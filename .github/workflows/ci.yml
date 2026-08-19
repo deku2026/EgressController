@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -44,7 +44,7 @@ jobs:
         run: ./build/Package.ps1 -Version "0.0.${{ github.run_number }}"
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: EgressController-win-x64
           path: artifacts/package/*
