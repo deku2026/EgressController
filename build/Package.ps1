@@ -85,6 +85,41 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
 }
 
+function Restore-RuntimeDependencies {
+    param(
+        [Parameter(Mandatory)] [string] $Project,
+        [Parameter(Mandatory)] [string] $RuntimeIdentifier,
+        [Parameter(Mandatory)] [string] $BuildConfiguration,
+        [int] $MaximumAttempts = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        Write-Host "Restoring $RuntimeIdentifier dependencies (attempt $attempt of $MaximumAttempts)..."
+        $restoreArguments = @(
+            'restore', $Project,
+            '--runtime', $RuntimeIdentifier,
+            '--disable-parallel',
+            '--force-evaluate',
+            "-p:Configuration=$BuildConfiguration",
+            '-p:PublishAot=true',
+            '-p:SelfContained=true',
+            '--verbosity', $(if ($attempt -eq $MaximumAttempts) { 'detailed' } else { 'minimal' })
+        )
+        & dotnet @restoreArguments
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        if ($attempt -lt $MaximumAttempts) {
+            $delaySeconds = 5 * $attempt
+            Write-Warning "Runtime restore failed. Retrying in $delaySeconds seconds."
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+
+    throw "Restoring $RuntimeIdentifier dependencies failed after $MaximumAttempts attempts."
+}
+
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
     [IO.Path]::GetFullPath($OutputDirectory)
@@ -124,11 +159,20 @@ $portableZip = Join-Path $outputRoot 'EgressController-win-x64.zip'
 
 Push-Location $repositoryRoot
 try {
+    # A NativeAOT publish needs a runtime-specific assets graph. Restore it explicitly so
+    # publish never depends on NuGet's implicit second restore, which can fail transiently
+    # on otherwise healthy hosted runners without reporting the underlying restore error.
+    Restore-RuntimeDependencies `
+        -Project $applicationProject `
+        -RuntimeIdentifier 'win-x64' `
+        -BuildConfiguration $Configuration
+
     $publishArguments = @(
         'publish', $applicationProject,
         '--configuration', $Configuration,
         '--runtime', 'win-x64',
         '--self-contained', 'true',
+        '--no-restore',
         '--output', $publishDirectory,
         '-p:PublishAot=true',
         "-p:Version=$semanticVersion",
