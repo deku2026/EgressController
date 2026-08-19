@@ -1,0 +1,310 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:EgressController.App.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="1180" d:DesignHeight="760"
+        x:Class="EgressController.App.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="EgressController" Width="1180" Height="760"
+        MinWidth="980" MinHeight="620">
+    <DockPanel Background="#F6F7FB">
+        <Border DockPanel.Dock="Top" Background="#172033" Padding="24,18,24,16">
+            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                <StackPanel Grid.Row="0" Spacing="4">
+                    <TextBlock Foreground="White" FontSize="25" FontWeight="SemiBold"
+                               Text="EgressController" />
+                    <TextBlock Foreground="#AAB7CF" FontSize="13"
+                               Text="Windows 多出口控制器 · 应用、域名与连接决策" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Border Background="#263652" CornerRadius="14" Padding="12,7">
+                        <TextBlock Foreground="#DCE7FF" Text="{Binding Overview.SystemProxy}" />
+                    </Border>
+                    <Button Classes="primary" Command="{Binding Overview.ToggleRoutingCommand}"
+                            Content="{Binding Overview.ToggleRoutingText}" />
+                </StackPanel>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,16,0,0"
+                           Foreground="#C3CDE0" Text="{Binding Status}" TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </Border>
+
+        <TabControl Margin="20" SelectedIndex="0">
+            <TabItem Header="概览">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="16">
+                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="14">
+                            <Border Classes="card" Grid.Row="0" Grid.Column="0">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="eyebrow" Text="ESIM 出口" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Esim}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="选择实际物理网卡；ifIndex 只在运行时使用。" />
+                                    <ComboBox ItemsSource="{Binding Overview.Adapters}"
+                                              SelectedItem="{Binding Overview.SelectedAdapter}"
+                                              HorizontalAlignment="Stretch">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:AdapterOptionViewModel">
+                                                <TextBlock Text="{Binding Display}" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Button Content="扫描网卡" Command="{Binding Overview.RefreshCommand}"
+                                            HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Row="0" Grid.Column="1">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="eyebrow" Text="上游代理" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" />
+                                    <TextBlock Classes="muted" Text="未命中的 HTTP/HTTPS 流量 fail-closed 地进入这里，不会回落到普通直连。" TextWrapping="Wrap" />
+                                    <Border Classes="metric-pill" HorizontalAlignment="Left">
+                                        <TextBlock Text="HTTP-compatible upstream" />
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Row="1" Grid.Column="0">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="eyebrow" Text="本地路由器" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Router}" />
+                                    <TextBlock Classes="muted" Text="系统代理只接管 HTTP/HTTPS；Controller 自身控制面不走系统代理。" TextWrapping="Wrap" />
+                                    <Button Content="启动本地 Router" Command="{Binding Overview.StartCommand}"
+                                            HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Row="1" Grid.Column="1">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="eyebrow" Text="System Proxy" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.SystemProxy}" />
+                                    <TextBlock Classes="muted" Text="接管前会保存完整状态；退出时只在状态仍归 Controller 所有时恢复。" TextWrapping="Wrap" />
+                                    <Button Content="恢复上次未完成会话" Command="{Binding Overview.RestoreStaleCommand}"
+                                            IsVisible="{Binding Overview.CanRestoreStale}"
+                                            HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                        <Border Classes="notice">
+                            <TextBlock Text="{Binding Overview.Notice}" TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Windows 应用">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                            <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用或路径…" />
+                            <Button Grid.Column="1" Classes="primary" Content="{Binding Apps.ScanText}" Command="{Binding Apps.ScanCommand}" />
+                            <Button Grid.Column="2" Content="全选 Managed" Command="{Binding Apps.SelectAllCommand}" />
+                            <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}" />
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Text="{Binding Apps.ManualExecutable}" PlaceholderText="添加 .exe 的完整路径…" />
+                            <Button Grid.Column="1" Content="添加可执行文件" Command="{Binding Apps.AddExecutableCommand}" />
+                        </Grid>
+                        <TextBlock Classes="muted" Text="{Binding Apps.Status}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Border Classes="list-card" Margin="0,14,0,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ListBox ItemsSource="{Binding Apps.Entries}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:AppEntryViewModel">
+                                        <Border Padding="8" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
+                                            <Grid ColumnDefinitions="Auto,Auto,*,190,Auto" ColumnSpacing="12">
+                                                <CheckBox IsChecked="{Binding Managed}" IsEnabled="{Binding CanManage}" VerticalAlignment="Center" />
+                                                <Border Grid.Column="1" Classes="app-glyph">
+                                                    <Grid>
+                                                        <Image Source="{Binding Icon}" Width="24" Height="24"
+                                                               Stretch="Uniform" IsVisible="{Binding HasIcon}" />
+                                                        <TextBlock Text="{Binding Glyph}" IsVisible="{Binding HasNoIcon}" />
+                                                    </Grid>
+                                                </Border>
+                                                <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                                    <TextBlock Classes="muted" Text="{Binding Details}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Classes="warning" Text="{Binding Status}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="3" Classes="tag" Text="{Binding KindText}" VerticalAlignment="Center" />
+                                                <Button Grid.Column="4" Content="启动" Command="{Binding LaunchCommand}"
+                                                        IsEnabled="{Binding CanLaunch}" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </ScrollViewer>
+                    </Border>
+                </DockPanel>
+            </TabItem>
+
+            <TabItem Header="域名规则">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                            <TextBox Text="{Binding Domains.Query}" PlaceholderText="搜索官方 MetaCubeX geosite，例如 google…" />
+                            <Button Grid.Column="1" Classes="primary" Content="{Binding Domains.RefreshText}" Command="{Binding Domains.RefreshCatalogCommand}" />
+                            <Button Grid.Column="2" Content="全选当前结果" Command="{Binding Domains.SelectAllCommand}" />
+                            <Button Grid.Column="3" Content="清空当前结果" Command="{Binding Domains.ClearAllCommand}" />
+                            <Button Grid.Column="4" Content="导入本地目录" Click="OnImportRulesDirectoryClick" />
+                            <TextBlock Grid.Column="5" VerticalAlignment="Center" Classes="muted" Text="{Binding Domains.SelectedSummary}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <TextBlock Text="规则来源" VerticalAlignment="Center" Classes="muted" />
+                            <TextBlock Grid.Column="1" Text="{Binding Domains.CatalogDirectory}" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="{Binding Domains.CatalogCommit}" VerticalAlignment="Center" Classes="tag" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Text="{Binding Domains.ManualDomain}" PlaceholderText="添加自定义域名，默认包含根域和所有子域…" />
+                            <Button Grid.Column="1" Content="添加到 ESIM" Command="{Binding Domains.AddManualCommand}" />
+                        </Grid>
+                        <TextBlock Classes="muted" Text="{Binding Domains.Status}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Grid Margin="0,14,0,0" ColumnDefinitions="1.2*,1*" ColumnSpacing="14">
+                        <Border Classes="list-card" Grid.Column="0">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Classes="section-title" Text="官方 catalog 结果" Margin="14,12" />
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ListBox ItemsSource="{Binding Domains.Results}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:RuleEntryViewModel">
+                                                <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,9" ColumnSpacing="10">
+                                                    <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                                                    <StackPanel Grid.Column="1" Spacing="2">
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                                        <TextBlock Classes="muted" Text="{Binding Path}" />
+                                                        <TextBlock Classes="success" Text="{Binding Status}" />
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="2" Classes="tag" Text="ESIM" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                        <Border Classes="list-card" Grid.Column="1">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Classes="section-title" Text="已选择 → ESIM" Margin="14,12" />
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <ItemsControl ItemsSource="{Binding Domains.SelectedRules}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:RuleEntryViewModel">
+                                                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,8" ColumnSpacing="8">
+                                                        <CheckBox IsChecked="{Binding IsSelected}" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="2" Classes="tag" Text="geosite" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Classes="section-title" Text="自定义域名" Margin="14,14,14,6" />
+                                        <ItemsControl ItemsSource="{Binding Domains.ManualDomains}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:ManualDomainViewModel">
+                                                    <Grid ColumnDefinitions="*,Auto" Margin="12,7">
+                                                        <TextBlock Text="{Binding Domain}" />
+                                                        <Button Grid.Column="1" Content="移除" Command="{Binding RemoveCommand}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+                </DockPanel>
+            </TabItem>
+
+            <TabItem Header="连接日志">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,260,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,10">
+                        <TextBlock Classes="muted" Text="每 500ms 刷新；拖动表头分隔线调整列宽，双击连接查看详情。" VerticalAlignment="Center" />
+                        <TextBox Grid.Column="1" Text="{Binding Connections.Query}" PlaceholderText="搜索进程、PID、域名、路由…" />
+                        <TextBlock Grid.Column="2" Classes="tag" Text="{Binding Connections.ActiveSummary}" Margin="8,0" VerticalAlignment="Center" />
+                        <Button Grid.Column="3" Content="全部关闭并清空" Command="{Binding Connections.CloseAllCommand}" />
+                        <TextBlock Grid.Column="4" Classes="warning" Text="{Binding Connections.Dropped}" VerticalAlignment="Center" />
+                    </Grid>
+                    <Border Classes="list-card">
+                        <DockPanel>
+                            <Grid x:Name="ConnectionHeaderGrid" DockPanel.Dock="Top" Background="#F1F3F8" Margin="12,9">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Time, Mode=TwoWay}" MinWidth="60" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Source, Mode=TwoWay}" MinWidth="160" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Target, Mode=TwoWay}" MinWidth="130" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Decision, Mode=TwoWay}" MinWidth="70" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Reason, Mode=TwoWay}" MinWidth="80" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Rule, Mode=TwoWay}" MinWidth="100" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="{Binding Connections.Columns.Status, Mode=TwoWay}" MinWidth="70" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Classes="table-head" Text="时间" />
+                                <GridSplitter Grid.Column="1" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                <TextBlock Grid.Column="2" Classes="table-head" Text="来源进程 / 实际路径" />
+                                <GridSplitter Grid.Column="3" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                <TextBlock Grid.Column="4" Classes="table-head" Text="目标" />
+                                <GridSplitter Grid.Column="5" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                <TextBlock Grid.Column="6" Classes="table-head" Text="决策" />
+                                <GridSplitter Grid.Column="7" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                <TextBlock Grid.Column="8" Classes="table-head" Text="原因" />
+                                <GridSplitter Grid.Column="9" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                <TextBlock Grid.Column="10" Classes="table-head" Text="规则" />
+                                <GridSplitter Grid.Column="11" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                <TextBlock Grid.Column="12" Classes="table-head" Text="状态" />
+                            </Grid>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ListBox ItemsSource="{Binding Connections.Rows}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:ConnectionRowViewModel">
+                                            <Grid Margin="12,8" Background="Transparent" DoubleTapped="OnConnectionRowDoubleTapped">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="{Binding Columns.Time}" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="{Binding Columns.Source}" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="{Binding Columns.Target}" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="{Binding Columns.Decision}" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="{Binding Columns.Reason}" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="{Binding Columns.Rule}" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="{Binding Columns.Status}" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Classes="muted" Text="{Binding Time}" VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="2" ToolTip.Tip="{Binding Executable}">
+                                                    <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Classes="muted" FontSize="10" Text="{Binding Executable}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="4" Text="{Binding Host}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="6" FontWeight="SemiBold" Text="{Binding Decision}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="8" Text="{Binding Reason}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="10" Classes="muted" Text="{Binding Rule}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="12" Classes="muted" Text="{Binding Status}" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Border>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

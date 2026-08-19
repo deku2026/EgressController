@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Adapter struct traversal (GetAdaptersAddresses) uses raw pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Emit Roslyn source-generator output (CsWin32) to obj/generated so struct layouts can be
+         inspected. Output is under obj/ (gitignored); kept on for interop development. -->
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CsWin32: source-generates P/Invoke from NativeMethods.txt. PrivateAssets keeps the
+         generator from leaking to consumers; no runtime dependency. -->
+    <PackageReference Include="Microsoft.Windows.CsWin32">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Make internal interop (incl. CsWin32 HANDLE-typed structs) inspectable by integration tests. -->
+    <InternalsVisibleTo Include="EgressController.Windows.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

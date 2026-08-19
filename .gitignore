@@ -1,0 +1,47 @@
+# Build and IDE output
+bin/
+obj/
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet and test output
+packages/
+*.nupkg
+TestResults/
+*.trx
+coverage*.xml
+coverage*.openxml
+coverage*.cobertura.xml
+
+# Local runtime state and generated packages
+LocalAppData/
+RuntimeData/
+artifacts/
+dist/
+publish/
+*.msix
+*.msixbundle
+*.appinstaller
+*.zip
+
+# Local secrets and signing material
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.snk
+*.key
+
+# Repository-local worktrees
+.worktree/
+
+# Operating-system files
+Thumbs.db
+Desktop.ini
+.DS_Store

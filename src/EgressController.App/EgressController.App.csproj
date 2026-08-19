@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Avalonia 12 + NativeAOT friendly (trimming analyzers etc.). -->
+
+    <!--
+      .NET 10.0.11 + Microsoft.Windows.SDK.NET.Ref 10.0.26100.57 currently
+      emits IL2081/IL2104, and its own stale suppressions emit IL2121, from
+      WinRT generic ABI code. Keep the product's strict warning policy while
+      limiting this known upstream exception to NativeAOT publishing only.
+    -->
+    <NoWarn Condition="'$(PublishAot)' == 'true'">$(NoWarn);IL2081;IL2104;IL2121</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Windows shell icon extraction, matching the BCUninstaller icon path. -->
+    <PackageReference Include="System.Drawing.Common" />
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport">
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
+    <ProjectReference Include="..\EgressController.Transport\EgressController.Transport.csproj" />
+    <ProjectReference Include="..\EgressController.Proxy\EgressController.Proxy.csproj" />
+    <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
+    <ProjectReference Include="..\EgressController.Rules\EgressController.Rules.csproj" />
+    <ProjectReference Include="..\EgressController.Launcher\EgressController.Launcher.csproj" />
+    <ProjectReference Include="..\EgressController.Diagnostics\EgressController.Diagnostics.csproj" />
+    <ProjectReference Include="..\EgressController.State\EgressController.State.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EgressController.Windows.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

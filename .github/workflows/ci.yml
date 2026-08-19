@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: Build, test, and package (win-x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore EgressController.slnx
+
+      - name: Build
+        run: dotnet build EgressController.slnx --configuration Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
+
+      - name: Create NativeAOT and unsigned MSIX artifacts
+        shell: pwsh
+        run: ./build/Package.ps1 -Version "0.0.${{ github.run_number }}"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: EgressController-win-x64
+          path: artifacts/package/*
+          if-no-files-found: error
+          retention-days: 14
