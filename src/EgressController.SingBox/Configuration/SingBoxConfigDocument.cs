@@ -194,6 +194,10 @@ public sealed record SingBoxRouteRuleDocument
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? ProcessPath { get; init; }
 
+    [JsonPropertyName("process_path_regex")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ProcessPathRegex { get; init; }
+
     [JsonPropertyName("rule_set")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? RuleSet { get; init; }

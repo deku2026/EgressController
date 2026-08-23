@@ -70,7 +70,10 @@ public sealed class EgressProfileCompiler
         {
             rules.Add(new SingBoxRouteRuleDocument
             {
-                ProcessPath = applications,
+                // sing-box compares process_path with a case-sensitive Go map, even on Windows.
+                // QueryFullProcessImageName may return different casing than package inventory,
+                // so preserve exact-path ownership while making only casing insignificant.
+                ProcessPathRegex = CreateWindowsExactPathRegexes(applications),
                 Action = "route",
                 Outbound = EsimDirectTag,
             });
@@ -220,6 +223,22 @@ public sealed class EgressProfileCompiler
                 names.Add(withoutExtension);
         }
         return names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string[] CreateWindowsExactPathRegexes(IEnumerable<string> paths)
+        => paths.Select(path => "(?i)^" + EscapeGoRegularExpression(path) + "$").ToArray();
+
+    private static string EscapeGoRegularExpression(string value)
+    {
+        const string metacharacters = @"\.+*?()|[]{}^$";
+        var escaped = new StringBuilder(value.Length + 16);
+        foreach (char character in value)
+        {
+            if (metacharacters.Contains(character, StringComparison.Ordinal))
+                escaped.Append('\\');
+            escaped.Append(character);
+        }
+        return escaped.ToString();
     }
 
     private static List<SingBoxRuleSetInput> NormalizeRuleSets(

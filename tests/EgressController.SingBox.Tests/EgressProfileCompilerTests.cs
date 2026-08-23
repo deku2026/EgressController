@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
@@ -66,7 +67,8 @@ public sealed class EgressProfileCompilerTests
             Assert.Equal("sniff", rules[0].GetProperty("action").GetString());
             Assert.Equal("hijack-dns", rules[1].GetProperty("action").GetString());
             Assert.Equal("primary-direct", rules[2].GetProperty("outbound").GetString());
-            Assert.Equal(@"C:\Apps\Chrome\chrome.exe", rules[3].GetProperty("process_path")[0].GetString());
+            Assert.False(rules[3].TryGetProperty("process_path", out _));
+            Assert.Equal(@"(?i)^C:\\Apps\\Chrome\\chrome\.exe$", rules[3].GetProperty("process_path_regex")[0].GetString());
             Assert.Equal("google", rules[4].GetProperty("rule_set")[0].GetString());
             Assert.Equal("openai.com", rules[5].GetProperty("domain_suffix")[0].GetString());
             Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
@@ -102,7 +104,26 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal("primary-direct", rules[2].GetProperty("outbound").GetString());
         Assert.Contains("proxy.exe", rules[2].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
         Assert.Contains("proxy", rules[2].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
-        Assert.Equal(2, rules[3].GetProperty("process_path").GetArrayLength());
+        Assert.Equal(2, rules[3].GetProperty("process_path_regex").GetArrayLength());
+    }
+
+    [Fact]
+    public void Application_paths_are_case_insensitive_but_remain_exact_and_regex_safe()
+    {
+        const string configuredPath = @"C:\Program Files\Vendor (Preview)\App[1]+.EXE";
+        EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(Input(
+            new EgressProfileDocument(),
+            applicationPaths: new[] { configuredPath }));
+
+        using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
+        JsonElement applicationRule = json.RootElement.GetProperty("route").GetProperty("rules")[3];
+        string expression = Assert.Single(applicationRule.GetProperty("process_path_regex").EnumerateArray()).GetString()!;
+        var matcher = new Regex(expression, RegexOptions.CultureInvariant);
+
+        Assert.Matches(matcher, configuredPath.ToLowerInvariant());
+        Assert.Matches(matcher, configuredPath.ToUpperInvariant());
+        Assert.DoesNotMatch(matcher, configuredPath + ".helper");
+        Assert.DoesNotMatch(matcher, @"D:\Program Files\Vendor (Preview)\App[1]+.EXE");
     }
 
     [Fact]
