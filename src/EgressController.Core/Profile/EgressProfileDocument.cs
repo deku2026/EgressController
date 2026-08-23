@@ -188,7 +188,8 @@ public sealed record EgressProfileDocument
     {
         string name = value.Trim().Replace('\\', '/').TrimStart('/');
         if (name.Length == 0 || name.Contains("..", StringComparison.Ordinal)
-            || name.Any(char.IsWhiteSpace) || name.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' or '/')))
+            || name.Any(char.IsWhiteSpace)
+            || name.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' or '/' or '@' or '!')))
         {
             throw new ArgumentException($"非法规则集名称：{value}", nameof(EsimRuleSets));
         }
