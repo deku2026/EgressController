@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
-    <ProjectReference Include="..\EgressController.Transport\EgressController.Transport.csproj" />
-  </ItemGroup>
-
-</Project>

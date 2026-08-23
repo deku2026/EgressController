@@ -5,7 +5,7 @@ namespace EgressController.App;
 
 /// <summary>
 /// Per-user single-instance gate. A second launch only signals the first window; it does not
-/// create a second router or touch System Proxy state.
+/// create a second data plane or touch Windows global proxy state.
 /// </summary>
 internal sealed class SingleInstanceGuard : IDisposable
 {

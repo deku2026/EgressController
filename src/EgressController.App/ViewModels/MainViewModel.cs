@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -322,7 +321,7 @@ public sealed class AppsViewModel : ObservableObject
         else
         {
             foreach (AppEntryViewModel entry in targets)
-                entry.SetManagedLocal(enabled);
+                entry.SetEsimLocal(enabled);
             Status = enabled ? "已将当前可路由应用加入 eSIM。" : "已清空当前应用的 eSIM 选择。";
         }
         RefreshVisible();
@@ -373,30 +372,18 @@ public sealed class AppsViewModel : ObservableObject
 
 public sealed class AppEntryViewModel : ObservableObject, IDisposable
 {
-    private readonly AppController? _controller;
-    private readonly RouterHost? _legacyHost;
+    private readonly AppController _controller;
     private readonly Action _changed;
-    private bool _managed;
+    private bool _isEsim;
     private bool _changing;
     private string _status = string.Empty;
 
     public AppEntryViewModel(AppController controller, LaunchTarget target, Action changed)
-        : this(target, changed)
     {
         _controller = controller;
-    }
-
-    public AppEntryViewModel(RouterHost legacyHost, LaunchTarget target, Action changed)
-        : this(target, changed)
-    {
-        _legacyHost = legacyHost;
-    }
-
-    private AppEntryViewModel(LaunchTarget target, Action changed)
-    {
         Target = target;
         _changed = changed;
-        _managed = target.Managed;
+        _isEsim = target.EsimSelected;
         Icon = AppIconLoader.Load(target.IconPath ?? target.CanonicalExecutable ?? target.Command);
         LaunchCommand = new RelayCommand(Launch);
     }
@@ -426,47 +413,36 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public bool CanLaunch => Target.CanLaunch;
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
 
-    public bool Managed
-    {
-        get => _managed;
-        set
-        {
-            if (_changing || value == _managed)
-                return;
-            _ = ApplyManagedAsync(value);
-        }
-    }
-
     public bool IsEsim
     {
-        get => _managed;
-        set => Managed = value;
+        get => _isEsim;
+        set
+        {
+            if (_changing || value == _isEsim)
+                return;
+            _ = ApplyEsimAsync(value);
+        }
     }
 
     public RelayCommand LaunchCommand { get; }
 
-    internal void SetManagedLocal(bool value)
+    internal void SetEsimLocal(bool value)
     {
-        if (SetProperty(ref _managed, value))
+        if (SetProperty(ref _isEsim, value))
         {
-            Target.Managed = value;
-            OnPropertyChanged(nameof(IsEsim));
+            Target.EsimSelected = value;
             _changed();
         }
     }
 
-    private async Task ApplyManagedAsync(bool enabled)
+    private async Task ApplyEsimAsync(bool enabled)
     {
         _changing = true;
         Status = enabled ? "正在应用 eSIM 选择…" : "正在移除 eSIM 选择…";
         ControllerOperationResult result;
         try
         {
-            result = _controller is not null
-                ? await _controller.SetApplicationsEsimAsync([Target], enabled)
-                : _legacyHost!.SetTargetManaged(Target.Id, enabled)
-                    ? ControllerOperationResult.Success()
-                    : ControllerOperationResult.Failure("应用选择失败。");
+            result = await _controller.SetApplicationsEsimAsync([Target], enabled);
         }
         catch (Exception exception)
         {
@@ -476,7 +452,7 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
             Status = result.Error ?? "应用选择失败。";
         else
         {
-            SetManagedLocal(enabled);
+            SetEsimLocal(enabled);
             Status = enabled ? "已加入 eSIM" : "已移除 eSIM";
         }
         _changing = false;
@@ -492,8 +468,7 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         }
         try
         {
-            Status = _controller?.LaunchTarget(Target.Id)
-                ?? _legacyHost!.LaunchTarget(Target.Id);
+            Status = _controller.LaunchTarget(Target.Id);
             RefreshStatus();
         }
         catch (Exception exception)
@@ -504,32 +479,9 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
 
     public void RefreshStatus()
     {
-        string status = _controller?.GetTargetStatus(Target.Id)
-            ?? GetLegacyTargetStatus();
+        string status = _controller.GetTargetStatus(Target.Id);
         if (status.Length > 0)
             Status = status;
-    }
-
-    private string GetLegacyTargetStatus()
-    {
-        LaunchSession[] sessions = _legacyHost!.Sessions.All()
-            .Where(session => string.Equals(session.TargetId, Target.Id, StringComparison.Ordinal))
-            .ToArray();
-        if (sessions.Length == 0)
-            return Status.StartsWith("运行中", StringComparison.Ordinal) ? "已结束" : string.Empty;
-        bool running = sessions.Any(session =>
-        {
-            try
-            {
-                using var process = Process.GetProcessById(checked((int)session.RootPid));
-                return !process.HasExited;
-            }
-            catch
-            {
-                return false;
-            }
-        });
-        return running ? "运行中" : "已结束";
     }
 
     public void Dispose() => Icon?.Dispose();

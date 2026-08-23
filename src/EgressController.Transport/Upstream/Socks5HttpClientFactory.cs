@@ -8,7 +8,7 @@ namespace EgressController.Transport.Upstream;
 
 /// <summary>
 /// Creates an HTTP client whose every TCP connection is established through the user's
-/// loopback SOCKS5 provider. It never consults Windows System Proxy and never falls back direct.
+/// loopback SOCKS5 provider. It never consults Windows global proxy settings and never falls back direct.
 /// </summary>
 public static class Socks5HttpClientFactory
 {

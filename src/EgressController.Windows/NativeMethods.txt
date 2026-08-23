@@ -2,68 +2,19 @@
 // CsWin32 generates type-safe P/Invoke wrappers from these names (plan §1.2, Stack §2).
 
 // Network adapter enumeration (Step 01)
-GetAdaptersAddresses
-GetIfEntry2
-GetBestInterface
-
-// Interface identity <-> LUID / index conversions (Step 01/02/03)
-ConvertInterfaceIndexToLuid
-ConvertInterfaceLuidToIndex
-ConvertInterfaceLuidToGuid
-ConvertInterfaceGuidToLuid
-
-// ESIM DNS (Step 02). DnsRecordListFree is NOT declared here: it lives in the documented
-// hand-written Interop/NativeDns.cs shim (CsWin32 doesn't emit it).
-DnsQueryEx
-
-// Interface/route change notification for ESIM hotplug/reconnect (Step 02)
-NotifyIpInterfaceChange
-NotifyRouteChange2
-CancelMibChangeNotify2
+[GetAdaptersAddresses]
+[GetBestInterface]
 
 // Source PID lookup (Step 08)
-GetExtendedTcpTable
-MIB_TCPROW_OWNER_PID
-MIB_TCP6ROW_OWNER_PID
-MIB_TCPTABLE_OWNER_PID
-MIB_TCP6TABLE_OWNER_PID
+[GetExtendedTcpTable]
+[MIB_TCPROW_OWNER_PID]
+[MIB_TCP6ROW_OWNER_PID]
+[MIB_TCPTABLE_OWNER_PID]
+[MIB_TCP6TABLE_OWNER_PID]
 
 // Process identity (Step 08)
-OpenProcess
-QueryFullProcessImageName
-GetProcessTimes
-GetFinalPathNameByHandle
-CloseHandle
-
-// Process launch (Step 09)
-CreateProcessW
-STARTUPINFOW
-PROCESS_INFORMATION
-CreateJobObject
-SetInformationJobObject
-AssignProcessToJobObject
-QueryInformationJobObject
-ResumeThread
-CloseHandle
-JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-JOBOBJECT_BASIC_PROCESS_ID_LIST
-
-// System Proxy / WinINet (Step 12)
-InternetOpen
-InternetCloseHandle
-InternetQueryOption
-InternetSetOption
-INTERNET_PER_CONN_OPTION_LISTW
-INTERNET_PER_CONN_OPTIONW
-INTERNET_OPTION_PER_CONNECTION_OPTION
-
-// Enums/enums-members used with DNS + interface notifications.
-// DnsRecordListFree / DNS_RECORD_TYPE / DNS_QUERY_REQUEST_CONTEXT are NOT emitted by CsWin32
-// (macro-defined or union-backed); they are covered by a hand-written interop shim with a
-// documented justification (plan §1.2 exception).
-DNS_QUERY_OPTIONS
-DNS_QUERY_REQUEST
-DNS_QUERY_RESULT
-DNS_RECORDW
-DNS_A_DATA
-DNS_AAAA_DATA
+[OpenProcess]
+[QueryFullProcessImageName]
+[GetProcessTimes]
+[GetFinalPathNameByHandle]
+[CloseHandle]

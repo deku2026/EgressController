@@ -4,9 +4,8 @@ namespace EgressController.Launcher.Sessions;
 
 /// <summary>
 /// Concurrency-safe registry of live <see cref="LaunchSession"/>s and their pid→session backing,
-/// so the Step 11 router can ask "does PID p belong to a managed (active-owned) session?" at
-/// accept time. Every active member carries its own process StartTime identity so a reused child
-/// PID cannot inherit an earlier process's Managed membership.
+/// used only for ordinary launch/session status in the UI. Every active member carries its own
+/// process start-time identity so a reused child PID cannot inherit an earlier session entry.
 /// </summary>
 public sealed class LaunchSessionRegistry
 {

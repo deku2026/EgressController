@@ -39,8 +39,8 @@ public sealed class LaunchTarget
 
     public IReadOnlyList<string> OwnedRoots { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> OwnedExecutables { get; init; } = Array.Empty<string>();
-    /// <summary>User-selected launch/routing toggle. Newly discovered targets start unchecked.</summary>
-    public bool Managed { get; set; }
+    /// <summary>User-selected eSIM route toggle. Newly discovered targets start unchecked.</summary>
+    public bool EsimSelected { get; set; }
 
     /// <summary>Optional local icon path; the UI falls back to a kind-specific glyph.</summary>
     public string? IconPath { get; init; }

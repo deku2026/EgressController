@@ -1,37 +1,34 @@
 # EgressController
 
-[![CI](https://github.com/deku2026/EgressController/actions/workflows/ci.yml/badge.svg)](https://github.com/deku2026/EgressController/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-EgressController 是一个纯 Windows 的 HTTP/HTTPS 分流控制器。它把当前用户的 Windows
-System Proxy 接到本地路由代理，再按应用和域名把请求送往指定的 eSIM 网卡或普通上游代理。
-它不安装 TUN/WFP 驱动，也不做 TLS MITM。
+EgressController 是一个纯 Windows 的全流量 TUN 控制器。sing-box 负责唯一业务数据面；C#
+UI 负责生成和校验 JSON Profile、准备 core/SRS、管理 ElevatedHost 生命周期，并读取真实
+Clash API 诊断。
 
 ## 功能
 
-- 自动扫描经典 Win32 应用、注册表安装项、快捷方式和 MSIX/AppX 安装包，并显示应用图标。
-- 手动添加一个 EXE 后递归扫描其目录中的可执行文件，作为同一应用的可识别组件。
-- 启动选中的应用并跟踪实际出现的已扫描进程；匹配到的连接进入 Managed 路由。
-- 域名可按 MetaCubeX `meta-rules-dat` 规则集或手工域名选择 eSIM 出口。
-- 规则从官方仓库实时获取，固定到已解析的 commit 并缓存在本机；不需要克隆规则仓库。
-- 默认上游为 `127.0.0.1:7890`，本地路由代理监听 `127.0.0.1:18080`。
-- 连接日志支持搜索、关闭全部连接和查看单条连接详情。
-- eSIM 掉线时关闭现有连接并拒绝新连接；不会静默回落到普通上游。
-- System Proxy 使用所有权记录和 compare-before-restore，避免覆盖用户或其他软件的新状态。
+- 扫描 Win32、注册表安装项、快捷方式和 MSIX/AppX，并显示应用图标与可路由 EXE 数量。
+- 应用选择、MetaCubeX `sing` 分支 SRS 和手工域名组成同一个 eSIM 路由集合。
+- 未命中项固定进入本机 SOCKS5，默认 `127.0.0.1:7890`；控制面下载也显式经此 SOCKS5。
+- Managed core 自动下载、版本/摘要/feature/check 校验；System core 使用用户选择的绝对路径。
+- 通过最小 ElevatedHost 启动 sing-box TUN，App 与普通 Launch 始终保持普通权限。
+- 连接页消费真实 sing-box connections/traffic/logs API，并提供连接关闭、历史清理和 DNS 诊断。
+
+软件不修改 Windows 全局代理，不监听 C# 业务代理端口，不向应用注入代理环境变量或浏览器
+参数，也不实现订阅、节点、selector、provider 或 YAML 配置。
 
 ## 系统要求
 
 - Windows 10 2004（build 19041）或更新版本；推荐 Windows 11 x64。
 - 从源码构建需要 `global.json` 指定的 .NET SDK。
-- NativeAOT 需要 Visual Studio Build Tools 的 **Desktop development with C++** 工作负载。
-- 构建 MSIX 需要带 `MakeAppx.exe` 的 Windows 10/11 SDK。
+- NativeAOT 需要 Visual Studio Build Tools 的 Desktop development with C++ 工作负载。
+- 规则/core 下载失败时，应用使用 Profile 的显式 SOCKS5 端口；默认端口为 7890。
 
 ## 构建与测试
 
 ```powershell
 dotnet restore EgressController.slnx
 dotnet build EgressController.slnx -c Release --no-restore
-./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
+dotnet test EgressController.slnx -c Release --no-restore
 ```
 
 启动开发构建：
@@ -40,53 +37,37 @@ dotnet build EgressController.slnx -c Release --no-restore
 dotnet run --project ./src/EgressController.App/EgressController.App.csproj -c Release
 ```
 
-测试使用 xUnit v3 与 Microsoft.Testing.Platform。需要真实规则 corpus 的可选测试通过
-`EGRESS_RULES_ROOT` 指向 `meta-rules-dat` 根目录或 `geo/geosite`；需要联网和显式上游的测试
-只有在 `EGRESS_LIVE_RULES_TEST=1` 时才运行。
+默认测试不访问网络。实时规则/SRS/已安装 sing-box 检查显式启用：
 
-## NativeAOT 与 MSIX
+```powershell
+$env:EGRESS_LIVE_RULES_TEST = '1'
+dotnet test ./tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj -c Debug --no-restore
+dotnet test ./tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj -c Debug --no-restore
+```
+
+## NativeAOT 与发布
+
+真实发布验证使用 `PublishAot=true`，不能用 JIT 运行替代：
+
+```powershell
+dotnet publish ./src/EgressController.App/EgressController.App.csproj -c Release -r win-x64 -p:PublishAot=true --self-contained true
+dotnet publish ./src/EgressController.ElevatedHost/EgressController.ElevatedHost.csproj -c Release -r win-x64 -p:PublishAot=true --self-contained true
+```
+
+完整打包仍可使用：
 
 ```powershell
 ./build/Package.ps1 -Version 0.1.0
 ```
 
-输出位于 `artifacts/package`：
-
-- `EgressController-win-x64.zip`：自包含 NativeAOT 便携包。
-- `EgressController-x64.unsigned.msix`：未签名的 MSIX 结构验证包，不可直接用于生产安装。
-- `SHA256SUMS.txt`：发布文件校验值。
-
-若传入可信 PFX，脚本会生成可安装的 `EgressController-x64.msix` 和具有自动更新设置的
-`EgressController.appinstaller`：
-
-```powershell
-$env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD = '<password>'
-./build/Package.ps1 -Version 1.0.0 -CertificatePath C:\secure\egress-controller.pfx
-```
-
-证书 Subject 必须与包 Publisher 完全一致，默认是 `CN=ArcForges`。证书和密码不得提交。
-若将来改用 Microsoft Store 分发，应同时替换包 Identity/Publisher 为 Store 保留值。
-
-## CI 与发布
-
-- 每次 push 和 pull request 都会在 `windows-latest` 上还原、编译、运行测试，并生成
-  NativeAOT ZIP 与未签名 MSIX 工件。
-- 推送 `v*` 标签会自动创建 GitHub Release。
-- 仓库配置 `WINDOWS_SIGNING_CERTIFICATE_BASE64` 和
-  `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` 后，标签发布会签名 MSIX 并附带 App Installer；
-  未配置签名时仍发布便携 ZIP 和明确标记的 unsigned MSIX。
-- 已签名版本可直接下载
-  [`EgressController.appinstaller`](https://github.com/deku2026/EgressController/releases/latest/download/EgressController.appinstaller)
-  安装；文件使用稳定的 latest URL 检查后续更新。
-
 ## 数据与安全边界
 
-运行状态和规则缓存保存在 `%LOCALAPPDATA%\EgressController`。仓库不包含连接日志、应用清单、
-本机路径、代理凭据或签名材料。EgressController 只控制进入 Windows HTTP/HTTPS System Proxy
-的流量；绕过系统代理的 UDP、QUIC 和原始 TCP 不在其控制范围内。
+Profile、core、规则 catalog、SRS 和 sing-box state 保存在 `%LOCALAPPDATA%\EgressController`。
+仓库不包含连接日志、应用清单、本机路径、代理凭据或签名材料。TUN 是否接管 UDP、QUIC、
+原始 TCP 和 IPv6 由 sing-box 与 Windows 网络栈共同决定，C# 不单独重实现网络转发。
 
-协议支持范围见 [docs/protocol-compatibility.md](docs/protocol-compatibility.md)，WFP 用户态探针结论见
-[docs/probes/connection-policy-CONCLUSION.md](docs/probes/connection-policy-CONCLUSION.md)。
+配置边界见 [docs/traffic-migration-boundary.md](docs/traffic-migration-boundary.md)，
+能力矩阵见 [docs/protocol-compatibility.md](docs/protocol-compatibility.md)。
 
 ## License
 

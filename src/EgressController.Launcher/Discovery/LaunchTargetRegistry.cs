@@ -53,13 +53,13 @@ public sealed class LaunchTargetRegistry
         }
     }
 
-    public bool SetManaged(string id, bool managed)
+    public bool SetEsimSelected(string id, bool selected)
     {
         lock (_gate)
         {
             if (!_byId.TryGetValue(id, out LaunchTarget? target))
                 return false;
-            target.Managed = managed;
+            target.EsimSelected = selected;
             return true;
         }
     }
@@ -77,7 +77,7 @@ public sealed class LaunchTargetRegistry
         if (!string.IsNullOrWhiteSpace(t.IconPath)) q += 2;                  // visible catalog icon
         if (t.OwnedExecutables.Count > 0) q += 1;                            // recursive executable inventory
         if (!string.IsNullOrWhiteSpace(t.Source)) q += 1;
-        if (t.Managed) q += 1;
+        if (t.EsimSelected) q += 1;
         if (t.Kind == LaunchKind.PackagedAumid && !string.IsNullOrWhiteSpace(t.Aumid)) q += 1;
         if (t.ResolutionUnsupported) q -= 8;                                 // wrapper we can't yet resolve
         return q;

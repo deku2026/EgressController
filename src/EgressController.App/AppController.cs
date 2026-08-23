@@ -9,7 +9,6 @@ using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Launcher.Discovery;
-using EgressController.Launcher.Ownership;
 using EgressController.Launcher.Sessions;
 using EgressController.Rules.Artifacts;
 using EgressController.Rules.Catalog;
@@ -157,7 +156,7 @@ public sealed class AppController : IAsyncDisposable
         _targets.Clear();
         foreach (LaunchTarget target in discovered)
         {
-            target.Managed = _profile.EsimApplications.Any(selection =>
+            target.EsimSelected = _profile.EsimApplications.Any(selection =>
                 string.Equals(selection.DiscoveryKey, target.DiscoveryKey, StringComparison.Ordinal));
             _targets.Add(target);
         }
@@ -183,7 +182,7 @@ public sealed class AppController : IAsyncDisposable
             CanonicalExecutable = full,
             OwnedRoots = new[] { root },
             OwnedExecutables = ExecutableInventory.Collect(new[] { root }, full),
-            Managed = false,
+            EsimSelected = false,
             IconPath = full,
             Source = "手动添加",
         };

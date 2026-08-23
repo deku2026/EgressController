@@ -104,7 +104,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="数据面" />
                                      <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                    <TextBlock Classes="muted" Text="不修改 Windows System Proxy，不向应用注入代理参数；普通 Launch 也不会暗中启动 TUN。" TextWrapping="Wrap" />
+                                     <TextBlock Classes="muted" Text="不修改 Windows 全局代理，不向应用注入代理参数；普通 Launch 也不会暗中启动 TUN。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
