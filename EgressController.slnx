@@ -10,9 +10,11 @@
     <Project Path="src/EgressController.App/EgressController.App.csproj" />
     <Project Path="src/EgressController.Core/EgressController.Core.csproj" />
     <Project Path="src/EgressController.Diagnostics/EgressController.Diagnostics.csproj" />
+    <Project Path="src/EgressController.ElevatedHost/EgressController.ElevatedHost.csproj" />
     <Project Path="src/EgressController.Launcher/EgressController.Launcher.csproj" />
     <Project Path="src/EgressController.Proxy/EgressController.Proxy.csproj" />
     <Project Path="src/EgressController.Rules/EgressController.Rules.csproj" />
+    <Project Path="src/EgressController.SingBox/EgressController.SingBox.csproj" />
     <Project Path="src/EgressController.State/EgressController.State.csproj" />
     <Project Path="src/EgressController.Transport/EgressController.Transport.csproj" />
     <Project Path="src/EgressController.Windows/EgressController.Windows.csproj" />
