@@ -2,19 +2,19 @@
 // CsWin32 generates type-safe P/Invoke wrappers from these names (plan §1.2, Stack §2).
 
 // Network adapter enumeration (Step 01)
-[GetAdaptersAddresses]
-[GetBestInterface]
+GetAdaptersAddresses
+GetBestInterface
 
 // Source PID lookup (Step 08)
-[GetExtendedTcpTable]
-[MIB_TCPROW_OWNER_PID]
-[MIB_TCP6ROW_OWNER_PID]
-[MIB_TCPTABLE_OWNER_PID]
-[MIB_TCP6TABLE_OWNER_PID]
+GetExtendedTcpTable
+MIB_TCPROW_OWNER_PID
+MIB_TCP6ROW_OWNER_PID
+MIB_TCPTABLE_OWNER_PID
+MIB_TCP6TABLE_OWNER_PID
 
 // Process identity (Step 08)
-[OpenProcess]
-[QueryFullProcessImageName]
-[GetProcessTimes]
-[GetFinalPathNameByHandle]
-[CloseHandle]
+OpenProcess
+QueryFullProcessImageName
+GetProcessTimes
+GetFinalPathNameByHandle
+CloseHandle

@@ -28,7 +28,7 @@ Clash API 诊断。
 ```powershell
 dotnet restore EgressController.slnx
 dotnet build EgressController.slnx -c Release --no-restore
-dotnet test EgressController.slnx -c Release --no-restore
+dotnet test EgressController.slnx -c Release --no-restore -- --minimum-expected-tests 1 --progress off
 ```
 
 启动开发构建：
@@ -41,8 +41,8 @@ dotnet run --project ./src/EgressController.App/EgressController.App.csproj -c R
 
 ```powershell
 $env:EGRESS_LIVE_RULES_TEST = '1'
-dotnet test ./tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj -c Debug --no-restore
-dotnet test ./tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj -c Debug --no-restore
+dotnet test ./tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj -c Debug --no-restore -- --minimum-expected-tests 1 --progress off
+dotnet test ./tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj -c Debug --no-restore -- --minimum-expected-tests 1 --progress off
 ```
 
 ## NativeAOT 与发布
