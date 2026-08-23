@@ -38,50 +38,6 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void OnConnectionRowDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        if (sender is not Control { DataContext: ConnectionRowViewModel row })
-            return;
-
-        e.Handled = true;
-        var details = new StackPanel { Spacing = 8 };
-        AddDetail(details, "时间", row.Timestamp);
-        AddDetail(details, "进程", row.ProcessName);
-        AddDetail(details, "PID", row.Pid);
-        AddDetail(details, "实际 EXE", row.Executable);
-        AddDetail(details, "Launch Session", row.Session);
-        AddDetail(details, "目标", row.Host);
-        AddDetail(details, "决策", row.Decision);
-        AddDetail(details, "原因", row.Reason);
-        AddDetail(details, "规则集", row.RuleSet);
-        AddDetail(details, "命中规则", row.RuleText);
-        AddDetail(details, "出口 / 接口", row.Interface);
-        AddDetail(details, "状态", row.Status);
-        AddDetail(details, "字节", row.Bytes);
-        AddDetail(details, "延迟", row.Latency);
-
-        try { await ShowDialogAsync("连接详情", details, width: 720, height: 650); }
-        catch
-        {
-            // The owner may be closing while a double-click dialog is being created.
-        }
-    }
-
-    private void OnConnectionColumnDragCompleted(object? sender, VectorEventArgs e)
-    {
-        if (_vm is null || ConnectionHeaderGrid.ColumnDefinitions.Count < 13)
-            return;
-
-        ConnectionColumnLayout columns = _vm.Connections.Columns;
-        columns.Time = ConnectionHeaderGrid.ColumnDefinitions[0].Width;
-        columns.Source = ConnectionHeaderGrid.ColumnDefinitions[2].Width;
-        columns.Target = ConnectionHeaderGrid.ColumnDefinitions[4].Width;
-        columns.Decision = ConnectionHeaderGrid.ColumnDefinitions[6].Width;
-        columns.Reason = ConnectionHeaderGrid.ColumnDefinitions[8].Width;
-        columns.Rule = ConnectionHeaderGrid.ColumnDefinitions[10].Width;
-        columns.Status = ConnectionHeaderGrid.ColumnDefinitions[12].Width;
-    }
-
     private async void OnUpstreamPortLostFocus(object? sender, RoutedEventArgs e)
     {
         if (_vm is not null)
