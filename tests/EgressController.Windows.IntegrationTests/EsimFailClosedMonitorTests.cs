@@ -217,6 +217,7 @@ public sealed class EsimFailClosedMonitorTests
                 Addresses = online ? [IPAddress.Parse("192.0.2.10")] : [],
                 Gateways = online ? [IPAddress.Parse("192.0.2.1")] : [],
                 DnsServers = online ? [IPAddress.Parse("192.0.2.53")] : [],
+                InterfaceType = 6,
             };
         }
     }

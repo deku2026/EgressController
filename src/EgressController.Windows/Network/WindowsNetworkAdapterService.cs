@@ -53,6 +53,16 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
         }
     }
 
+    /// <summary>
+    /// Returns adapters that can be selected as a physical primary/eSIM exit. Loopback, tunnel,
+    /// known TUN adapters and interfaces without a stable GUID are intentionally omitted.
+    /// </summary>
+    public IReadOnlyList<NetworkAdapterInfo> EnumerateSelectable()
+        => EnumerateAll()
+            .Where(IsSelectable)
+            .OrderBy(adapter => adapter.Identity.NameSnapshot, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
     public NetworkAdapterInfo? GetByGuid(Guid guid)
         => EnumerateAll().FirstOrDefault(a => a.Identity.Guid == guid);
 
@@ -102,7 +112,23 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
             Addresses = addresses,
             Gateways = gateways,
             DnsServers = dnsServers,
+            InterfaceType = cur->IfType,
         };
+    }
+
+    private static bool IsSelectable(NetworkAdapterInfo adapter)
+    {
+        if (adapter.Identity.Guid == Guid.Empty || adapter.InterfaceType is 24 or 131)
+            return false; // IF_TYPE_SOFTWARE_LOOPBACK / IF_TYPE_TUNNEL
+
+        string name = $"{adapter.Identity.NameSnapshot} {adapter.Description}";
+        return !name.Contains("loopback", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("wintun", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("tap-", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("tun", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("virtualbox", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("vmware", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("hyper-v", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Converts a SOCKET_ADDRESS to a managed IPAddress using the raw sockaddr bytes.</summary>
