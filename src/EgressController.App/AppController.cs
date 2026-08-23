@@ -95,7 +95,7 @@ public sealed class AppController : IAsyncDisposable
         RefreshAdapters();
 
         _lazyHost = new LazyElevatedHostClient(_hostLauncher, CreateHostOptions);
-        _singBox = new SingBoxService(_lazyHost, _stateStore, HealthCheckAsync);
+        _singBox = new SingBoxService(_lazyHost, _stateStore);
         _singBox.Output += OnSingBoxOutput;
     }
 
@@ -371,7 +371,6 @@ public sealed class AppController : IAsyncDisposable
         {
             if (IsTunRunning)
                 return ControllerOperationResult.Success();
-            _preparedEndpoint = null;
             SingBoxApplyResult result = await _singBox.StartAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
@@ -379,8 +378,6 @@ public sealed class AppController : IAsyncDisposable
                 return ControllerOperationResult.Failure(result.ErrorMessage ?? "TUN 启动失败。");
             }
 
-            _activeEndpoint = _preparedEndpoint;
-            StartDiagnostics(_activeEndpoint);
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -395,9 +392,7 @@ public sealed class AppController : IAsyncDisposable
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            StopDiagnostics();
             await _singBox.StopAsync(cancellationToken).ConfigureAwait(false);
-            _activeEndpoint = null;
             SetMessage("sing-box TUN 已停止。");
             return ControllerOperationResult.Success();
         }
@@ -521,8 +516,6 @@ public sealed class AppController : IAsyncDisposable
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
 
-        int controllerPort = GetFreePort();
-        string controllerSecret = EgressProfileCompiler.CreateControllerSecret();
         string runtimeDirectory = Path.Combine(_dataRoot, "runtime");
         Directory.CreateDirectory(runtimeDirectory);
         string configPath = Path.Combine(runtimeDirectory, "config.json");
@@ -534,13 +527,9 @@ public sealed class AppController : IAsyncDisposable
             UpstreamOwnerPaths = ownerPaths,
             SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty],
             RuleSets = ruleSets,
-            ControllerPort = controllerPort,
-            ControllerSecret = controllerSecret,
-            LogPath = Path.Combine(_dataRoot, "logs", "sing-box.log"),
         });
         EgressProfileCompiler.WriteNext(configPath, compiled);
-        _preparedEndpoint = new ControllerEndpoint(controllerPort, controllerSecret);
-        return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256, controllerPort, controllerSecret);
+        return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256);
     }
 
     private async Task<IReadOnlyList<SingBoxRuleSetInput>> EnsureRuleSetsAsync(
@@ -656,14 +645,9 @@ public sealed class AppController : IAsyncDisposable
                 return ControllerOperationResult.Success();
             }
 
-            ControllerEndpoint? previousEndpoint = _activeEndpoint;
-            StopDiagnostics();
-            _preparedEndpoint = null;
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
-                _activeEndpoint = _preparedEndpoint;
-                StartDiagnostics(_activeEndpoint);
                 SetMessage("配置已校验并应用，sing-box 已重启。");
                 return ControllerOperationResult.Success();
             }
@@ -676,8 +660,6 @@ public sealed class AppController : IAsyncDisposable
                 _profileStore.Save(previous);
             }
             catch { }
-            _activeEndpoint = previousEndpoint;
-            StartDiagnostics(_activeEndpoint);
             return ControllerOperationResult.Failure(applied.ErrorMessage ?? "配置应用失败，已回滚。");
         }
         finally

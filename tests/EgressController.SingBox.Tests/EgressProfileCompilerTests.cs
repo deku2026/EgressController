@@ -9,6 +9,34 @@ namespace EgressController.SingBox.Tests;
 public sealed class EgressProfileCompilerTests
 {
     [Fact]
+    public void Default_profile_emits_the_reference_minimal_shape()
+    {
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input(new EgressProfileDocument())).JsonBytes);
+        JsonElement root = json.RootElement;
+        JsonElement dns = root.GetProperty("dns");
+        JsonElement inbound = root.GetProperty("inbounds")[0];
+        JsonElement route = root.GetProperty("route");
+
+        Assert.False(root.TryGetProperty("experimental", out _));
+        Assert.Equal("dns-clash", dns.GetProperty("servers")[0].GetProperty("tag").GetString());
+        Assert.Equal("clash-7890", dns.GetProperty("servers")[0].GetProperty("detour").GetString());
+        Assert.Equal("prefer_ipv4", dns.GetProperty("strategy").GetString());
+        Assert.Equal("sing-box", inbound.GetProperty("interface_name").GetString());
+        Assert.Single(inbound.GetProperty("address").EnumerateArray());
+        Assert.Equal("esim-direct", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
+        Assert.Equal("primary-direct", root.GetProperty("outbounds")[1].GetProperty("tag").GetString());
+        Assert.Equal("clash-7890", root.GetProperty("outbounds")[2].GetProperty("tag").GetString());
+        Assert.False(route.TryGetProperty("rule_set", out _));
+        Assert.False(route.TryGetProperty("auto_detect_interface", out _));
+        Assert.False(route.TryGetProperty("find_process", out _));
+        Assert.Equal("sniff", route.GetProperty("rules")[0].GetProperty("action").GetString());
+        Assert.Equal("dns", route.GetProperty("rules")[1].GetProperty("protocol").GetString());
+        Assert.Equal("hijack-dns", route.GetProperty("rules")[1].GetProperty("action").GetString());
+        Assert.True(route.GetProperty("rules")[2].TryGetProperty("process_name", out _));
+        Assert.False(route.GetProperty("rules")[2].TryGetProperty("process_path", out _));
+    }
+
+    [Fact]
     public void Route_order_and_union_are_deterministic()
     {
         string root = NewRoot();
@@ -38,10 +66,10 @@ public sealed class EgressProfileCompilerTests
             Assert.Equal(@"C:\Apps\Chrome\chrome.exe", rules[3].GetProperty("process_path")[0].GetString());
             Assert.Equal("google", rules[4].GetProperty("rule_set")[0].GetString());
             Assert.Equal("openai.com", rules[5].GetProperty("domain_suffix")[0].GetString());
-            Assert.Equal("upstream-socks", json.RootElement.GetProperty("route").GetProperty("final").GetString());
-            Assert.Equal("primary-direct", outbounds[0].GetProperty("tag").GetString());
-            Assert.Equal("esim-direct", outbounds[1].GetProperty("tag").GetString());
-            Assert.Equal("upstream-socks", outbounds[2].GetProperty("tag").GetString());
+            Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
+            Assert.Equal("esim-direct", outbounds[0].GetProperty("tag").GetString());
+            Assert.Equal("primary-direct", outbounds[1].GetProperty("tag").GetString());
+            Assert.Equal("clash-7890", outbounds[2].GetProperty("tag").GetString());
             Assert.Equal("5", outbounds[2].GetProperty("version").GetString());
         }
         finally
@@ -69,7 +97,8 @@ public sealed class EgressProfileCompilerTests
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
         Assert.Equal(4, rules.GetArrayLength());
         Assert.Equal("primary-direct", rules[2].GetProperty("outbound").GetString());
-        Assert.Contains(owner, rules[2].GetProperty("process_path").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("proxy.exe", rules[2].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("proxy", rules[2].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
         Assert.Equal(2, rules[3].GetProperty("process_path").GetArrayLength());
     }
 

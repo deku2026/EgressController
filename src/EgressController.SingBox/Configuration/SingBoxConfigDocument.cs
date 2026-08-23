@@ -21,7 +21,8 @@ public sealed record SingBoxConfigDocument
     public required SingBoxRouteDocument Route { get; init; }
 
     [JsonPropertyName("experimental")]
-    public required SingBoxExperimentalDocument Experimental { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SingBoxExperimentalDocument? Experimental { get; init; }
 
     public byte[] ToJsonBytes()
         => JsonSerializer.SerializeToUtf8Bytes(this, SingBoxConfigJsonContext.Default.SingBoxConfigDocument);
@@ -47,6 +48,10 @@ public sealed record SingBoxDnsDocument
 
     [JsonPropertyName("final")]
     public required string Final { get; init; }
+
+    [JsonPropertyName("strategy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Strategy { get; init; }
 }
 
 public sealed record SingBoxHttpsDnsServerDocument
@@ -145,16 +150,19 @@ public sealed record SingBoxRouteDocument
     public required IReadOnlyList<SingBoxRouteRuleDocument> Rules { get; init; }
 
     [JsonPropertyName("rule_set")]
-    public required IReadOnlyList<SingBoxRuleSetDocument> RuleSet { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SingBoxRuleSetDocument>? RuleSet { get; init; }
 
     [JsonPropertyName("final")]
     public required string Final { get; init; }
 
     [JsonPropertyName("auto_detect_interface")]
-    public bool AutoDetectInterface { get; init; } = true;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AutoDetectInterface { get; init; }
 
     [JsonPropertyName("find_process")]
-    public bool FindProcess { get; init; } = true;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FindProcess { get; init; }
 }
 
 public sealed record SingBoxRuleSetDocument
@@ -174,6 +182,14 @@ public sealed record SingBoxRuleSetDocument
 
 public sealed record SingBoxRouteRuleDocument
 {
+    [JsonPropertyName("protocol")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Protocol { get; init; }
+
+    [JsonPropertyName("process_name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ProcessName { get; init; }
+
     [JsonPropertyName("process_path")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? ProcessPath { get; init; }

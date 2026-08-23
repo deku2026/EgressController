@@ -16,10 +16,10 @@ public sealed record EgressProfileCompileInput
     public required IReadOnlyList<string> UpstreamOwnerPaths { get; init; }
     public IReadOnlyList<string> SelfExecutablePaths { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<SingBoxRuleSetInput> RuleSets { get; init; }
-    public required int ControllerPort { get; init; }
-    public required string ControllerSecret { get; init; }
+    public int ControllerPort { get; init; }
+    public string ControllerSecret { get; init; } = string.Empty;
     public string? LogPath { get; init; }
-    public string TunInterfaceName { get; init; } = "EgressController-TUN";
+    public string TunInterfaceName { get; init; } = "sing-box";
 }
 
 public sealed record EgressProfileCompilationResult(
@@ -39,16 +39,14 @@ public sealed class EgressProfileCompiler
     public const string TunTag = "tun-in";
     public const string PrimaryDirectTag = "primary-direct";
     public const string EsimDirectTag = "esim-direct";
-    public const string UpstreamSocksTag = "upstream-socks";
-    public const string DnsTag = "dns-doh";
+    public const string UpstreamSocksTag = "clash-7890";
+    public const string DnsTag = "dns-clash";
     public const string ControllerHost = "127.0.0.1";
 
     public EgressProfileCompilationResult Compile(EgressProfileCompileInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
         EgressProfileDocument profile = input.Profile.NormalizeAndValidate();
-        ValidateController(input.ControllerPort, input.ControllerSecret);
-
         string[] owners = NormalizePaths(input.UpstreamOwnerPaths, "upstream.owner");
         if (owners.Length == 0)
             throw Failure("upstream.owner", "未解析到上游 SOCKS5 owner executable path。");
@@ -64,8 +62,8 @@ public sealed class EgressProfileCompiler
         var rules = new List<SingBoxRouteRuleDocument>
         {
             new() { Action = "sniff" },
-            new() { Action = "hijack-dns" },
-            new() { ProcessPath = owners, Action = "route", Outbound = PrimaryDirectTag },
+            new() { Protocol = "dns", Action = "hijack-dns" },
+            new() { ProcessName = NormalizeProcessNames(owners), Action = "route", Outbound = PrimaryDirectTag },
         };
         if (applications.Length > 0)
         {
@@ -113,6 +111,7 @@ public sealed class EgressProfileCompiler
                     },
                 },
                 Final = DnsTag,
+                Strategy = "prefer_ipv4",
             },
             Inbounds = new[]
             {
@@ -120,7 +119,7 @@ public sealed class EgressProfileCompiler
                 {
                     Tag = TunTag,
                     InterfaceName = tunName,
-                    Address = new[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" },
+                    Address = new[] { "172.19.0.1/30" },
                     AutoRoute = true,
                     StrictRoute = true,
                     Stack = "system",
@@ -128,8 +127,8 @@ public sealed class EgressProfileCompiler
             },
             Outbounds = new SingBoxOutboundDocument[]
             {
-                CreateDirect(PrimaryDirectTag, input.Environment.Primary),
                 CreateDirect(EsimDirectTag, input.Environment.Esim),
+                CreateDirect(PrimaryDirectTag, input.Environment.Primary),
                 new SingBoxOutboundDocument
                 {
                     Type = "socks",
@@ -142,7 +141,7 @@ public sealed class EgressProfileCompiler
             Route = new SingBoxRouteDocument
             {
                 Rules = rules,
-                RuleSet = selectedRuleSets.Select(item => new SingBoxRuleSetDocument
+                RuleSet = selectedRuleSets.Count == 0 ? null : selectedRuleSets.Select(item => new SingBoxRuleSetDocument
                 {
                     Tag = item.Name,
                     Path = item.Path,
@@ -150,17 +149,6 @@ public sealed class EgressProfileCompiler
                     Format = "binary",
                 }).ToArray(),
                 Final = UpstreamSocksTag,
-                AutoDetectInterface = true,
-                FindProcess = true,
-            },
-            Experimental = new SingBoxExperimentalDocument
-            {
-                ClashApi = new SingBoxClashApiDocument
-                {
-                    ExternalController = $"{ControllerHost}:{input.ControllerPort}",
-                    Secret = input.ControllerSecret.Trim(),
-                    DefaultMode = "rule",
-                },
             },
         };
 
@@ -207,9 +195,23 @@ public sealed class EgressProfileCompiler
             Type = "direct",
             Tag = tag,
             BindInterface = NormalizeRequired(adapter.Alias, "adapter.alias"),
-            Inet4BindAddress = adapter.Ipv4BindAddress?.ToString(),
-            Inet6BindAddress = adapter.Ipv6BindAddress?.ToString(),
         };
+
+    private static string[] NormalizeProcessNames(IEnumerable<string> paths)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in paths)
+        {
+            string fileName = Path.GetFileName(path);
+            if (string.IsNullOrWhiteSpace(fileName))
+                throw Failure("upstream.owner.name", "上游 SOCKS5 owner executable name 为空。");
+            names.Add(fileName);
+            string withoutExtension = Path.GetFileNameWithoutExtension(fileName);
+            if (!string.IsNullOrWhiteSpace(withoutExtension))
+                names.Add(withoutExtension);
+        }
+        return names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
 
     private static List<SingBoxRuleSetInput> NormalizeRuleSets(
         EgressProfileDocument profile,
@@ -305,14 +307,6 @@ public sealed class EgressProfileCompiler
         if (name.Length > 64 || name.Any(char.IsControl))
             throw Failure("tun.name", "TUN 名称无效。");
         return name;
-    }
-
-    private static void ValidateController(int port, string secret)
-    {
-        if (port is < 1 or > ushort.MaxValue)
-            throw Failure("controller.port", "Clash API 端口必须在 1..65535。");
-        if (string.IsNullOrWhiteSpace(secret) || secret.Trim().Length < 16)
-            throw Failure("controller.secret", "Clash API secret 至少需要 16 个字符。");
     }
 
     private static EgressProfileCompilationException Failure(string code, string message, Exception? inner = null)
