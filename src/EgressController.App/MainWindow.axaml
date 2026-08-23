@@ -15,11 +15,11 @@
                     <TextBlock Foreground="White" FontSize="25" FontWeight="SemiBold"
                                Text="EgressController" />
                     <TextBlock Foreground="#AAB7CF" FontSize="13"
-                               Text="Windows 多出口控制器 · 应用、域名与连接决策" />
+                               Text="Windows 全流量 TUN · 应用、域名与连接诊断" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Border Background="#263652" CornerRadius="14" Padding="12,7">
-                        <TextBlock Foreground="#DCE7FF" Text="{Binding Overview.SystemProxy}" />
+                        <TextBlock Foreground="#DCE7FF" Text="{Binding Overview.TunBadge}" />
                     </Border>
                     <Button Classes="primary" Command="{Binding Overview.ToggleRoutingCommand}"
                             Content="{Binding Overview.ToggleRoutingText}" />
@@ -33,7 +33,7 @@
             <TabItem Header="概览">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="16">
-                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="14">
+                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="14" RowSpacing="14">
                             <Border Classes="card" Grid.Row="0" Grid.Column="0">
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="ESIM 出口" />
@@ -48,37 +48,63 @@
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <Button Content="扫描网卡" Command="{Binding Overview.RefreshCommand}"
-                                            HorizontalAlignment="Left" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Row="0" Grid.Column="1">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="上游代理" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" />
-                                    <TextBlock Classes="muted" Text="未命中的 HTTP/HTTPS 流量 fail-closed 地进入这里，不会回落到普通直连。" TextWrapping="Wrap" />
-                                    <Border Classes="metric-pill" HorizontalAlignment="Left">
-                                        <TextBlock Text="HTTP-compatible upstream" />
-                                    </Border>
+                                    <TextBlock Classes="eyebrow" Text="主网卡" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Primary}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="主出口用于 upstream SOCKS5 与自身控制连接；绑定名称只在运行时解析。" TextWrapping="Wrap" />
+                                    <ComboBox ItemsSource="{Binding Overview.PrimaryAdapters}"
+                                              SelectedItem="{Binding Overview.SelectedPrimaryAdapter}"
+                                              HorizontalAlignment="Stretch">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:AdapterOptionViewModel">
+                                                <TextBlock Text="{Binding Display}" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Row="1" Grid.Column="0">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="本地路由器" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.Router}" />
-                                    <TextBlock Classes="muted" Text="系统代理只接管 HTTP/HTTPS；Controller 自身控制面不走系统代理。" TextWrapping="Wrap" />
-                                    <Button Content="启动本地 Router" Command="{Binding Overview.StartCommand}"
-                                            HorizontalAlignment="Left" />
+                                    <TextBlock Classes="eyebrow" Text="上游 SOCKS5" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" />
+                                    <TextBlock Classes="muted" Text="未命中应用或 SRS 的流量统一进入这里；软件控制面和上游 owner 通过主网卡，避免递归。" TextWrapping="Wrap" />
+                                    <Grid ColumnDefinitions="Auto,110" ColumnSpacing="8">
+                                        <TextBlock Text="SOCKS5 端口" VerticalAlignment="Center" />
+                                        <TextBox Grid.Column="1" Text="{Binding Overview.UpstreamPortText, Mode=TwoWay}"
+                                                 PlaceholderText="7890" LostFocus="OnUpstreamPortLostFocus"
+                                                 KeyDown="OnUpstreamPortKeyDown" />
+                                    </Grid>
+                                    <Border Classes="metric-pill" HorizontalAlignment="Left">
+                                        <TextBlock Text="显式控制面代理 · 使用上方 SOCKS5 端口" />
+                                    </Border>
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Row="1" Grid.Column="1">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="System Proxy" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.SystemProxy}" />
-                                    <TextBlock Classes="muted" Text="接管前会保存完整状态；退出时只在状态仍归 Controller 所有时恢复。" TextWrapping="Wrap" />
-                                    <Button Content="恢复上次未完成会话" Command="{Binding Overview.RestoreStaleCommand}"
-                                            IsVisible="{Binding Overview.CanRestoreStale}"
+                                    <TextBlock Classes="eyebrow" Text="sing-box Core" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Core}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="Managed core 会通过 SOCKS5 7890 下载、校验并在提权 host 中启动；UI 本身保持普通权限。" TextWrapping="Wrap" />
+                                    <Button Content="启动 / 应用 TUN" Command="{Binding Overview.StartCommand}"
                                             HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Row="2" Grid.Column="0">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="eyebrow" Text="TUN 状态" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Tun}" />
+                                    <TextBlock Classes="muted" Text="{Binding Overview.Traffic}" />
+                                    <Button Content="扫描网卡" Command="{Binding Overview.RefreshCommand}"
+                                            HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Row="2" Grid.Column="1">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="eyebrow" Text="数据面" />
+                                     <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
+                                    <TextBlock Classes="muted" Text="不修改 Windows System Proxy，不向应用注入代理参数；普通 Launch 也不会暗中启动 TUN。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -95,7 +121,7 @@
                         <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                             <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用或路径…" />
                             <Button Grid.Column="1" Classes="primary" Content="{Binding Apps.ScanText}" Command="{Binding Apps.ScanCommand}" />
-                            <Button Grid.Column="2" Content="全选 Managed" Command="{Binding Apps.SelectAllCommand}" />
+                            <Button Grid.Column="2" Content="全选 eSIM" Command="{Binding Apps.SelectAllCommand}" />
                             <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}" />
                             <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
                         </Grid>
@@ -112,7 +138,7 @@
                                     <DataTemplate x:DataType="vm:AppEntryViewModel">
                                         <Border Padding="8" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
                                             <Grid ColumnDefinitions="Auto,Auto,*,190,Auto" ColumnSpacing="12">
-                                                <CheckBox IsChecked="{Binding Managed}" IsEnabled="{Binding CanManage}" VerticalAlignment="Center" />
+                                                <CheckBox IsChecked="{Binding IsEsim}" IsEnabled="{Binding CanManage}" VerticalAlignment="Center" />
                                                 <Border Grid.Column="1" Classes="app-glyph">
                                                     <Grid>
                                                         <Image Source="{Binding Icon}" Width="24" Height="24"
@@ -141,13 +167,13 @@
             <TabItem Header="域名规则">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Spacing="10">
-                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
-                            <TextBox Text="{Binding Domains.Query}" PlaceholderText="搜索官方 MetaCubeX geosite，例如 google…" />
-                            <Button Grid.Column="1" Classes="primary" Content="{Binding Domains.RefreshText}" Command="{Binding Domains.RefreshCatalogCommand}" />
-                            <Button Grid.Column="2" Content="全选当前结果" Command="{Binding Domains.SelectAllCommand}" />
+                            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                                <TextBox Text="{Binding Domains.Query}" PlaceholderText="搜索官方 MetaCubeX geosite，例如 google…" />
+                                <Button Grid.Column="1" Classes="primary" Content="{Binding Domains.RefreshText}" Command="{Binding Domains.RefreshCatalogCommand}" />
+                            <Button Grid.Column="2" Content="全选当前结果" Command="{Binding Domains.SelectAllCommand}"
+                                    IsEnabled="{Binding Domains.CanSelectVisible}" />
                             <Button Grid.Column="3" Content="清空当前结果" Command="{Binding Domains.ClearAllCommand}" />
-                            <Button Grid.Column="4" Content="导入本地目录" Click="OnImportRulesDirectoryClick" />
-                            <TextBlock Grid.Column="5" VerticalAlignment="Center" Classes="muted" Text="{Binding Domains.SelectedSummary}" />
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Domains.SelectedSummary}" />
                         </Grid>
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                             <TextBlock Text="规则来源" VerticalAlignment="Center" Classes="muted" />
@@ -222,87 +248,115 @@
             <TabItem Header="连接日志">
                 <DockPanel>
                     <Grid DockPanel.Dock="Top" ColumnDefinitions="*,260,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,10">
-                        <TextBlock Classes="muted" Text="每 500ms 刷新；拖动表头分隔线调整列宽，双击连接查看详情。" VerticalAlignment="Center" />
+                            <TextBlock Classes="muted" Text="真实 sing-box API 增量快照；拖动表头分隔线调整列宽，双击连接查看详情。" VerticalAlignment="Center" />
                         <TextBox Grid.Column="1" Text="{Binding Connections.Query}" PlaceholderText="搜索进程、PID、域名、路由…" />
                         <TextBlock Grid.Column="2" Classes="tag" Text="{Binding Connections.ActiveSummary}" Margin="8,0" VerticalAlignment="Center" />
-                        <Button Grid.Column="3" Content="全部关闭并清空" Command="{Binding Connections.CloseAllCommand}" />
+                        <Button Grid.Column="3" Content="关闭全部" Command="{Binding Connections.CloseAllCommand}" />
                         <TextBlock Grid.Column="4" Classes="warning" Text="{Binding Connections.Dropped}" VerticalAlignment="Center" />
                     </Grid>
-                    <Border Classes="list-card">
-                        <DockPanel>
-                            <Grid x:Name="ConnectionHeaderGrid" DockPanel.Dock="Top" Background="#F1F3F8" Margin="12,9">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Time, Mode=TwoWay}" MinWidth="60" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Source, Mode=TwoWay}" MinWidth="160" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Target, Mode=TwoWay}" MinWidth="130" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Decision, Mode=TwoWay}" MinWidth="70" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Reason, Mode=TwoWay}" MinWidth="80" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Rule, Mode=TwoWay}" MinWidth="100" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="{Binding Connections.Columns.Status, Mode=TwoWay}" MinWidth="70" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Classes="table-head" Text="时间" />
-                                <GridSplitter Grid.Column="1" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
-                                <TextBlock Grid.Column="2" Classes="table-head" Text="来源进程 / 实际路径" />
-                                <GridSplitter Grid.Column="3" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
-                                <TextBlock Grid.Column="4" Classes="table-head" Text="目标" />
-                                <GridSplitter Grid.Column="5" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
-                                <TextBlock Grid.Column="6" Classes="table-head" Text="决策" />
-                                <GridSplitter Grid.Column="7" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
-                                <TextBlock Grid.Column="8" Classes="table-head" Text="原因" />
-                                <GridSplitter Grid.Column="9" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
-                                <TextBlock Grid.Column="10" Classes="table-head" Text="规则" />
-                                <GridSplitter Grid.Column="11" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                              Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
-                                <TextBlock Grid.Column="12" Classes="table-head" Text="状态" />
+                    <TabControl>
+                        <TabItem Header="连接">
+                            <Border Classes="list-card">
+                                <DockPanel>
+                                    <Grid x:Name="ConnectionHeaderGrid" DockPanel.Dock="Top" Background="#F1F3F8" Margin="12,9">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Time, Mode=TwoWay}" MinWidth="60" />
+                                            <ColumnDefinition Width="5" />
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Source, Mode=TwoWay}" MinWidth="160" />
+                                            <ColumnDefinition Width="5" />
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Target, Mode=TwoWay}" MinWidth="130" />
+                                            <ColumnDefinition Width="5" />
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Decision, Mode=TwoWay}" MinWidth="70" />
+                                            <ColumnDefinition Width="5" />
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Reason, Mode=TwoWay}" MinWidth="80" />
+                                            <ColumnDefinition Width="5" />
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Rule, Mode=TwoWay}" MinWidth="100" />
+                                            <ColumnDefinition Width="5" />
+                                            <ColumnDefinition Width="{Binding Connections.Columns.Status, Mode=TwoWay}" MinWidth="70" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Classes="table-head" Text="时间" />
+                                        <GridSplitter Grid.Column="1" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                                      Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                        <TextBlock Grid.Column="2" Classes="table-head" Text="来源进程 / 实际路径" />
+                                        <GridSplitter Grid.Column="3" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                                      Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                        <TextBlock Grid.Column="4" Classes="table-head" Text="目标" />
+                                        <GridSplitter Grid.Column="5" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                                      Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                        <TextBlock Grid.Column="6" Classes="table-head" Text="决策" />
+                                        <GridSplitter Grid.Column="7" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                                      Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                        <TextBlock Grid.Column="8" Classes="table-head" Text="原因" />
+                                        <GridSplitter Grid.Column="9" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                                      Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                        <TextBlock Grid.Column="10" Classes="table-head" Text="规则" />
+                                        <GridSplitter Grid.Column="11" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                                                      Background="#D2D8E4" DragIncrement="1" DragCompleted="OnConnectionColumnDragCompleted" />
+                                        <TextBlock Grid.Column="12" Classes="table-head" Text="状态" />
+                                    </Grid>
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <ListBox ItemsSource="{Binding Connections.Rows}">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:ConnectionRowViewModel">
+                                                    <Grid Margin="12,8" Background="Transparent" DoubleTapped="OnConnectionRowDoubleTapped">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="{Binding Columns.Time}" />
+                                                            <ColumnDefinition Width="5" />
+                                                            <ColumnDefinition Width="{Binding Columns.Source}" />
+                                                            <ColumnDefinition Width="5" />
+                                                            <ColumnDefinition Width="{Binding Columns.Target}" />
+                                                            <ColumnDefinition Width="5" />
+                                                            <ColumnDefinition Width="{Binding Columns.Decision}" />
+                                                            <ColumnDefinition Width="5" />
+                                                            <ColumnDefinition Width="{Binding Columns.Reason}" />
+                                                            <ColumnDefinition Width="5" />
+                                                            <ColumnDefinition Width="{Binding Columns.Rule}" />
+                                                            <ColumnDefinition Width="5" />
+                                                            <ColumnDefinition Width="{Binding Columns.Status}" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Classes="muted" Text="{Binding Time}" VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="2" ToolTip.Tip="{Binding Executable}">
+                                                            <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Classes="muted" FontSize="10" Text="{Binding Executable}" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="4" Text="{Binding Host}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="6" FontWeight="SemiBold" Text="{Binding Decision}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="8" Text="{Binding Reason}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="10" Classes="muted" Text="{Binding Rule}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="12" Classes="muted" Text="{Binding Status}" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                        </TabItem>
+                        <TabItem Header="核心日志 / DNS">
+                            <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                                <Grid ColumnDefinitions="*,Auto,Auto,*" ColumnSpacing="8">
+                                    <TextBox Text="{Binding Connections.DnsHost}" PlaceholderText="DNS 查询域名，例如 example.com" />
+                                    <Button Grid.Column="1" Content="查询 DNS" Command="{Binding Connections.QueryDnsCommand}" />
+                                    <Button Grid.Column="2" Content="清 DNS 缓存" Command="{Binding Connections.FlushDnsCommand}" />
+                                    <TextBlock Grid.Column="3" Classes="muted" Text="{Binding Connections.DnsResult}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                </Grid>
+                                <Border Grid.Row="1" Classes="list-card">
+                                    <ListBox ItemsSource="{Binding Connections.CoreLogs}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:CoreLogRowViewModel">
+                                                <Grid ColumnDefinitions="80,100,80,*" ColumnSpacing="10" Margin="12,7">
+                                                    <TextBlock Classes="muted" Text="{Binding Time}" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding Level}" />
+                                                    <TextBlock Grid.Column="3" Text="{Binding Message}" TextTrimming="CharacterEllipsis" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
                             </Grid>
-                            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <ListBox ItemsSource="{Binding Connections.Rows}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:ConnectionRowViewModel">
-                                            <Grid Margin="12,8" Background="Transparent" DoubleTapped="OnConnectionRowDoubleTapped">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="{Binding Columns.Time}" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="{Binding Columns.Source}" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="{Binding Columns.Target}" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="{Binding Columns.Decision}" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="{Binding Columns.Reason}" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="{Binding Columns.Rule}" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="{Binding Columns.Status}" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Classes="muted" Text="{Binding Time}" VerticalAlignment="Center" />
-                                                <StackPanel Grid.Column="2" ToolTip.Tip="{Binding Executable}">
-                                                    <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Classes="muted" FontSize="10" Text="{Binding Executable}" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <TextBlock Grid.Column="4" Text="{Binding Host}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="6" FontWeight="SemiBold" Text="{Binding Decision}" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="8" Text="{Binding Reason}" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="10" Classes="muted" Text="{Binding Rule}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="12" Classes="muted" Text="{Binding Status}" VerticalAlignment="Center" />
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </ScrollViewer>
-                        </DockPanel>
-                    </Border>
+                        </TabItem>
+                    </TabControl>
                 </DockPanel>
             </TabItem>
         </TabControl>

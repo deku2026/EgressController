@@ -167,6 +167,15 @@ public sealed class SingBoxApiClient : IDisposable
         }
     }
 
+    public static SingBoxConnectionsResponse ParseConnectionsMessage(string json)
+        => DeserializeWebSocketMessage(json, SingBoxApiJsonContext.Default.SingBoxConnectionsResponse);
+
+    public static SingBoxTrafficEvent ParseTrafficMessage(string json)
+        => DeserializeWebSocketMessage(json, SingBoxApiJsonContext.Default.SingBoxTrafficEvent);
+
+    public static SingBoxLogEvent ParseLogMessage(string json)
+        => DeserializeWebSocketMessage(json, SingBoxApiJsonContext.Default.SingBoxLogEvent);
+
     public void Dispose()
     {
         if (_disposed)
@@ -318,6 +327,21 @@ public sealed class SingBoxApiClient : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(10),
         };
+
+    private static T DeserializeWebSocketMessage<T>(string json, JsonTypeInfo<T> typeInfo)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            throw new SingBoxApiException("sing-box API returned an empty WebSocket message.");
+        try
+        {
+            return JsonSerializer.Deserialize(json, typeInfo)
+                ?? throw new SingBoxApiException("sing-box API returned a null WebSocket message.");
+        }
+        catch (JsonException exception)
+        {
+            throw new SingBoxApiException("sing-box API returned invalid WebSocket JSON.", exception);
+        }
+    }
 }
 
 public sealed class SingBoxApiException : Exception

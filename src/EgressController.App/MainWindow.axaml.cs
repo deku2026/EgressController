@@ -1,8 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using EgressController.App.ViewModels;
 
@@ -13,7 +13,6 @@ public partial class MainWindow : Window
     private MainViewModel? _vm;
     private DispatcherTimer? _timer;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
-    private bool _esimWarningOpen;
 
     public MainWindow()
     {
@@ -39,23 +38,6 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void OnImportRulesDirectoryClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (_vm is null)
-            return;
-
-        IReadOnlyList<IStorageFolder> folders = await StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions
-            {
-                Title = "选择 meta-rules-dat 根目录或 geo\\geosite 目录",
-                AllowMultiple = false,
-            });
-        IStorageFolder? folder = folders.FirstOrDefault();
-        string? path = folder?.TryGetLocalPath();
-        if (!string.IsNullOrWhiteSpace(path))
-            _vm.Domains.ImportLocalDirectory(path);
-    }
-
     private async void OnConnectionRowDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (sender is not Control { DataContext: ConnectionRowViewModel row })
@@ -67,7 +49,7 @@ public partial class MainWindow : Window
         AddDetail(details, "进程", row.ProcessName);
         AddDetail(details, "PID", row.Pid);
         AddDetail(details, "实际 EXE", row.Executable);
-        AddDetail(details, "Managed Session", row.Session);
+        AddDetail(details, "Launch Session", row.Session);
         AddDetail(details, "目标", row.Host);
         AddDetail(details, "决策", row.Decision);
         AddDetail(details, "原因", row.Reason);
@@ -100,43 +82,19 @@ public partial class MainWindow : Window
         columns.Status = ConnectionHeaderGrid.ColumnDefinitions[12].Width;
     }
 
-    internal async Task ShowEsimDisconnectedWarningAsync(EsimConnectivityChangedEventArgs args)
+    private async void OnUpstreamPortLostFocus(object? sender, RoutedEventArgs e)
     {
-        if (_esimWarningOpen)
+        if (_vm is not null)
+            await _vm.Overview.CommitUpstreamPortAsync();
+    }
+
+    private async void OnUpstreamPortKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
             return;
-
-        _esimWarningOpen = true;
-        try
-        {
-            var content = new StackPanel { Spacing = 12 };
-            content.Children.Add(new TextBlock
-            {
-                Text = "⚠  eSIM 已断开",
-                FontSize = 22,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = Brushes.DarkOrange,
-            });
-            content.Children.Add(new TextBlock
-            {
-                Text = $"检测到网卡“{args.AdapterName}”离线。\n"
-                    + $"已先关闭 {args.ClosedConnections} 个活动连接，现在拒绝所有新连接，不会回落到上游或普通直连。\n"
-                    + "eSIM 恢复在线后，拒绝状态会自动解除。",
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 14,
-            });
-            content.Children.Add(new TextBlock
-            {
-                Text = "检测时间：" + args.DetectedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
-                Foreground = Brushes.Gray,
-                FontSize = 12,
-            });
-
-            await ShowDialogAsync("eSIM 断线警告", content, width: 560, height: 300);
-        }
-        finally
-        {
-            _esimWarningOpen = false;
-        }
+        e.Handled = true;
+        if (_vm is not null)
+            await _vm.Overview.CommitUpstreamPortAsync();
     }
 
     private async Task ShowDialogAsync(string title, Control content, double width, double height)

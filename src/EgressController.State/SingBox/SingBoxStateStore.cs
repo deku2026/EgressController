@@ -17,6 +17,8 @@ public sealed record SingBoxRuntimePointer
     public required string ConfigPath { get; init; }
     public required string ConfigSha256 { get; init; }
     public required DateTimeOffset AppliedAtUtc { get; init; }
+    public int ControllerPort { get; init; }
+    public string ControllerSecret { get; init; } = string.Empty;
 }
 
 public sealed record SingBoxPendingApply

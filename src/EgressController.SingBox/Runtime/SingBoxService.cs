@@ -12,11 +12,15 @@ public sealed record SingBoxRuntimeCandidate
     public required string CoreSha256 { get; init; }
     public required string ConfigPath { get; init; }
     public required string ConfigSha256 { get; init; }
+    public int ControllerPort { get; init; }
+    public string ControllerSecret { get; init; } = string.Empty;
 
     public static SingBoxRuntimeCandidate From(
         SingBoxCoreCandidate core,
         string configPath,
-        string configSha256)
+        string configSha256,
+        int controllerPort = 0,
+        string controllerSecret = "")
     {
         ArgumentNullException.ThrowIfNull(core);
         if (string.IsNullOrWhiteSpace(configPath) || string.IsNullOrWhiteSpace(configSha256))
@@ -28,6 +32,8 @@ public sealed record SingBoxRuntimeCandidate
             CoreSha256 = core.Sha256,
             ConfigPath = Path.GetFullPath(configPath),
             ConfigSha256 = configSha256.Trim().ToLowerInvariant(),
+            ControllerPort = controllerPort,
+            ControllerSecret = controllerSecret,
         };
     }
 
@@ -43,6 +49,8 @@ public sealed record SingBoxRuntimeCandidate
             },
             ConfigPath = ConfigPath,
             ConfigSha256 = ConfigSha256,
+            ControllerPort = ControllerPort,
+            ControllerSecret = ControllerSecret,
             AppliedAtUtc = DateTimeOffset.UtcNow,
         };
 
@@ -56,6 +64,8 @@ public sealed record SingBoxRuntimeCandidate
             CoreSha256 = pointer.Core.Sha256,
             ConfigPath = pointer.ConfigPath,
             ConfigSha256 = pointer.ConfigSha256,
+            ControllerPort = pointer.ControllerPort,
+            ControllerSecret = pointer.ControllerSecret,
         };
     }
 }
