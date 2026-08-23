@@ -83,6 +83,8 @@ public sealed class AppController : IAsyncDisposable
     private long _trafficDownRate;
     private string _connectionMonitorStatus = "未启动";
     private string _trafficMonitorStatus = "未启动";
+    private string? _lastConnectionMonitorError;
+    private string? _lastTrafficMonitorError;
     private int _diagnosticsGeneration;
 
     public AppController(string? dataRoot = null)
@@ -795,15 +797,42 @@ public sealed class AppController : IAsyncDisposable
     private void StopDiagnostics()
     {
         Interlocked.Increment(ref _diagnosticsGeneration);
-        _diagnosticsCts?.Cancel();
-        _diagnosticsCts?.Dispose();
+        CancellationTokenSource? diagnosticsCts = _diagnosticsCts;
+        Task? diagnosticsTask = _diagnosticsTask;
         _diagnosticsCts = null;
         _diagnosticsTask = null;
+
+        diagnosticsCts?.Cancel();
+        if (diagnosticsCts is not null)
+        {
+            if (diagnosticsTask is null || diagnosticsTask.IsCompleted)
+            {
+                diagnosticsCts.Dispose();
+            }
+            else
+            {
+                _ = diagnosticsTask.ContinueWith(
+                    static (completedTask, state) =>
+                    {
+                        _ = completedTask.Exception;
+                        ((CancellationTokenSource)state!).Dispose();
+                    },
+                    diagnosticsCts,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+        }
+
         lock (_diagnosticsStateGate)
+        {
             _connectionRateSamples.Clear();
-        _connectionHistory.ApplySnapshot(Array.Empty<ConnectionObservation>());
-        Interlocked.Exchange(ref _trafficUpRate, 0);
-        Interlocked.Exchange(ref _trafficDownRate, 0);
+            _connectionHistory.ApplySnapshot(Array.Empty<ConnectionObservation>());
+            Interlocked.Exchange(ref _trafficUp, 0);
+            Interlocked.Exchange(ref _trafficDown, 0);
+            Interlocked.Exchange(ref _trafficUpRate, 0);
+            Interlocked.Exchange(ref _trafficDownRate, 0);
+        }
         SetMonitorStatuses("未运行", "未运行");
     }
 
@@ -834,25 +863,27 @@ public sealed class AppController : IAsyncDisposable
             try
             {
                 using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
-                ApplyConnectionSnapshot(await api.GetConnectionsAsync(cancellationToken).ConfigureAwait(false));
-                SetConnectionMonitorStatus("已连接", generation);
+                ApplyConnectionSnapshot(
+                    await api.GetConnectionsAsync(cancellationToken).ConfigureAwait(false),
+                    generation);
                 using ClientWebSocket socket = await api.ConnectConnectionsWebSocketAsync(500, cancellationToken).ConfigureAwait(false);
+                backoff = TimeSpan.FromMilliseconds(250);
+                SetConnectionMonitorConnected(generation);
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
                     if (message is null)
                         throw new SingBoxApiException("连接监控 WebSocket 已关闭。");
-                    ApplyConnectionSnapshot(SingBoxApiClient.ParseConnectionsMessage(message));
+                    ApplyConnectionSnapshot(SingBoxApiClient.ParseConnectionsMessage(message), generation);
                 }
-                backoff = TimeSpan.FromMilliseconds(250);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
-            catch
+            catch (Exception exception)
             {
-                SetConnectionMonitorStatus("重试中…", generation);
+                ReportConnectionMonitorFailure(exception, generation);
                 try
                 {
                     await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
@@ -879,27 +910,25 @@ public sealed class AppController : IAsyncDisposable
             {
                 using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
                 using ClientWebSocket socket = await api.ConnectTrafficWebSocketAsync(cancellationToken).ConfigureAwait(false);
-                SetTrafficMonitorStatus("已连接", generation);
+                backoff = TimeSpan.FromMilliseconds(250);
+                SetTrafficMonitorConnected(generation);
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
                     if (message is null)
                         throw new SingBoxApiException("流量监控 WebSocket 已关闭。");
                     SingBoxTrafficEvent traffic = SingBoxApiClient.ParseTrafficMessage(message);
-                    Interlocked.Exchange(ref _trafficUpRate, Math.Max(0, traffic.Up));
-                    Interlocked.Exchange(ref _trafficDownRate, Math.Max(0, traffic.Down));
+                    ApplyTrafficRate(traffic, generation);
                 }
-                backoff = TimeSpan.FromMilliseconds(250);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
-            catch
+            catch (Exception exception)
             {
-                Interlocked.Exchange(ref _trafficUpRate, 0);
-                Interlocked.Exchange(ref _trafficDownRate, 0);
-                SetTrafficMonitorStatus("重试中…", generation);
+                ResetTrafficRate(generation);
+                ReportTrafficMonitorFailure(exception, generation);
                 try
                 {
                     await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
@@ -911,12 +940,11 @@ public sealed class AppController : IAsyncDisposable
                 backoff = TimeSpan.FromMilliseconds(Math.Min(backoff.TotalMilliseconds * 2, 5_000));
             }
         }
-        Interlocked.Exchange(ref _trafficUpRate, 0);
-        Interlocked.Exchange(ref _trafficDownRate, 0);
+        ResetTrafficRate(generation);
         SetTrafficMonitorStatus("已停止", generation);
     }
 
-    private void ApplyConnectionSnapshot(SingBoxConnectionsResponse snapshot)
+    private void ApplyConnectionSnapshot(SingBoxConnectionsResponse snapshot, int generation)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         DateTimeOffset observedAtUtc = DateTimeOffset.UtcNow;
@@ -924,6 +952,9 @@ public sealed class AppController : IAsyncDisposable
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
         lock (_diagnosticsStateGate)
         {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+
             foreach (SingBoxConnection connection in snapshot.Connections)
             {
                 if (string.IsNullOrWhiteSpace(connection.Id))
@@ -935,33 +966,36 @@ public sealed class AppController : IAsyncDisposable
                     : (observedAtUtc - previous.ObservedAtUtc).TotalSeconds;
                 long uploadRate = CalculateRate(connection.Upload, previous?.Upload, elapsedSeconds);
                 long downloadRate = CalculateRate(connection.Download, previous?.Download, elapsedSeconds);
-                observations.Add(ToObservation(connection, observedAtUtc, uploadRate, downloadRate));
+                DateTimeOffset startedAtUtc = connection.Start ?? previous?.StartedAtUtc ?? observedAtUtc;
+                observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate));
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
                     observedAtUtc,
                     connection.Upload,
-                    connection.Download);
+                    connection.Download,
+                    startedAtUtc);
             }
 
             foreach (string id in _connectionRateSamples.Keys.Where(id => !currentIds.Contains(id)).ToArray())
                 _connectionRateSamples.Remove(id);
-        }
 
-        Interlocked.Exchange(ref _trafficUp, Math.Max(0, snapshot.UploadTotal));
-        Interlocked.Exchange(ref _trafficDown, Math.Max(0, snapshot.DownloadTotal));
-        _connectionHistory.ApplySnapshot(observations, observedAtUtc);
+            Interlocked.Exchange(ref _trafficUp, Math.Max(0, snapshot.UploadTotal));
+            Interlocked.Exchange(ref _trafficDown, Math.Max(0, snapshot.DownloadTotal));
+            _connectionHistory.ApplySnapshot(observations, observedAtUtc);
+        }
     }
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)
     {
         if (previous is null || elapsedSeconds <= 0 || current <= previous.Value)
             return 0;
-        double rate = (current - previous.Value) / elapsedSeconds;
+        double rate = ((double)current - previous.Value) / elapsedSeconds;
         return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
     }
 
     private static ConnectionObservation ToObservation(
         SingBoxConnection connection,
         DateTimeOffset observedAtUtc,
+        DateTimeOffset startedAtUtc,
         long uploadRate,
         long downloadRate)
         => new()
@@ -980,7 +1014,7 @@ public sealed class AppController : IAsyncDisposable
             Download = connection.Download,
             UploadRate = uploadRate,
             DownloadRate = downloadRate,
-            StartedAtUtc = connection.Start ?? observedAtUtc,
+            StartedAtUtc = startedAtUtc,
             LastSeenAtUtc = observedAtUtc,
             Chains = connection.Chains.ToArray(),
             Rule = connection.Rule,
@@ -1019,23 +1053,113 @@ public sealed class AppController : IAsyncDisposable
         return new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
     }
 
+    private void ApplyTrafficRate(SingBoxTrafficEvent traffic, int generation)
+    {
+        lock (_diagnosticsStateGate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+            Interlocked.Exchange(ref _trafficUpRate, Math.Max(0, traffic.Up));
+            Interlocked.Exchange(ref _trafficDownRate, Math.Max(0, traffic.Down));
+        }
+    }
+
+    private void ResetTrafficRate(int generation)
+    {
+        lock (_diagnosticsStateGate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+            Interlocked.Exchange(ref _trafficUpRate, 0);
+            Interlocked.Exchange(ref _trafficDownRate, 0);
+        }
+    }
+
     private void OnSingBoxOutput(SingBoxOutputEvent output)
         => _logs.Append(output.Source, output.Source.Equals("stderr", StringComparison.OrdinalIgnoreCase) ? "error" : "output", output.Line);
 
+    private void SetConnectionMonitorConnected(int generation)
+    {
+        lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+            _connectionMonitorStatus = "已连接";
+            _lastConnectionMonitorError = null;
+        }
+    }
+
+    private void SetTrafficMonitorConnected(int generation)
+    {
+        lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+            _trafficMonitorStatus = "已连接";
+            _lastTrafficMonitorError = null;
+        }
+    }
+
+    private void ReportConnectionMonitorFailure(Exception exception, int generation)
+    {
+        string detail = DescribeDiagnosticsFailure(exception);
+        bool shouldLog;
+        lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+            _connectionMonitorStatus = "重试中：" + detail;
+            shouldLog = !string.Equals(_lastConnectionMonitorError, detail, StringComparison.Ordinal);
+            _lastConnectionMonitorError = detail;
+        }
+
+        if (shouldLog && generation == Volatile.Read(ref _diagnosticsGeneration))
+            _logs.Append("diagnostics", "warn", "连接监控中断：" + detail);
+    }
+
+    private void ReportTrafficMonitorFailure(Exception exception, int generation)
+    {
+        string detail = DescribeDiagnosticsFailure(exception);
+        bool shouldLog;
+        lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
+            _trafficMonitorStatus = "重试中：" + detail;
+            shouldLog = !string.Equals(_lastTrafficMonitorError, detail, StringComparison.Ordinal);
+            _lastTrafficMonitorError = detail;
+        }
+
+        if (shouldLog && generation == Volatile.Read(ref _diagnosticsGeneration))
+            _logs.Append("diagnostics", "warn", "流量监控中断：" + detail);
+    }
+
+    private static string DescribeDiagnosticsFailure(Exception exception)
+    {
+        string detail = exception.Message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (detail.Length == 0)
+            detail = exception.GetType().Name;
+        return detail.Length <= 180 ? detail : detail[..180] + "…";
+    }
+
     private void SetConnectionMonitorStatus(string status, int generation)
     {
-        if (generation != Volatile.Read(ref _diagnosticsGeneration))
-            return;
         lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
             _connectionMonitorStatus = status;
+        }
     }
 
     private void SetTrafficMonitorStatus(string status, int generation)
     {
-        if (generation != Volatile.Read(ref _diagnosticsGeneration))
-            return;
         lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _diagnosticsGeneration))
+                return;
             _trafficMonitorStatus = status;
+        }
     }
 
     private void SetMonitorStatuses(string connectionStatus, string trafficStatus)
@@ -1044,6 +1168,8 @@ public sealed class AppController : IAsyncDisposable
         {
             _connectionMonitorStatus = connectionStatus;
             _trafficMonitorStatus = trafficStatus;
+            _lastConnectionMonitorError = null;
+            _lastTrafficMonitorError = null;
         }
     }
 
@@ -1058,7 +1184,8 @@ public sealed class AppController : IAsyncDisposable
 internal sealed record ConnectionRateSample(
     DateTimeOffset ObservedAtUtc,
     long Upload,
-    long Download);
+    long Download,
+    DateTimeOffset StartedAtUtc);
 
 internal sealed class ControllerPreparationException(string code, string message)
     : InvalidOperationException(message)
