@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using EgressController.Core.Profile;
 using EgressController.Core.Models;
 using EgressController.State.Storage;
+using EgressController.State.SingBox;
 using EgressController.State.Ui;
 
 namespace EgressController.State.Json;
@@ -18,6 +19,7 @@ namespace EgressController.State.Json;
 [JsonSerializable(typeof(EgressApplicationSelection))]
 [JsonSerializable(typeof(UiStateDocument))]
 [JsonSerializable(typeof(Dictionary<string, double>))]
+[JsonSerializable(typeof(SingBoxCorePointer))]
 internal sealed partial class EgressStateJsonContext : JsonSerializerContext;
 
 /// <summary>Cross-cutting accessor so State.Storage can use the generated context without exposing it.</summary>

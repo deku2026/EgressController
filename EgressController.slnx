@@ -24,6 +24,7 @@
     <Project Path="tests/EgressController.Launcher.Tests/EgressController.Launcher.Tests.csproj" />
     <Project Path="tests/EgressController.Proxy.Tests/EgressController.Proxy.Tests.csproj" />
     <Project Path="tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj" />
+    <Project Path="tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj" />
     <Project Path="tests/EgressController.State.Tests/EgressController.State.Tests.csproj" />
     <Project Path="tests/EgressController.Windows.IntegrationTests/EgressController.Windows.IntegrationTests.csproj" />
   </Folder>
