@@ -43,6 +43,7 @@ public sealed record ControllerEndpoint(int Port, string Secret)
 /// </summary>
 public sealed class AppController : IAsyncDisposable
 {
+    private static readonly TimeSpan GraphicalLaunchStartupGrace = TimeSpan.FromSeconds(10);
     private readonly object _gate = new();
     private readonly SemaphoreSlim _configurationGate = new(1, 1);
     private readonly string _dataRoot;
@@ -66,6 +67,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
+    private readonly HashSet<Guid> _sessionsWithObservedWindows = new();
 
     private Socks5RemoteFetcher _remoteFetcher = null!;
     private HttpClient _releaseHttpClient = null!;
@@ -513,7 +515,7 @@ public sealed class AppController : IAsyncDisposable
 
         LaunchSession session = new WindowsLaunchService().StartPlain(target);
         _sessions.Register(session);
-        SetMessage($"已发送启动请求：{target.Name} (启动器 PID {session.RootPid})；网络规则由 sing-box 按 EXE 路径决定。");
+        SetMessage($"已发送启动请求：{target.Name} (PID {session.RootPid})；网络规则由 sing-box 按 EXE 路径决定。");
         return LastMessage;
     }
 
@@ -521,17 +523,33 @@ public sealed class AppController : IAsyncDisposable
     {
         LaunchSession[] sessions = _sessions.All()
             .Where(session => string.Equals(session.TargetId, targetId, StringComparison.Ordinal))
+            .OrderByDescending(session => session.StartedAtUtc)
             .ToArray();
         if (sessions.Length == 0)
             return string.Empty;
-        LaunchSession? live = sessions.FirstOrDefault(IsLiveRoot);
-        if (live is not null)
-            return $"运行中 · PID {live.RootPid}";
 
         LaunchTarget? target = _targets.Get(targetId);
-        uint? ownedPid = target is null ? null : FindLiveTargetProcess(target);
-        if (ownedPid is not null)
-            return $"运行中 · PID {ownedPid.Value}（目标进程）";
+        LaunchSession? liveRoot = sessions.FirstOrDefault(IsLiveRoot);
+        if (target?.Kind == LaunchKind.CliNative && liveRoot is not null)
+            return $"运行中 · PID {liveRoot.RootPid}";
+
+        uint? windowPid = target is null ? null : FindVisibleTargetProcess(target);
+        if (windowPid is not null)
+        {
+            lock (_gate)
+                _sessionsWithObservedWindows.Add(sessions[0].SessionId);
+            return windowPid == liveRoot?.RootPid
+                ? $"运行中 · PID {windowPid.Value}"
+                : $"运行中 · PID {windowPid.Value}（目标窗口）";
+        }
+
+        bool observedWindow;
+        lock (_gate)
+            observedWindow = _sessionsWithObservedWindows.Contains(sessions[0].SessionId);
+        if (liveRoot is not null
+            && !observedWindow
+            && DateTime.UtcNow - sessions[0].StartedAtUtc < GraphicalLaunchStartupGrace)
+            return $"启动中 · PID {liveRoot.RootPid}";
 
         foreach (LaunchSession session in sessions)
             _sessions.MarkRootExited(session.SessionId);
@@ -540,14 +558,18 @@ public sealed class AppController : IAsyncDisposable
 
     private bool IsLiveRoot(LaunchSession session)
     {
+        if (session.RootExited)
+            return false;
         ProcessIdentity? identity = _processIdentity.Resolve(session.RootPid);
         return identity is not null && identity.StartTimeUtc == session.RootStartTimeUtc;
     }
 
-    private uint? FindLiveTargetProcess(LaunchTarget target)
+    private uint? FindVisibleTargetProcess(LaunchTarget target)
     {
-        HashSet<string> executablePaths = target.OwnedExecutables
-            .Append(target.CanonicalExecutable)
+        IEnumerable<string?> statusExecutables = string.IsNullOrWhiteSpace(target.CanonicalExecutable)
+            ? target.OwnedExecutables
+            : new[] { target.CanonicalExecutable };
+        HashSet<string> executablePaths = statusExecutables
             .OfType<string>()
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
@@ -571,8 +593,19 @@ public sealed class AppController : IAsyncDisposable
                 using (process)
                 {
                     ProcessIdentity? identity = _processIdentity.Resolve(checked((uint)process.Id));
-                    if (identity?.ExePathFinal is not null && executablePaths.Contains(identity.ExePathFinal))
-                        return identity.Pid;
+                    if (identity?.ExePathFinal is null || !executablePaths.Contains(identity.ExePathFinal))
+                        continue;
+                    try
+                    {
+                        process.Refresh();
+                        nint window = process.MainWindowHandle;
+                        if (window != 0 && WindowsWindowVisibility.IsVisible(window))
+                            return identity.Pid;
+                    }
+                    catch
+                    {
+                        // An exiting or access-restricted process is not reliable UI evidence.
+                    }
                 }
             }
         }

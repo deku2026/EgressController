@@ -52,4 +52,83 @@ public sealed class TargetProcessStatusTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task Background_process_with_the_same_executable_is_not_reported_as_a_running_app()
+    {
+        string? commandShell = Environment.GetEnvironmentVariable("ComSpec");
+        if (string.IsNullOrWhiteSpace(commandShell) || !File.Exists(commandShell))
+            Assert.Skip("Windows command shell is unavailable.");
+
+        string root = Path.Combine(Path.GetTempPath(), "EgressController.TargetStatusTests", Guid.NewGuid().ToString("N"));
+        string launchRoot = Path.Combine(root, "launch");
+        Directory.CreateDirectory(launchRoot);
+        string launchExecutable = Path.Combine(launchRoot, "egress-background-status-test.exe");
+        File.Copy(commandShell, launchExecutable);
+        System.Diagnostics.Process? background = null;
+        try
+        {
+            await using var controller = new AppController(root);
+            LaunchTarget target = controller.AddExecutable(launchExecutable, "background-status-test");
+            controller.LaunchTarget(target.Id);
+
+            LaunchSession session = Assert.Single(controller.Sessions.All());
+            Kill(session.RootPid);
+            await WaitForExitAsync(session.RootPid);
+
+            background = System.Diagnostics.Process.Start(new ProcessStartInfo
+            {
+                FileName = launchExecutable,
+                Arguments = "/d /c ping.exe -n 30 127.0.0.1 > nul",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            Assert.NotNull(background);
+            Assert.False(background.HasExited);
+
+            Assert.Equal("未运行", controller.GetTargetStatus(target.Id));
+        }
+        finally
+        {
+            if (background is { HasExited: false })
+                background.Kill(entireProcessTree: true);
+            background?.Dispose();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void Kill(uint processId)
+    {
+        try
+        {
+            using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(checked((int)processId));
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (ArgumentException) { }
+    }
+
+    private static async Task WaitForExitAsync(uint processId)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(3);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(checked((int)processId));
+                if (process.HasExited)
+                    return;
+            }
+            catch (ArgumentException)
+            {
+                return;
+            }
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+        throw new TimeoutException($"Process {processId} did not exit.");
+    }
 }

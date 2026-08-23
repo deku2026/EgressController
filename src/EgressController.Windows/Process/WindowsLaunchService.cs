@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using EgressController.Core.Models;
 
@@ -13,6 +12,15 @@ public sealed class WindowsLaunchService
 {
     private readonly WindowsProcessIdentityResolver _identity =
         new(new ExecutablePathCanonicalizer());
+    private readonly Func<string, string?, uint> _activatePackaged;
+
+    public WindowsLaunchService()
+        : this(WindowsPackageActivator.ActivateApplication)
+    {
+    }
+
+    internal WindowsLaunchService(Func<string, string?, uint> activatePackaged)
+        => _activatePackaged = activatePackaged ?? throw new ArgumentNullException(nameof(activatePackaged));
 
     public bool DirectExecutableStarted { get; private set; }
 
@@ -74,23 +82,13 @@ public sealed class WindowsLaunchService
 
     private LaunchSession StartPackaged(LaunchTarget target)
     {
-        if (!string.IsNullOrWhiteSpace(target.CanonicalExecutable)
-            && File.Exists(target.CanonicalExecutable))
-        {
-            try
-            {
-                return StartDirect(target);
-            }
-            catch (Exception exception) when (CanFallbackToPackageActivation(exception))
-            {
-                DirectExecutableStarted = false;
-            }
-        }
-
         if (string.IsNullOrWhiteSpace(target.Aumid))
             throw new InvalidOperationException("Package 缺少 AUMID，无法启动。");
 
-        uint rootPid = WindowsPackageActivator.ActivateApplication(target.Aumid, target.Arguments);
+        // Activating by AUMID returns the app instance that fulfilled the launch contract.
+        // Starting the package EXE directly can return a short-lived delegation process and
+        // leaves status tracking to an unsafe machine-wide same-path guess.
+        uint rootPid = _activatePackaged(target.Aumid, target.Arguments);
         ProcessIdentity identity = WaitForActivatedIdentity(rootPid)
             ?? throw new InvalidOperationException($"Windows 返回了 packaged root PID {rootPid}，但无法读取其进程身份。");
         if (identity.ExePathFinal is null || !IsUnderOwnedRoot(identity.ExePathFinal, target))
@@ -111,12 +109,6 @@ public sealed class WindowsLaunchService
         while (DateTime.UtcNow < deadline);
         return null;
     }
-
-    private static bool CanFallbackToPackageActivation(Exception exception)
-        => exception is Win32Exception
-            or UnauthorizedAccessException
-            or FileNotFoundException
-            or InvalidOperationException;
 
     private static bool IsUnderOwnedRoot(string path, LaunchTarget target)
     {

@@ -41,4 +41,39 @@ public sealed class ProcessLauncherTests
 
         Assert.Throws<InvalidOperationException>(() => new WindowsLaunchService().StartPlain(target));
     }
+
+    [Fact]
+    public void Packaged_target_uses_aumid_activation_even_when_its_executable_exists()
+    {
+        string executable = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Test process path is unavailable.");
+        string ownedRoot = Path.GetDirectoryName(executable)
+            ?? throw new InvalidOperationException("Test process directory is unavailable.");
+        string? activatedAumid = null;
+        string? activatedArguments = null;
+        var launcher = new WindowsLaunchService((aumid, arguments) =>
+        {
+            activatedAumid = aumid;
+            activatedArguments = arguments;
+            return checked((uint)Environment.ProcessId);
+        });
+        var target = new LaunchTarget
+        {
+            Id = "packaged-test",
+            Name = "packaged-test",
+            Kind = LaunchKind.PackagedAumid,
+            Aumid = "Contoso.Sample_123!App",
+            Arguments = "--test-argument",
+            CanonicalExecutable = executable,
+            OwnedRoots = new[] { ownedRoot },
+            OwnedExecutables = new[] { executable },
+        };
+
+        LaunchSession session = launcher.StartPlain(target);
+
+        Assert.Equal(target.Aumid, activatedAumid);
+        Assert.Equal(target.Arguments, activatedArguments);
+        Assert.False(launcher.DirectExecutableStarted);
+        Assert.Equal((uint)Environment.ProcessId, session.RootPid);
+    }
 }
