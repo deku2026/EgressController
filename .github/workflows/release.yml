@@ -4,17 +4,37 @@ on:
   push:
     tags:
       - v*
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional version such as 1.2.3; leave empty to increment the latest patch version
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
     name: Build and publish win-x64 release
+    if: >-
+      ${{
+        github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main')
+      }}
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -23,34 +43,82 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'workflow_dispatch' && 'refs/heads/main' || github.ref }}
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
-      - name: Validate release tag
-        id: version
+      - name: Resolve release target
+        id: target
         shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+(?:\.\d+)?)$') {
-            throw "Release tag '$tag' must look like v1.2.3."
+          git fetch origin main --tags --force
+          if ($env:EVENT_NAME -eq 'workflow_run') {
+            $targetSha = $env:WORKFLOW_RUN_SHA
+            $currentMainSha = (git rev-parse origin/main).Trim()
+            $eligible = $targetSha -eq $currentMainSha
           }
-          "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
+          else {
+            $targetSha = (git rev-parse HEAD).Trim()
+            $eligible = $true
+          }
+
+          "target_sha=$targetSha" >> $env:GITHUB_OUTPUT
+          "eligible=$($eligible.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+          if (-not $eligible) {
+            "Skipping stale main CI commit $targetSha; current main is $currentMainSha." >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Resolve release version
+        id: version
+        if: steps.target.outputs.eligible == 'true'
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          $requestedTag = if ($env:EVENT_NAME -eq 'push') {
+            $env:GITHUB_REF_NAME
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:REQUESTED_VERSION)) {
+            "v$($env:REQUESTED_VERSION.Trim().TrimStart([char[]]'vV'))"
+          }
+          else {
+            ''
+          }
+
+          ./build/Resolve-ReleaseVersion.ps1 `
+            -TargetSha '${{ steps.target.outputs.target_sha }}' `
+            -RequestedTag $requestedTag `
+            -OutputFile $env:GITHUB_OUTPUT
 
       - name: Restore
+        if: steps.target.outputs.eligible == 'true'
         run: dotnet restore EgressController.slnx
 
       - name: Build
+        if: steps.target.outputs.eligible == 'true'
         run: dotnet build EgressController.slnx --configuration Release --no-restore
 
       - name: Test
+        if: steps.target.outputs.eligible == 'true'
         shell: pwsh
         run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
 
+      - name: Test release version resolver
+        if: steps.target.outputs.eligible == 'true'
+        shell: pwsh
+        run: ./build/Test-ReleaseVersion.ps1
+
       - name: Prepare optional signing certificate
         id: signing
+        if: steps.target.outputs.eligible == 'true'
         shell: pwsh
         env:
           SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
@@ -68,6 +136,7 @@ jobs:
           "certificate_path=$certificatePath" >> $env:GITHUB_OUTPUT
 
       - name: Create release artifacts
+        if: steps.target.outputs.eligible == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
@@ -84,6 +153,7 @@ jobs:
         run: Remove-Item -LiteralPath '${{ steps.signing.outputs.certificate_path }}' -Force -ErrorAction SilentlyContinue
 
       - name: Summarize signing mode
+        if: steps.target.outputs.eligible == 'true'
         shell: pwsh
         run: |
           if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
@@ -95,13 +165,55 @@ jobs:
             'Signing secrets were not configured. The NativeAOT ZIP is usable; the MSIX is explicitly marked unsigned.' >> $env:GITHUB_STEP_SUMMARY
           }
 
+      - name: Validate release artifacts
+        if: steps.target.outputs.eligible == 'true'
+        id: artifacts
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath artifacts/package -File | Sort-Object Name)
+          $names = @($files.Name)
+          if ('EgressController-win-x64.zip' -notin $names) { throw 'Portable ZIP is missing.' }
+          if (-not ($names | Where-Object { $_ -match '^EgressController-x64(?:\.unsigned)?\.msix$' })) { throw 'MSIX is missing.' }
+          if ('SHA256SUMS.txt' -notin $names) { throw 'SHA256SUMS.txt is missing.' }
+          "files=$($files.FullName -join '|')" >> $env:GITHUB_OUTPUT
+
+      - name: Revalidate release target
+        if: steps.target.outputs.eligible == 'true'
+        id: publish
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $current = $true
+          if ($env:EVENT_NAME -eq 'workflow_run') {
+            git fetch origin main --force
+            $currentMainSha = (git rev-parse origin/main).Trim()
+            $current = '${{ steps.version.outputs.target_sha }}' -eq $currentMainSha
+          }
+
+          "current=$($current.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $current) {
+            "Skipping release because main advanced to $currentMainSha while artifacts were building." >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Create release tag
+        if: steps.publish.outputs.current == 'true' && steps.version.outputs.create_tag == 'true'
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag --annotate '${{ steps.version.outputs.tag }}' '${{ steps.version.outputs.target_sha }}' --message 'EgressController ${{ steps.version.outputs.tag }}'
+          git push origin 'refs/tags/${{ steps.version.outputs.tag }}'
+
       - name: Create or update GitHub Release
+        if: steps.publish.outputs.current == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $files = Get-ChildItem -LiteralPath artifacts/package -File | Sort-Object Name | ForEach-Object FullName
+          $tag = '${{ steps.version.outputs.tag }}'
+          $files = '${{ steps.artifacts.outputs.files }}'.Split('|', [StringSplitOptions]::RemoveEmptyEntries)
+
           gh release view $tag --json tagName *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag @files --clobber
