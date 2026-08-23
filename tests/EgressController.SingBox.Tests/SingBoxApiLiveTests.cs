@@ -31,6 +31,13 @@ public sealed class SingBoxApiLiveTests
               "log": { "level": "info" },
               "dns": {
                 "servers": [ { "type": "local", "tag": "local" } ],
+                "rules": [
+                  {
+                    "domain": "egresscontroller.test",
+                    "action": "predefined",
+                    "answer": [ "egresscontroller.test. IN A 192.0.2.1" ]
+                  }
+                ],
                 "final": "local"
               },
               "outbounds": [ { "type": "direct", "tag": "direct" } ],
@@ -79,8 +86,9 @@ public sealed class SingBoxApiLiveTests
             SingBoxConnectionsResponse connections = await client.GetConnectionsAsync(timeout.Token);
             Assert.Empty(connections.Connections);
 
-            SingBoxDnsResponse dns = await client.QueryDnsAsync("localhost", "A", timeout.Token);
+            SingBoxDnsResponse dns = await client.QueryDnsAsync("egresscontroller.test", "A", timeout.Token);
             Assert.Equal(0, dns.Status);
+            Assert.Contains("192.0.2.1", dns.Answer.GetRawText(), StringComparison.Ordinal);
             await client.FlushDnsCacheAsync(timeout.Token);
             await client.FlushFakeIpCacheAsync(timeout.Token);
             await client.CloseAllConnectionsAsync(timeout.Token);
