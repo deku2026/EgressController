@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\EgressController.SingBox\EgressController.SingBox.csproj" />
+    <ProjectReference Include="..\..\src\EgressController.Diagnostics\EgressController.Diagnostics.csproj" />
     <ProjectReference Include="..\..\src\EgressController.Rules\EgressController.Rules.csproj" />
     <ProjectReference Include="..\..\src\EgressController.State\EgressController.State.csproj" />
     <ProjectReference Include="..\..\src\EgressController.Transport\EgressController.Transport.csproj" />
