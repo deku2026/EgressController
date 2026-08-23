@@ -39,6 +39,10 @@ jobs:
         shell: pwsh
         run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
 
+      - name: Test release version resolver
+        shell: pwsh
+        run: ./build/Test-ReleaseVersion.ps1
+
       - name: Create NativeAOT and unsigned MSIX artifacts
         shell: pwsh
         run: ./build/Package.ps1 -Version "0.0.${{ github.run_number }}"
