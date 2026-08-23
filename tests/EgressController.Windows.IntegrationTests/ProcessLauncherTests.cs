@@ -8,6 +8,27 @@ namespace EgressController.Windows.IntegrationTests;
 public class ProcessLauncherTests
 {
     [Fact]
+    public void Plain_launch_path_does_not_report_proxy_injection()
+    {
+        string cmdExe = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        var target = new LaunchTarget
+        {
+            Id = "plain-launch-test",
+            Name = "Plain launch test",
+            Kind = LaunchKind.DirectExe,
+            Command = cmdExe,
+            CanonicalExecutable = cmdExe,
+            Arguments = "/d /c exit 0",
+        };
+
+        var launcher = new WindowsLaunchService();
+        LaunchSession session = launcher.StartPlain(target);
+        Assert.False(launcher.ChromiumProxyArgumentsApplied);
+        using var process = System.Diagnostics.Process.GetProcessById(checked((int)session.RootPid));
+        Assert.True(process.WaitForExit(8000));
+    }
+
+    [Fact]
     public void Managed_native_launch_environment_uses_the_local_router_for_all_proxy_names()
     {
         IReadOnlyDictionary<string, string> environment = WindowsLaunchService.LocalProxyEnvironment(18081);

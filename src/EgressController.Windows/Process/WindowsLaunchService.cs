@@ -45,6 +45,14 @@ public sealed class WindowsLaunchService
     }
 
     /// <summary>
+    /// Starts an application with its normal inherited environment. The sing-box data plane is
+    /// transparent, so routing is later decided from the executable path rather than injected
+    /// proxy variables or browser arguments.
+    /// </summary>
+    public LaunchSession StartPlain(LaunchTarget target)
+        => Start(target, environmentOverrides: null);
+
+    /// <summary>
     /// Starts a Managed native target suspended, invokes <paramref name="registerBeforeResume"/>
     /// with its verified root identity, and only then lets application code execute. This removes
     /// the root process's first-connection race. AUMID activation cannot be suspended, so its
@@ -96,6 +104,15 @@ public sealed class WindowsLaunchService
             _ => throw new InvalidOperationException("该目标是未解析的 wrapper/shortcut，不能安全地建立 Managed 会话。"),
         };
     }
+
+    /// <summary>Managed/session tracking variant of <see cref="StartPlain"/>.</summary>
+    public LaunchSession StartPlainManagedTracked(
+        LaunchTarget target,
+        Action<LaunchSession, WindowsProcessJob?> registerBeforeResume)
+        => StartManagedTracked(
+            target,
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            registerBeforeResume);
 
     private LaunchSession StartDirect(
         LaunchTarget target,
