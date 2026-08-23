@@ -1,11 +1,9 @@
 using System.Collections.ObjectModel;
-using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EgressController.Core.Models;
 using EgressController.Diagnostics;
-using EgressController.SingBox.Api.Models;
 using EgressController.Rules.Catalog;
 
 namespace EgressController.App.ViewModels;
@@ -19,6 +17,7 @@ public sealed class MainViewModel : ObservableObject
         Apps = new AppsViewModel(controller);
         Domains = new DomainsViewModel(controller);
         Connections = new ConnectionsViewModel(controller);
+        Traffic = new TrafficViewModel(controller);
         Apps.StartInitialScan();
         Domains.RefreshSearch();
         Overview.Refresh();
@@ -29,6 +28,7 @@ public sealed class MainViewModel : ObservableObject
     public AppsViewModel Apps { get; }
     public DomainsViewModel Domains { get; }
     public ConnectionsViewModel Connections { get; }
+    public TrafficViewModel Traffic { get; }
 
     private string _status = "正在初始化…";
     public string Status
@@ -43,6 +43,7 @@ public sealed class MainViewModel : ObservableObject
         Apps.RefreshStatuses();
         Domains.RefreshStatus();
         Connections.Refresh();
+        Traffic.Refresh();
         Status = string.IsNullOrWhiteSpace(Controller.LastMessage)
             ? $"TUN：{Controller.TunStatus}"
             : Controller.LastMessage;
@@ -738,52 +739,134 @@ public sealed class ManualDomainViewModel
 public sealed class ConnectionsViewModel : ObservableObject
 {
     private readonly AppController _controller;
+    private readonly Dictionary<string, ConnectionRowViewModel> _rowsByKey = new(StringComparer.Ordinal);
     private string _query = string.Empty;
-    private long _dropped;
+    private bool _includeClosed = true;
+    private long _droppedConnections;
+    private long _droppedLogs;
     private int _activeConnections;
     private string _lastUpdated = "等待 sing-box API";
-    private string _dnsHost = string.Empty;
-    private string _dnsResult = string.Empty;
+    private string _actionMessage = string.Empty;
+    private ConnectionRowViewModel? _selectedRow;
 
     public ConnectionsViewModel(AppController controller)
     {
         _controller = controller;
         CloseAllCommand = new AsyncRelayCommand(CloseAllAsync);
+        CloseSelectedCommand = new AsyncRelayCommand(CloseSelectedAsync);
         ClearHistoryCommand = new RelayCommand(ClearHistory);
-        QueryDnsCommand = new AsyncRelayCommand(QueryDnsAsync);
-        FlushDnsCommand = new AsyncRelayCommand(FlushDnsAsync);
+        ToggleHistoryCommand = new RelayCommand(() => IncludeClosed = !IncludeClosed);
     }
 
     public ObservableCollection<ConnectionRowViewModel> Rows { get; } = new();
     public ObservableCollection<CoreLogRowViewModel> CoreLogs { get; } = new();
-    public ConnectionColumnLayout Columns { get; } = new();
-    public long Dropped { get => _dropped; private set => SetProperty(ref _dropped, value); }
+
+    public ConnectionRowViewModel? SelectedRow
+    {
+        get => _selectedRow;
+        set
+        {
+            if (SetProperty(ref _selectedRow, value))
+                OnPropertyChanged(nameof(CanCloseSelected));
+        }
+    }
+
+    public bool CanCloseSelected => SelectedRow?.IsActive == true;
     public int ActiveConnections { get => _activeConnections; private set => SetProperty(ref _activeConnections, value); }
-    public string ActiveSummary => $"活动 {ActiveConnections} · ↑ {_controller.TrafficUp:N0} · ↓ {_controller.TrafficDown:N0}";
     public int Count => Rows.Count;
+    public long DroppedConnections { get => _droppedConnections; private set => SetProperty(ref _droppedConnections, value); }
+    public long DroppedLogs { get => _droppedLogs; private set => SetProperty(ref _droppedLogs, value); }
+    public string MonitorStatus => _controller.DiagnosticsStatus;
+    public string ActiveSummary => $"活动 {ActiveConnections} · ↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
+    public string TotalSummary => $"当前会话 ↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
     public string LastUpdated { get => _lastUpdated; private set => SetProperty(ref _lastUpdated, value); }
-    public string Query { get => _query; set { if (SetProperty(ref _query, value ?? string.Empty)) Refresh(); } }
-    public string DnsHost { get => _dnsHost; set => SetProperty(ref _dnsHost, value ?? string.Empty); }
-    public string DnsResult { get => _dnsResult; private set => SetProperty(ref _dnsResult, value); }
+    public string ActionMessage { get => _actionMessage; private set => SetProperty(ref _actionMessage, value); }
+    public string Query
+    {
+        get => _query;
+        set
+        {
+            if (SetProperty(ref _query, value ?? string.Empty))
+                Refresh();
+        }
+    }
+
+    public bool IncludeClosed
+    {
+        get => _includeClosed;
+        set
+        {
+            if (SetProperty(ref _includeClosed, value))
+            {
+                OnPropertyChanged(nameof(HistoryToggleText));
+                Refresh();
+            }
+        }
+    }
+
+    public string HistoryToggleText => IncludeClosed ? "隐藏已结束" : "显示历史";
     public IAsyncRelayCommand CloseAllCommand { get; }
+    public IAsyncRelayCommand CloseSelectedCommand { get; }
     public RelayCommand ClearHistoryCommand { get; }
-    public IAsyncRelayCommand QueryDnsCommand { get; }
-    public IAsyncRelayCommand FlushDnsCommand { get; }
+    public RelayCommand ToggleHistoryCommand { get; }
 
     public void Refresh()
     {
         IReadOnlyList<ConnectionObservation> active = _controller.ConnectionHistory.ActiveSnapshot();
         IReadOnlyList<ConnectionObservation> closed = _controller.ConnectionHistory.ClosedSnapshot();
         string query = _query.Trim();
-        Rows.Clear();
-        foreach (ConnectionObservation item in active.Reverse().Concat(closed.Reverse()).Take(500).Where(item => Matches(item, query)))
-            Rows.Add(new ConnectionRowViewModel(item, Columns, item.ClosedAtUtc is null));
+        var visible = active
+            .OrderByDescending(item => item.StartedAtUtc)
+            .Select(item => (Item: item, Active: true))
+            .Concat(IncludeClosed
+                ? closed.OrderByDescending(item => item.ClosedAtUtc ?? item.LastSeenAtUtc).Select(item => (Item: item, Active: false))
+                : [])
+            .Where(entry => Matches(entry.Item, query))
+            .Take(500)
+            .ToArray();
+        var desiredKeys = visible.Select(entry => RowKey(entry.Item, entry.Active)).ToHashSet(StringComparer.Ordinal);
+
+        for (int index = 0; index < visible.Length; index++)
+        {
+            (ConnectionObservation item, bool activeRow) = visible[index];
+            string key = RowKey(item, activeRow);
+            if (!_rowsByKey.TryGetValue(key, out ConnectionRowViewModel? row))
+            {
+                row = new ConnectionRowViewModel(item, activeRow);
+                _rowsByKey[key] = row;
+            }
+            else
+            {
+                row.Update(item, activeRow);
+            }
+
+            if (index < Rows.Count && ReferenceEquals(Rows[index], row))
+                continue;
+            int currentIndex = Rows.IndexOf(row);
+            if (currentIndex >= 0)
+                Rows.Move(currentIndex, index);
+            else
+                Rows.Insert(index, row);
+        }
+
+        while (Rows.Count > visible.Length)
+            Rows.RemoveAt(Rows.Count - 1);
+        foreach (string key in _rowsByKey.Keys.Where(key => !desiredKeys.Contains(key)).ToArray())
+            _rowsByKey.Remove(key);
+
+        if (SelectedRow is not null && !Rows.Contains(SelectedRow))
+            SelectedRow = null;
+
         CoreLogs.Clear();
         foreach (CoreLogEntry entry in _controller.Logs.Snapshot().Reverse().Take(500))
             CoreLogs.Add(new CoreLogRowViewModel(entry));
-        Dropped = _controller.ConnectionHistory.DroppedClosed + _controller.Logs.Dropped;
+
         ActiveConnections = active.Count;
+        DroppedConnections = _controller.ConnectionHistory.DroppedClosed;
+        DroppedLogs = _controller.Logs.Dropped;
         OnPropertyChanged(nameof(ActiveSummary));
+        OnPropertyChanged(nameof(TotalSummary));
+        OnPropertyChanged(nameof(MonitorStatus));
         OnPropertyChanged(nameof(Count));
         LastUpdated = DateTime.Now.ToString("HH:mm:ss");
     }
@@ -791,98 +874,181 @@ public sealed class ConnectionsViewModel : ObservableObject
     private async Task CloseAllAsync()
     {
         ControllerOperationResult result = await _controller.CloseAllConnectionsAsync();
-        if (!result.Succeeded)
-            DnsResult = result.Error ?? "关闭连接失败。";
+        ActionMessage = result.Succeeded ? "已请求关闭全部活动连接。" : result.Error ?? "关闭连接失败。";
+        Refresh();
+    }
+
+    private async Task CloseSelectedAsync()
+    {
+        ConnectionRowViewModel? selected = SelectedRow;
+        if (selected is null || !selected.IsActive)
+            return;
+        ControllerOperationResult result = await _controller.CloseConnectionAsync(selected.Id);
+        ActionMessage = result.Succeeded ? "已请求关闭选中连接。" : result.Error ?? "关闭连接失败。";
         Refresh();
     }
 
     private void ClearHistory()
     {
         _controller.ClearConnectionHistory();
+        ActionMessage = "已清空已结束连接；不会影响当前活动连接。";
         Refresh();
     }
 
-    private async Task QueryDnsAsync()
-    {
-        try
-        {
-            SingBoxDnsResponse result = await _controller.QueryDnsAsync(DnsHost);
-            DnsResult = $"Status={result.Status} · Server={result.Server} · Answer={result.Answer.ValueKind}";
-        }
-        catch (Exception exception)
-        {
-            DnsResult = exception.Message;
-        }
-    }
-
-    private async Task FlushDnsAsync()
-    {
-        ControllerOperationResult result = await _controller.FlushDnsCacheAsync();
-        DnsResult = result.Succeeded ? "DNS 缓存已清理。" : result.Error ?? "DNS 缓存清理失败。";
-    }
+    private static string RowKey(ConnectionObservation item, bool active)
+        => active
+            ? "active:" + item.Id
+            : $"closed:{item.Id}:{item.StartedAtUtc.UtcTicks}:{item.ClosedAtUtc?.UtcTicks ?? 0}";
 
     private static bool Matches(ConnectionObservation item, string query)
     {
         if (query.Length == 0)
             return true;
-        string text = string.Join('\n', item.Id, item.ProcessId, item.ProcessPath, item.Host,
-            item.DestinationIp, item.DestinationPort, item.Network, item.Rule, item.RulePayload,
+        string text = string.Join('\n', item.Id, item.ProcessPath, item.Host, item.DestinationIp,
+            item.DestinationPort, item.Network, item.Type, item.DnsMode, item.Rule,
             item.Outbound, string.Join(' ', item.Chains));
         return text.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 }
 
-public sealed class ConnectionColumnLayout : ObservableObject
+public sealed class TrafficViewModel : ObservableObject
 {
-    private GridLength _time = new(82);
-    private GridLength _source = new(300);
-    private GridLength _target = new(1.2, GridUnitType.Star);
-    private GridLength _decision = new(100);
-    private GridLength _reason = new(110);
-    private GridLength _rule = new(1, GridUnitType.Star);
-    private GridLength _status = new(100);
+    private readonly AppController _controller;
+    private string _lastUpdated = "等待 sing-box API";
+    private string _currentRate = "↑ 0 B/s · ↓ 0 B/s";
+    private string _total = "↑ 0 B · ↓ 0 B";
+    private string _active = "0";
 
-    public GridLength Time { get => _time; set => SetProperty(ref _time, value); }
-    public GridLength Source { get => _source; set => SetProperty(ref _source, value); }
-    public GridLength Target { get => _target; set => SetProperty(ref _target, value); }
-    public GridLength Decision { get => _decision; set => SetProperty(ref _decision, value); }
-    public GridLength Reason { get => _reason; set => SetProperty(ref _reason, value); }
-    public GridLength Rule { get => _rule; set => SetProperty(ref _rule, value); }
-    public GridLength Status { get => _status; set => SetProperty(ref _status, value); }
-}
-
-public sealed class ConnectionRowViewModel
-{
-    private readonly ConnectionObservation _item;
-
-    public ConnectionRowViewModel(ConnectionObservation item, ConnectionColumnLayout columns, bool active)
+    public TrafficViewModel(AppController controller)
     {
-        _item = item;
-        Columns = columns;
-        IsActive = active;
+        _controller = controller;
     }
 
-    public ConnectionColumnLayout Columns { get; }
-    public bool IsActive { get; }
-    public string Time => _item.StartedAtUtc.ToLocalTime().ToString("HH:mm:ss");
-    public string Timestamp => _item.StartedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
-    public string Source => _item.ProcessId is uint pid ? $"PID {pid}" : "unknown";
-    public string ProcessName => string.IsNullOrWhiteSpace(_item.ProcessPath) ? "unknown" : Path.GetFileName(_item.ProcessPath);
-    public string Pid => _item.ProcessId?.ToString() ?? "unknown";
-    public string Host => string.IsNullOrWhiteSpace(_item.Host)
-        ? $"{_item.DestinationIp}:{_item.DestinationPort}"
-        : $"{_item.Host}:{_item.DestinationPort}";
-    public string Executable => _item.ProcessPath ?? "—";
-    public string Session => "—";
-    public string Decision => _item.Outbound ?? _item.Chains.LastOrDefault() ?? "unknown";
-    public string Reason => string.IsNullOrWhiteSpace(_item.Rule) ? "默认规则" : _item.Rule;
-    public string Rule => string.IsNullOrWhiteSpace(_item.RulePayload) ? (_item.Rule ?? "—") : _item.RulePayload;
-    public string RuleSet => _item.Rule ?? "—";
-    public string RuleText => _item.RulePayload ?? "—";
-    public string Interface => string.Join(" → ", _item.Chains);
-    public string Status => IsActive ? "活动" : "已关闭";
-    public string Bytes => (_item.Upload + _item.Download).ToString("N0");
-    public string Latency => "—";
+    public string CurrentRate { get => _currentRate; private set => SetProperty(ref _currentRate, value); }
+    public string Total { get => _total; private set => SetProperty(ref _total, value); }
+    public string Active { get => _active; private set => SetProperty(ref _active, value); }
+    public string MonitorStatus => _controller.DiagnosticsStatus;
+    public string LastUpdated { get => _lastUpdated; private set => SetProperty(ref _lastUpdated, value); }
+    public string Note => "流量来自 sing-box Clash API：实时速度读取 /traffic，当前会话总量读取连接快照；两者不是同一个统计口径。";
+
+    public void Refresh()
+    {
+        CurrentRate = $"↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
+        Total = $"↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
+        Active = _controller.ConnectionHistory.ActiveCount.ToString("N0");
+        OnPropertyChanged(nameof(MonitorStatus));
+        LastUpdated = DateTime.Now.ToString("HH:mm:ss");
+    }
+}
+
+public sealed class ConnectionRowViewModel : ObservableObject
+{
+    private ConnectionObservation _item;
+    private bool _isActive;
+
+    public ConnectionRowViewModel(ConnectionObservation item, bool active)
+    {
+        _item = item;
+        _isActive = active;
+    }
+
+    public ConnectionObservation Observation => _item;
+    public string Id => _item.Id;
+    public bool IsActive => _isActive;
+    public string Status => IsActive ? "活动" : "已结束";
+    public string ProcessName => string.IsNullOrWhiteSpace(_item.ProcessPath)
+        ? "未识别进程"
+        : Path.GetFileName(_item.ProcessPath);
+    public string ProcessPath => string.IsNullOrWhiteSpace(_item.ProcessPath) ? "未识别路径" : _item.ProcessPath;
+    public string Target => Endpoint(_item.Host, _item.DestinationIp, _item.DestinationPort);
+    public string SourceEndpoint => Endpoint(string.Empty, _item.SourceIp, _item.SourcePort);
+    public string DestinationEndpoint => Endpoint(string.Empty, _item.DestinationIp, _item.DestinationPort);
+    public string Protocol => string.IsNullOrWhiteSpace(_item.Network) ? "未知" : _item.Network.ToUpperInvariant();
+    public string Type => string.IsNullOrWhiteSpace(_item.Type) ? "未知" : _item.Type;
+    public string Route => _item.Outbound ?? _item.Chains.FirstOrDefault() ?? "未知出口";
+    public string RoutePath => _item.Chains.Count == 0 ? Route : string.Join(" → ", _item.Chains);
+    public string Reason => string.IsNullOrWhiteSpace(_item.Rule) ? "final" : _item.Rule;
+    public string Rule => string.IsNullOrWhiteSpace(_item.Rule) ? "未提供" : _item.Rule;
+    public string DnsMode => string.IsNullOrWhiteSpace(_item.DnsMode) ? "未提供" : _item.DnsMode;
+    public string Traffic => TrafficFormat.Bytes(_item.Upload + _item.Download);
+    public string Speed => TrafficFormat.Rate(_item.UploadRate + _item.DownloadRate);
+    public string Duration => TrafficFormat.Duration(DurationValue());
+    public string StartedAt => _item.StartedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
+    public string ClosedAt => _item.ClosedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz") ?? "仍在活动";
+
+    public void Update(ConnectionObservation item, bool active)
+    {
+        _item = item;
+        bool activeChanged = _isActive != active;
+        _isActive = active;
+        if (activeChanged)
+            OnPropertyChanged(nameof(IsActive));
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(ProcessName));
+        OnPropertyChanged(nameof(ProcessPath));
+        OnPropertyChanged(nameof(Target));
+        OnPropertyChanged(nameof(SourceEndpoint));
+        OnPropertyChanged(nameof(DestinationEndpoint));
+        OnPropertyChanged(nameof(Protocol));
+        OnPropertyChanged(nameof(Type));
+        OnPropertyChanged(nameof(Route));
+        OnPropertyChanged(nameof(RoutePath));
+        OnPropertyChanged(nameof(Reason));
+        OnPropertyChanged(nameof(Rule));
+        OnPropertyChanged(nameof(DnsMode));
+        OnPropertyChanged(nameof(Traffic));
+        OnPropertyChanged(nameof(Speed));
+        OnPropertyChanged(nameof(Duration));
+        OnPropertyChanged(nameof(StartedAt));
+        OnPropertyChanged(nameof(ClosedAt));
+    }
+
+    public void RefreshDuration() => OnPropertyChanged(nameof(Duration));
+
+    private TimeSpan DurationValue()
+    {
+        DateTimeOffset end = _item.ClosedAtUtc ?? DateTimeOffset.UtcNow;
+        return end > _item.StartedAtUtc ? end - _item.StartedAtUtc : TimeSpan.Zero;
+    }
+
+    private static string Endpoint(string? host, string? ip, string? port)
+    {
+        string address = !string.IsNullOrWhiteSpace(host) ? host : ip ?? string.Empty;
+        if (address.Length == 0)
+            return string.IsNullOrWhiteSpace(port) ? "未知目标" : $":{port}";
+        if (address.Contains(':') && !address.StartsWith("[", StringComparison.Ordinal))
+            address = $"[{address}]";
+        return string.IsNullOrWhiteSpace(port) ? address : $"{address}:{port}";
+    }
+}
+
+internal static class TrafficFormat
+{
+    public static string Bytes(long value)
+    {
+        double amount = Math.Max(0, value);
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        int unit = 0;
+        while (amount >= 1024 && unit < units.Length - 1)
+        {
+            amount /= 1024;
+            unit++;
+        }
+        return unit == 0 ? $"{amount:0} {units[unit]}" : $"{amount:0.##} {units[unit]}";
+    }
+
+    public static string Rate(long value) => Bytes(value) + "/s";
+
+    public static string Duration(TimeSpan value)
+    {
+        if (value < TimeSpan.Zero)
+            value = TimeSpan.Zero;
+        if (value.TotalDays >= 1)
+            return $"{(int)value.TotalDays}d {value.Hours:00}:{value.Minutes:00}:{value.Seconds:00}";
+        return value.TotalHours >= 1
+            ? $"{value.Hours:00}:{value.Minutes:00}:{value.Seconds:00}"
+            : $"{value.Minutes:00}:{value.Seconds:00}";
+    }
 }
 
 public sealed class CoreLogRowViewModel(CoreLogEntry entry)

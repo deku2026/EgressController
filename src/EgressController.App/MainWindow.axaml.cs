@@ -53,6 +53,33 @@ public partial class MainWindow : Window
             await _vm.Overview.CommitUpstreamPortAsync();
     }
 
+    private async void OnConnectionDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (_vm?.Connections.SelectedRow is not { } row)
+            return;
+
+        var details = new StackPanel { Spacing = 2 };
+        AddDetail(details, "状态", row.Status);
+        AddDetail(details, "进程", row.ProcessName);
+        AddDetail(details, "进程路径", row.ProcessPath);
+        AddDetail(details, "目标", row.Target);
+        AddDetail(details, "来源端点", row.SourceEndpoint);
+        AddDetail(details, "目标端点", row.DestinationEndpoint);
+        AddDetail(details, "协议", row.Protocol);
+        AddDetail(details, "连接类型", row.Type);
+        AddDetail(details, "出口", row.Route);
+        AddDetail(details, "出口链路", row.RoutePath);
+        AddDetail(details, "匹配规则", row.Reason);
+        AddDetail(details, "DNS 模式", row.DnsMode);
+        AddDetail(details, "流量", row.Traffic);
+        AddDetail(details, "实时速度", row.Speed);
+        AddDetail(details, "持续时间", row.Duration);
+        AddDetail(details, "开始时间", row.StartedAt);
+        AddDetail(details, "结束时间", row.ClosedAt);
+        AddDetail(details, "连接 ID", row.Id);
+        await ShowDialogAsync("连接详情", details, 720, 700);
+    }
+
     private async Task ShowDialogAsync(string title, Control content, double width, double height)
     {
         await _dialogGate.WaitAsync();

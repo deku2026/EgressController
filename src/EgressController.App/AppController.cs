@@ -438,6 +438,23 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
+    public async Task<ControllerOperationResult> CloseConnectionAsync(
+        string connectionId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using SingBoxApiClient api = CreateApiClient();
+            await api.CloseConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
+            SetMessage("已请求 sing-box 关闭选中连接。");
+            return ControllerOperationResult.Success();
+        }
+        catch (Exception exception)
+        {
+            return ControllerOperationResult.Failure("关闭连接失败：" + exception.Message);
+        }
+    }
+
     public void ClearConnectionHistory()
     {
         _connectionHistory.ClearClosed();
