@@ -57,12 +57,10 @@ public sealed class AppController : IAsyncDisposable
     private readonly TcpListenerOwnerResolver _ownerResolver = new();
     private readonly UpstreamSocksProbe _upstreamProbe = new();
     private readonly EgressProfileCompiler _compiler = new();
-    private readonly ElevatedHostLauncher _hostLauncher = new();
-    private readonly LazyElevatedHostClient _lazyHost;
+    private readonly DirectSingBoxProcessClient _directSingBox = new();
     private readonly SingBoxService _singBox;
     private readonly ConnectionHistoryStore _connectionHistory = new();
     private readonly BoundedLogStore _logs = new();
-    private readonly string _pipeName = "EgressController-" + Environment.ProcessId + "-" + Guid.NewGuid().ToString("N");
     private readonly CancellationTokenSource _lifetimeCts = new();
 
     private Socks5RemoteFetcher _remoteFetcher = null!;
@@ -72,8 +70,6 @@ public sealed class AppController : IAsyncDisposable
     private SingBoxCoreManager _coreManager = null!;
     private Task? _diagnosticsTask;
     private CancellationTokenSource? _diagnosticsCts;
-    private ControllerEndpoint? _preparedEndpoint;
-    private ControllerEndpoint? _activeEndpoint;
     private EgressProfileDocument _profile;
     private IReadOnlyList<NetworkAdapterInfo> _adapters = Array.Empty<NetworkAdapterInfo>();
     private string _lastMessage = "就绪。";
@@ -94,8 +90,7 @@ public sealed class AppController : IAsyncDisposable
         LoadCachedCatalog();
         RefreshAdapters();
 
-        _lazyHost = new LazyElevatedHostClient(_hostLauncher, CreateHostOptions);
-        _singBox = new SingBoxService(_lazyHost, _stateStore);
+        _singBox = new SingBoxService(_directSingBox, _stateStore);
         _singBox.Output += OnSingBoxOutput;
     }
 
@@ -703,15 +698,6 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    private ElevatedHostLaunchOptions CreateHostOptions()
-        => new()
-        {
-            HostExecutablePath = LocateElevatedHost(),
-            PipeName = _pipeName,
-            DataRoot = _dataRoot,
-            AllowedSystemCorePath = _profile.Core.Mode == EgressProfileSchema.SystemCore ? _profile.Core.SystemPath : null,
-        };
-
     private void StartDiagnostics(ControllerEndpoint? endpoint)
     {
         StopDiagnostics();
@@ -829,9 +815,7 @@ public sealed class AppController : IAsyncDisposable
         };
 
     private SingBoxApiClient CreateApiClient()
-        => _activeEndpoint is ControllerEndpoint endpoint
-            ? new SingBoxApiClient(endpoint.Uri, endpoint.Secret)
-            : throw new InvalidOperationException("sing-box TUN 尚未运行，诊断 API 不可用。");
+        => throw new InvalidOperationException("当前最小 sing-box 配置未启用 Clash API。");
 
     private void OnSingBoxOutput(SingBoxOutputEvent output)
         => _logs.Append(output.Source, "output", output.Line);
@@ -840,30 +824,6 @@ public sealed class AppController : IAsyncDisposable
     {
         lock (_gate)
             _lastMessage = message;
-    }
-
-    private string LocateElevatedHost()
-    {
-        string? configured = Environment.GetEnvironmentVariable("EGRESS_ELEVATED_HOST");
-        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
-            return Path.GetFullPath(configured);
-
-        string[] candidates =
-        [
-            Path.Combine(AppContext.BaseDirectory, "EgressController.ElevatedHost.exe"),
-            Path.Combine(AppContext.BaseDirectory, "EgressController.ElevatedHost"),
-        ];
-        string? found = candidates.FirstOrDefault(File.Exists);
-        if (found is not null)
-            return found;
-        return candidates[0];
-    }
-
-    private static int GetFreePort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private sealed class ClientWebSocketBundle : IDisposable
@@ -906,108 +866,6 @@ public sealed class AppController : IAsyncDisposable
             Traffic.Dispose();
             Logs.Dispose();
         }
-    }
-}
-
-internal sealed class LazyElevatedHostClient : IElevatedHostClient
-{
-    private readonly object _gate = new();
-    private readonly ElevatedHostLauncher _launcher;
-    private readonly Func<ElevatedHostLaunchOptions> _optionsFactory;
-    private NamedPipeElevatedHostClient? _client;
-    private Action<SingBoxOutputEvent>? _output;
-    private bool _disposed;
-
-    public LazyElevatedHostClient(ElevatedHostLauncher launcher, Func<ElevatedHostLaunchOptions> optionsFactory)
-    {
-        _launcher = launcher;
-        _optionsFactory = optionsFactory;
-    }
-
-    public event Action<SingBoxOutputEvent>? Output
-    {
-        add
-        {
-            lock (_gate)
-            {
-                _output += value;
-                if (_client is not null && value is not null)
-                    _client.Output += value;
-            }
-        }
-        remove
-        {
-            lock (_gate)
-            {
-                _output -= value;
-                if (_client is not null && value is not null)
-                    _client.Output -= value;
-            }
-        }
-    }
-
-    public async Task<ElevatedHostClientStatus> StartAsync(
-        SingBoxRuntimeCandidate candidate,
-        bool restart,
-        CancellationToken cancellationToken = default)
-        => await (await GetClientAsync(cancellationToken).ConfigureAwait(false))
-            .StartAsync(candidate, restart, cancellationToken).ConfigureAwait(false);
-
-    public async Task<ElevatedHostClientStatus> StopAsync(CancellationToken cancellationToken = default)
-    {
-        NamedPipeElevatedHostClient? client = CurrentClient();
-        return client is null
-            ? new ElevatedHostClientStatus(true, "stopped", null, 0, null, null)
-            : await client.StopAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<ElevatedHostClientStatus> GetStatusAsync(CancellationToken cancellationToken = default)
-    {
-        NamedPipeElevatedHostClient? client = CurrentClient();
-        return client is null
-            ? new ElevatedHostClientStatus(true, "stopped", null, 0, null, null)
-            : await client.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        lock (_gate)
-        {
-            if (_disposed)
-                return;
-            _disposed = true;
-        }
-        await _launcher.DisposeAsync().ConfigureAwait(false);
-    }
-
-    private async Task<NamedPipeElevatedHostClient> GetClientAsync(CancellationToken cancellationToken)
-    {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_client is not null)
-                return _client;
-        }
-
-        NamedPipeElevatedHostClient client = await _launcher
-            .GetOrStartAsync(_optionsFactory(), cancellationToken)
-            .ConfigureAwait(false);
-        lock (_gate)
-        {
-            if (_client is null)
-            {
-                _client = client;
-                if (_output is not null)
-                    _client.Output += _output;
-            }
-            return _client;
-        }
-    }
-
-    private NamedPipeElevatedHostClient? CurrentClient()
-    {
-        lock (_gate)
-            return _client;
     }
 }
 
