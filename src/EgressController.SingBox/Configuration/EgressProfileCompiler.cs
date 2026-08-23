@@ -57,6 +57,7 @@ public sealed class EgressProfileCompiler
         string[] applications = NormalizePaths(input.ApplicationExecutablePaths, "application.path");
         var selectedRuleSets = NormalizeRuleSets(profile, input.RuleSets);
         ValidateEnvironment(input.Environment);
+        ValidateControllerEndpoint(input.ControllerPort, input.ControllerSecret);
         string tunName = NormalizeTunName(input.TunInterfaceName);
 
         var rules = new List<SingBoxRouteRuleDocument>
@@ -149,6 +150,14 @@ public sealed class EgressProfileCompiler
                     Format = "binary",
                 }).ToArray(),
                 Final = UpstreamSocksTag,
+            },
+            Experimental = new SingBoxExperimentalDocument
+            {
+                ClashApi = new SingBoxClashApiDocument
+                {
+                    ExternalController = $"{ControllerHost}:{input.ControllerPort}",
+                    Secret = input.ControllerSecret.Trim(),
+                },
             },
         };
 
@@ -252,6 +261,16 @@ public sealed class EgressProfileCompiler
             throw Failure("adapter.id", "网卡稳定 ID 为空。");
         if (environment.Primary.AdapterId == environment.Esim.AdapterId)
             throw Failure("adapter.same", "主网卡和 eSIM 网卡不能相同。");
+    }
+
+    private static void ValidateControllerEndpoint(int port, string secret)
+    {
+        if (port is < 1 or > ushort.MaxValue)
+            throw Failure("controller.port", "Clash API 端口必须是 1 到 65535。");
+        if (string.IsNullOrWhiteSpace(secret))
+            throw Failure("controller.secret", "Clash API secret 不能为空。");
+        if (secret.Length > 512 || secret.Any(char.IsControl))
+            throw Failure("controller.secret", "Clash API secret 长度或字符无效。");
     }
 
     private static void ValidateAdapter(AdapterSelection adapter, string label)

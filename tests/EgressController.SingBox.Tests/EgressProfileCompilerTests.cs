@@ -9,7 +9,7 @@ namespace EgressController.SingBox.Tests;
 public sealed class EgressProfileCompilerTests
 {
     [Fact]
-    public void Default_profile_emits_the_reference_minimal_shape()
+    public void Default_profile_emits_the_reference_data_plane_with_loopback_api()
     {
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input(new EgressProfileDocument())).JsonBytes);
         JsonElement root = json.RootElement;
@@ -17,7 +17,9 @@ public sealed class EgressProfileCompilerTests
         JsonElement inbound = root.GetProperty("inbounds")[0];
         JsonElement route = root.GetProperty("route");
 
-        Assert.False(root.TryGetProperty("experimental", out _));
+        JsonElement clashApi = root.GetProperty("experimental").GetProperty("clash_api");
+        Assert.Equal("127.0.0.1:19090", clashApi.GetProperty("external_controller").GetString());
+        Assert.Equal("0123456789abcdef0123456789abcdef", clashApi.GetProperty("secret").GetString());
         Assert.Equal("dns-clash", dns.GetProperty("servers")[0].GetProperty("tag").GetString());
         Assert.Equal("clash-7890", dns.GetProperty("servers")[0].GetProperty("detour").GetString());
         Assert.Equal("prefer_ipv4", dns.GetProperty("strategy").GetString());
@@ -113,6 +115,19 @@ public sealed class EgressProfileCompilerTests
                 selfPaths: new[] { owner })));
 
         Assert.Equal("upstream.owner.self", exception.Code);
+    }
+
+    [Fact]
+    public void Controller_endpoint_is_required_for_structured_diagnostics()
+    {
+        EgressProfileCompilationException exception = Assert.Throws<EgressProfileCompilationException>(
+            () => new EgressProfileCompiler().Compile(Input(new EgressProfileDocument()) with
+            {
+                ControllerPort = 0,
+                ControllerSecret = string.Empty,
+            }));
+
+        Assert.Equal("controller.port", exception.Code);
     }
 
     [Fact]

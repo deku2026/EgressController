@@ -64,6 +64,8 @@ public sealed class AppController : IAsyncDisposable
     private readonly ConnectionHistoryStore _connectionHistory = new();
     private readonly BoundedLogStore _logs = new();
     private readonly CancellationTokenSource _lifetimeCts = new();
+    private readonly object _diagnosticsStateGate = new();
+    private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
 
     private Socks5RemoteFetcher _remoteFetcher = null!;
     private HttpClient _releaseHttpClient = null!;
@@ -77,6 +79,11 @@ public sealed class AppController : IAsyncDisposable
     private string _lastMessage = "就绪。";
     private long _trafficUp;
     private long _trafficDown;
+    private long _trafficUpRate;
+    private long _trafficDownRate;
+    private string _connectionMonitorStatus = "未启动";
+    private string _trafficMonitorStatus = "未启动";
+    private int _diagnosticsGeneration;
 
     public AppController(string? dataRoot = null)
     {
@@ -121,6 +128,16 @@ public sealed class AppController : IAsyncDisposable
     };
     public long TrafficUp => Interlocked.Read(ref _trafficUp);
     public long TrafficDown => Interlocked.Read(ref _trafficDown);
+    public long TrafficUpRate => Interlocked.Read(ref _trafficUpRate);
+    public long TrafficDownRate => Interlocked.Read(ref _trafficDownRate);
+    public string DiagnosticsStatus
+    {
+        get
+        {
+            lock (_gate)
+                return $"连接：{_connectionMonitorStatus} · 流量：{_trafficMonitorStatus}";
+        }
+    }
 
     public string UpstreamSummary => $"127.0.0.1:{_profile.UpstreamPort} · SOCKS5";
 
@@ -375,6 +392,7 @@ public sealed class AppController : IAsyncDisposable
                 return ControllerOperationResult.Failure(result.ErrorMessage ?? "TUN 启动失败。");
             }
 
+            StartDiagnostics(LoadControllerEndpoint());
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -390,6 +408,7 @@ public sealed class AppController : IAsyncDisposable
         try
         {
             await _singBox.StopAsync(cancellationToken).ConfigureAwait(false);
+            StopDiagnostics();
             SetMessage("sing-box TUN 已停止。");
             return ControllerOperationResult.Success();
         }
@@ -548,6 +567,7 @@ public sealed class AppController : IAsyncDisposable
         string[] applicationPaths = ResolveApplicationPaths(profile);
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
+        ControllerEndpoint endpoint = CreateControllerEndpoint();
 
         string runtimeDirectory = Path.Combine(_dataRoot, "runtime");
         Directory.CreateDirectory(runtimeDirectory);
@@ -560,9 +580,11 @@ public sealed class AppController : IAsyncDisposable
             UpstreamOwnerPaths = ownerPaths,
             SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty],
             RuleSets = ruleSets,
+            ControllerPort = endpoint.Port,
+            ControllerSecret = endpoint.Secret,
         });
         EgressProfileCompiler.WriteNext(configPath, compiled);
-        return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256);
+        return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256, endpoint.Port, endpoint.Secret);
     }
 
     private async Task<IReadOnlyList<SingBoxRuleSetInput>> EnsureRuleSetsAsync(
@@ -681,6 +703,7 @@ public sealed class AppController : IAsyncDisposable
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
+                StartDiagnostics(LoadControllerEndpoint());
                 SetMessage("配置已校验并应用，sing-box 已重启。");
                 return ControllerOperationResult.Success();
             }
@@ -740,21 +763,53 @@ public sealed class AppController : IAsyncDisposable
     {
         StopDiagnostics();
         if (endpoint is null)
+        {
+            SetMonitorStatuses("未启用", "未启用");
             return;
+        }
+
+        int generation = Interlocked.Increment(ref _diagnosticsGeneration);
         _diagnosticsCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         CancellationToken token = _diagnosticsCts.Token;
-        _diagnosticsTask = Task.Run(() => DiagnosticsLoopAsync(endpoint, token), token);
+        SetMonitorStatuses("连接中…", "连接中…");
+        _diagnosticsTask = Task.Run(() => DiagnosticsLoopAsync(endpoint, generation, token), token);
     }
 
     private void StopDiagnostics()
     {
+        Interlocked.Increment(ref _diagnosticsGeneration);
         _diagnosticsCts?.Cancel();
         _diagnosticsCts?.Dispose();
         _diagnosticsCts = null;
         _diagnosticsTask = null;
+        lock (_diagnosticsStateGate)
+            _connectionRateSamples.Clear();
+        _connectionHistory.ApplySnapshot(Array.Empty<ConnectionObservation>());
+        Interlocked.Exchange(ref _trafficUpRate, 0);
+        Interlocked.Exchange(ref _trafficDownRate, 0);
+        SetMonitorStatuses("未运行", "未运行");
     }
 
-    private async Task DiagnosticsLoopAsync(ControllerEndpoint endpoint, CancellationToken cancellationToken)
+    private async Task DiagnosticsLoopAsync(
+        ControllerEndpoint endpoint,
+        int generation,
+        CancellationToken cancellationToken)
+    {
+        Task connections = ConnectionStreamLoopAsync(endpoint, generation, cancellationToken);
+        Task traffic = TrafficStreamLoopAsync(endpoint, generation, cancellationToken);
+        try
+        {
+            await Task.WhenAll(connections, traffic).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task ConnectionStreamLoopAsync(
+        ControllerEndpoint endpoint,
+        int generation,
+        CancellationToken cancellationToken)
     {
         TimeSpan backoff = TimeSpan.FromMilliseconds(250);
         while (!cancellationToken.IsCancellationRequested)
@@ -762,75 +817,136 @@ public sealed class AppController : IAsyncDisposable
             try
             {
                 using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
-                SingBoxConnectionsResponse snapshot = await api.GetConnectionsAsync(cancellationToken).ConfigureAwait(false);
-                ApplyConnectionSnapshot(snapshot);
-                using ClientWebSocketBundle sockets = await ClientWebSocketBundle.ConnectAsync(api, cancellationToken).ConfigureAwait(false);
-                using var socketLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                Task connections = ConsumeConnectionsAsync(sockets.Connections, socketLifetime.Token);
-                Task traffic = ConsumeTrafficAsync(sockets.Traffic, socketLifetime.Token);
-                Task logs = ConsumeLogsAsync(sockets.Logs, socketLifetime.Token);
-                await Task.WhenAny(connections, traffic, logs).ConfigureAwait(false);
-                socketLifetime.Cancel();
-                try { await Task.WhenAll(connections, traffic, logs).ConfigureAwait(false); } catch { }
+                ApplyConnectionSnapshot(await api.GetConnectionsAsync(cancellationToken).ConfigureAwait(false));
+                SetConnectionMonitorStatus("已连接", generation);
+                using ClientWebSocket socket = await api.ConnectConnectionsWebSocketAsync(500, cancellationToken).ConfigureAwait(false);
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
+                    if (message is null)
+                        throw new SingBoxApiException("连接监控 WebSocket 已关闭。");
+                    ApplyConnectionSnapshot(SingBoxApiClient.ParseConnectionsMessage(message));
+                }
                 backoff = TimeSpan.FromMilliseconds(250);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
-            catch (Exception exception)
+            catch
             {
-                _logs.Append("controller", "error", "sing-box API 连接中断：" + exception.Message);
-                await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+                SetConnectionMonitorStatus("重试中…", generation);
+                try
+                {
+                    await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
                 backoff = TimeSpan.FromMilliseconds(Math.Min(backoff.TotalMilliseconds * 2, 5_000));
             }
         }
+        SetConnectionMonitorStatus("已停止", generation);
     }
 
-    private async Task ConsumeConnectionsAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    private async Task TrafficStreamLoopAsync(
+        ControllerEndpoint endpoint,
+        int generation,
+        CancellationToken cancellationToken)
     {
+        TimeSpan backoff = TimeSpan.FromMilliseconds(250);
         while (!cancellationToken.IsCancellationRequested)
         {
-            string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-            if (message is null)
-                return;
-            ApplyConnectionSnapshot(SingBoxApiClient.ParseConnectionsMessage(message));
+            try
+            {
+                using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
+                using ClientWebSocket socket = await api.ConnectTrafficWebSocketAsync(cancellationToken).ConfigureAwait(false);
+                SetTrafficMonitorStatus("已连接", generation);
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
+                    if (message is null)
+                        throw new SingBoxApiException("流量监控 WebSocket 已关闭。");
+                    SingBoxTrafficEvent traffic = SingBoxApiClient.ParseTrafficMessage(message);
+                    Interlocked.Exchange(ref _trafficUpRate, Math.Max(0, traffic.Up));
+                    Interlocked.Exchange(ref _trafficDownRate, Math.Max(0, traffic.Down));
+                }
+                backoff = TimeSpan.FromMilliseconds(250);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch
+            {
+                Interlocked.Exchange(ref _trafficUpRate, 0);
+                Interlocked.Exchange(ref _trafficDownRate, 0);
+                SetTrafficMonitorStatus("重试中…", generation);
+                try
+                {
+                    await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                backoff = TimeSpan.FromMilliseconds(Math.Min(backoff.TotalMilliseconds * 2, 5_000));
+            }
         }
-    }
-
-    private async Task ConsumeTrafficAsync(ClientWebSocket socket, CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-            if (message is null)
-                return;
-            SingBoxTrafficEvent traffic = SingBoxApiClient.ParseTrafficMessage(message);
-            Interlocked.Add(ref _trafficUp, traffic.Up);
-            Interlocked.Add(ref _trafficDown, traffic.Down);
-        }
-    }
-
-    private async Task ConsumeLogsAsync(ClientWebSocket socket, CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-            if (message is null)
-                return;
-            SingBoxLogEvent log = SingBoxApiClient.ParseLogMessage(message);
-            _logs.Append("sing-box", log.Type, log.Payload);
-        }
+        Interlocked.Exchange(ref _trafficUpRate, 0);
+        Interlocked.Exchange(ref _trafficDownRate, 0);
+        SetTrafficMonitorStatus("已停止", generation);
     }
 
     private void ApplyConnectionSnapshot(SingBoxConnectionsResponse snapshot)
     {
-        Interlocked.Exchange(ref _trafficUp, snapshot.UploadTotal);
-        Interlocked.Exchange(ref _trafficDown, snapshot.DownloadTotal);
-        _connectionHistory.ApplySnapshot(snapshot.Connections.Select(ToObservation));
+        ArgumentNullException.ThrowIfNull(snapshot);
+        DateTimeOffset observedAtUtc = DateTimeOffset.UtcNow;
+        var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
+        var currentIds = new HashSet<string>(StringComparer.Ordinal);
+        lock (_diagnosticsStateGate)
+        {
+            foreach (SingBoxConnection connection in snapshot.Connections)
+            {
+                if (string.IsNullOrWhiteSpace(connection.Id))
+                    continue;
+                currentIds.Add(connection.Id);
+                _connectionRateSamples.TryGetValue(connection.Id, out ConnectionRateSample? previous);
+                double elapsedSeconds = previous is null
+                    ? 0
+                    : (observedAtUtc - previous.ObservedAtUtc).TotalSeconds;
+                long uploadRate = CalculateRate(connection.Upload, previous?.Upload, elapsedSeconds);
+                long downloadRate = CalculateRate(connection.Download, previous?.Download, elapsedSeconds);
+                observations.Add(ToObservation(connection, observedAtUtc, uploadRate, downloadRate));
+                _connectionRateSamples[connection.Id] = new ConnectionRateSample(
+                    observedAtUtc,
+                    connection.Upload,
+                    connection.Download);
+            }
+
+            foreach (string id in _connectionRateSamples.Keys.Where(id => !currentIds.Contains(id)).ToArray())
+                _connectionRateSamples.Remove(id);
+        }
+
+        Interlocked.Exchange(ref _trafficUp, Math.Max(0, snapshot.UploadTotal));
+        Interlocked.Exchange(ref _trafficDown, Math.Max(0, snapshot.DownloadTotal));
+        _connectionHistory.ApplySnapshot(observations, observedAtUtc);
     }
 
-    private static ConnectionObservation ToObservation(SingBoxConnection connection)
+    private static long CalculateRate(long current, long? previous, double elapsedSeconds)
+    {
+        if (previous is null || elapsedSeconds <= 0 || current <= previous.Value)
+            return 0;
+        double rate = (current - previous.Value) / elapsedSeconds;
+        return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
+    }
+
+    private static ConnectionObservation ToObservation(
+        SingBoxConnection connection,
+        DateTimeOffset observedAtUtc,
+        long uploadRate,
+        long downloadRate)
         => new()
         {
             Id = connection.Id,
@@ -845,18 +961,74 @@ public sealed class AppController : IAsyncDisposable
             ProcessPath = string.IsNullOrWhiteSpace(connection.Metadata.ProcessPath) ? null : connection.Metadata.ProcessPath,
             Upload = connection.Upload,
             Download = connection.Download,
-            StartedAtUtc = connection.Start ?? DateTimeOffset.UtcNow,
+            UploadRate = uploadRate,
+            DownloadRate = downloadRate,
+            StartedAtUtc = connection.Start ?? observedAtUtc,
+            LastSeenAtUtc = observedAtUtc,
             Chains = connection.Chains.ToArray(),
             Rule = connection.Rule,
             RulePayload = connection.RulePayload,
-            Outbound = connection.Chains.LastOrDefault(),
+            Outbound = connection.Chains.FirstOrDefault(),
         };
 
+    private ControllerEndpoint? LoadControllerEndpoint()
+    {
+        try
+        {
+            SingBoxRuntimePointer? runtime = _stateStore.LoadCurrentRuntime();
+            return runtime is { ControllerPort: >= 1 and <= ushort.MaxValue }
+                && !string.IsNullOrWhiteSpace(runtime.ControllerSecret)
+                ? new ControllerEndpoint(runtime.ControllerPort, runtime.ControllerSecret)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ControllerEndpoint CreateControllerEndpoint()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        return new ControllerEndpoint(port, EgressProfileCompiler.CreateControllerSecret());
+    }
+
     private SingBoxApiClient CreateApiClient()
-        => throw new InvalidOperationException("当前最小 sing-box 配置未启用 Clash API。");
+    {
+        ControllerEndpoint endpoint = LoadControllerEndpoint()
+            ?? throw new InvalidOperationException("当前 sing-box runtime 没有可用的 Clash API 配置。");
+        return new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
+    }
 
     private void OnSingBoxOutput(SingBoxOutputEvent output)
-        => _logs.Append(output.Source, "output", output.Line);
+        => _logs.Append(output.Source, output.Source.Equals("stderr", StringComparison.OrdinalIgnoreCase) ? "error" : "output", output.Line);
+
+    private void SetConnectionMonitorStatus(string status, int generation)
+    {
+        if (generation != Volatile.Read(ref _diagnosticsGeneration))
+            return;
+        lock (_gate)
+            _connectionMonitorStatus = status;
+    }
+
+    private void SetTrafficMonitorStatus(string status, int generation)
+    {
+        if (generation != Volatile.Read(ref _diagnosticsGeneration))
+            return;
+        lock (_gate)
+            _trafficMonitorStatus = status;
+    }
+
+    private void SetMonitorStatuses(string connectionStatus, string trafficStatus)
+    {
+        lock (_gate)
+        {
+            _connectionMonitorStatus = connectionStatus;
+            _trafficMonitorStatus = trafficStatus;
+        }
+    }
 
     private void SetMessage(string message)
     {
@@ -864,48 +1036,12 @@ public sealed class AppController : IAsyncDisposable
             _lastMessage = message;
     }
 
-    private sealed class ClientWebSocketBundle : IDisposable
-    {
-        private ClientWebSocketBundle(ClientWebSocket connections, ClientWebSocket traffic, ClientWebSocket logs)
-        {
-            Connections = connections;
-            Traffic = traffic;
-            Logs = logs;
-        }
-
-        public ClientWebSocket Connections { get; }
-        public ClientWebSocket Traffic { get; }
-        public ClientWebSocket Logs { get; }
-
-        public static async Task<ClientWebSocketBundle> ConnectAsync(SingBoxApiClient api, CancellationToken cancellationToken)
-        {
-            ClientWebSocket? connections = null;
-            ClientWebSocket? traffic = null;
-            ClientWebSocket? logs = null;
-            try
-            {
-                connections = await api.ConnectConnectionsWebSocketAsync(500, cancellationToken).ConfigureAwait(false);
-                traffic = await api.ConnectTrafficWebSocketAsync(cancellationToken).ConfigureAwait(false);
-                logs = await api.ConnectLogsWebSocketAsync("info", cancellationToken).ConfigureAwait(false);
-                return new ClientWebSocketBundle(connections, traffic, logs);
-            }
-            catch
-            {
-                connections?.Dispose();
-                traffic?.Dispose();
-                logs?.Dispose();
-                throw;
-            }
-        }
-
-        public void Dispose()
-        {
-            Connections.Dispose();
-            Traffic.Dispose();
-            Logs.Dispose();
-        }
-    }
 }
+
+internal sealed record ConnectionRateSample(
+    DateTimeOffset ObservedAtUtc,
+    long Upload,
+    long Download);
 
 internal sealed class ControllerPreparationException(string code, string message)
     : InvalidOperationException(message)

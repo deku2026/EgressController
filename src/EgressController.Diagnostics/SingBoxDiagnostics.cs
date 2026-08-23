@@ -16,7 +16,10 @@ public sealed record ConnectionObservation
     public uint? ProcessId { get; init; }
     public long Upload { get; init; }
     public long Download { get; init; }
+    public long UploadRate { get; init; }
+    public long DownloadRate { get; init; }
     public DateTimeOffset StartedAtUtc { get; init; }
+    public DateTimeOffset LastSeenAtUtc { get; init; }
     public IReadOnlyList<string> Chains { get; init; } = [];
     public string? Rule { get; init; }
     public string? RulePayload { get; init; }
