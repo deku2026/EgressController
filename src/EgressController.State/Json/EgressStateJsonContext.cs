@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
-using EgressController.Core.Models;
+using EgressController.Core.Profile;
 using EgressController.State.Storage;
+using EgressController.State.SingBox;
+using EgressController.State.Ui;
 
 namespace EgressController.State.Json;
 
@@ -9,8 +11,14 @@ namespace EgressController.State.Json;
 /// serialization reflection-free and AOT-safe. Add new documents here as they are introduced.
 /// </summary>
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
-[JsonSerializable(typeof(ProxyStateRecord))]
-[JsonSerializable(typeof(SystemProxyState))]
+[JsonSerializable(typeof(EgressProfileDocument))]
+[JsonSerializable(typeof(EgressCoreSelection))]
+[JsonSerializable(typeof(EgressApplicationSelection))]
+[JsonSerializable(typeof(UiStateDocument))]
+[JsonSerializable(typeof(Dictionary<string, double>))]
+[JsonSerializable(typeof(SingBoxCorePointer))]
+[JsonSerializable(typeof(SingBoxRuntimePointer))]
+[JsonSerializable(typeof(SingBoxPendingApply))]
 internal sealed partial class EgressStateJsonContext : JsonSerializerContext;
 
 /// <summary>Cross-cutting accessor so State.Storage can use the generated context without exposing it.</summary>

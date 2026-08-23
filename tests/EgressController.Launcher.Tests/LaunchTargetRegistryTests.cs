@@ -6,7 +6,7 @@ namespace EgressController.Launcher.Tests;
 public class LaunchTargetRegistryTests
 {
     private static LaunchTarget Target(LaunchKind kind, string id, string? command, string? canonical = null,
-        string? pkgFamily = null, string? aumid = null, string? args = null, bool managed = true)
+        string? pkgFamily = null, string? aumid = null, string? args = null, bool selected = true)
         => new()
         {
             Id = id,
@@ -17,7 +17,7 @@ public class LaunchTargetRegistryTests
             PackageFamily = pkgFamily,
             Aumid = aumid,
             Arguments = args,
-            Managed = managed,
+            EsimSelected = selected,
         };
 
     [Fact]
@@ -61,8 +61,8 @@ public class LaunchTargetRegistryTests
         var reg = new LaunchTargetRegistry();
         string exe = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
 
-        // Same key 'exe:<canonical>'; the Managed entry is higher quality and replaces the other.
-        var low = Target(LaunchKind.DirectExe, "c1", "chrome.exe", canonical: exe, managed: false);
+        // Same key 'exe:<canonical>'; the selected entry is higher quality and replaces the other.
+        var low = Target(LaunchKind.DirectExe, "c1", "chrome.exe", canonical: exe, selected: false);
         var high = Target(LaunchKind.DirectExe, "c2", "chrome.exe", canonical: exe);
 
         Assert.True(reg.Add(low));

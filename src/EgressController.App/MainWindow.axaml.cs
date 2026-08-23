@@ -1,8 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using EgressController.App.ViewModels;
 
@@ -13,7 +13,6 @@ public partial class MainWindow : Window
     private MainViewModel? _vm;
     private DispatcherTimer? _timer;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
-    private bool _esimWarningOpen;
 
     public MainWindow()
     {
@@ -39,104 +38,46 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void OnImportRulesDirectoryClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void OnUpstreamPortLostFocus(object? sender, RoutedEventArgs e)
     {
-        if (_vm is null)
-            return;
-
-        IReadOnlyList<IStorageFolder> folders = await StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions
-            {
-                Title = "选择 meta-rules-dat 根目录或 geo\\geosite 目录",
-                AllowMultiple = false,
-            });
-        IStorageFolder? folder = folders.FirstOrDefault();
-        string? path = folder?.TryGetLocalPath();
-        if (!string.IsNullOrWhiteSpace(path))
-            _vm.Domains.ImportLocalDirectory(path);
+        if (_vm is not null)
+            await _vm.Overview.CommitUpstreamPortAsync();
     }
 
-    private async void OnConnectionRowDoubleTapped(object? sender, TappedEventArgs e)
+    private async void OnUpstreamPortKeyDown(object? sender, KeyEventArgs e)
     {
-        if (sender is not Control { DataContext: ConnectionRowViewModel row })
+        if (e.Key != Key.Enter)
             return;
-
         e.Handled = true;
-        var details = new StackPanel { Spacing = 8 };
-        AddDetail(details, "时间", row.Timestamp);
-        AddDetail(details, "进程", row.ProcessName);
-        AddDetail(details, "PID", row.Pid);
-        AddDetail(details, "实际 EXE", row.Executable);
-        AddDetail(details, "Managed Session", row.Session);
-        AddDetail(details, "目标", row.Host);
-        AddDetail(details, "决策", row.Decision);
-        AddDetail(details, "原因", row.Reason);
-        AddDetail(details, "规则集", row.RuleSet);
-        AddDetail(details, "命中规则", row.RuleText);
-        AddDetail(details, "出口 / 接口", row.Interface);
+        if (_vm is not null)
+            await _vm.Overview.CommitUpstreamPortAsync();
+    }
+
+    private async void OnConnectionDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (_vm?.Connections.SelectedRow is not { } row)
+            return;
+
+        var details = new StackPanel { Spacing = 2 };
         AddDetail(details, "状态", row.Status);
-        AddDetail(details, "字节", row.Bytes);
-        AddDetail(details, "延迟", row.Latency);
-
-        try { await ShowDialogAsync("连接详情", details, width: 720, height: 650); }
-        catch
-        {
-            // The owner may be closing while a double-click dialog is being created.
-        }
-    }
-
-    private void OnConnectionColumnDragCompleted(object? sender, VectorEventArgs e)
-    {
-        if (_vm is null || ConnectionHeaderGrid.ColumnDefinitions.Count < 13)
-            return;
-
-        ConnectionColumnLayout columns = _vm.Connections.Columns;
-        columns.Time = ConnectionHeaderGrid.ColumnDefinitions[0].Width;
-        columns.Source = ConnectionHeaderGrid.ColumnDefinitions[2].Width;
-        columns.Target = ConnectionHeaderGrid.ColumnDefinitions[4].Width;
-        columns.Decision = ConnectionHeaderGrid.ColumnDefinitions[6].Width;
-        columns.Reason = ConnectionHeaderGrid.ColumnDefinitions[8].Width;
-        columns.Rule = ConnectionHeaderGrid.ColumnDefinitions[10].Width;
-        columns.Status = ConnectionHeaderGrid.ColumnDefinitions[12].Width;
-    }
-
-    internal async Task ShowEsimDisconnectedWarningAsync(EsimConnectivityChangedEventArgs args)
-    {
-        if (_esimWarningOpen)
-            return;
-
-        _esimWarningOpen = true;
-        try
-        {
-            var content = new StackPanel { Spacing = 12 };
-            content.Children.Add(new TextBlock
-            {
-                Text = "⚠  eSIM 已断开",
-                FontSize = 22,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = Brushes.DarkOrange,
-            });
-            content.Children.Add(new TextBlock
-            {
-                Text = $"检测到网卡“{args.AdapterName}”离线。\n"
-                    + $"已先关闭 {args.ClosedConnections} 个活动连接，现在拒绝所有新连接，不会回落到上游或普通直连。\n"
-                    + "eSIM 恢复在线后，拒绝状态会自动解除。",
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 14,
-            });
-            content.Children.Add(new TextBlock
-            {
-                Text = "检测时间：" + args.DetectedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
-                Foreground = Brushes.Gray,
-                FontSize = 12,
-            });
-
-            await ShowDialogAsync("eSIM 断线警告", content, width: 560, height: 300);
-        }
-        finally
-        {
-            _esimWarningOpen = false;
-        }
+        AddDetail(details, "进程", row.ProcessName);
+        AddDetail(details, "进程路径", row.ProcessPath);
+        AddDetail(details, "目标", row.Target);
+        AddDetail(details, "来源端点", row.SourceEndpoint);
+        AddDetail(details, "目标端点", row.DestinationEndpoint);
+        AddDetail(details, "协议", row.Protocol);
+        AddDetail(details, "连接类型", row.Type);
+        AddDetail(details, "出口", row.Route);
+        AddDetail(details, "出口链路", row.RoutePath);
+        AddDetail(details, "匹配规则", row.Reason);
+        AddDetail(details, "DNS 模式", row.DnsMode);
+        AddDetail(details, "流量", row.Traffic);
+        AddDetail(details, "实时速度", row.Speed);
+        AddDetail(details, "持续时间", row.Duration);
+        AddDetail(details, "开始时间", row.StartedAt);
+        AddDetail(details, "结束时间", row.ClosedAt);
+        AddDetail(details, "连接 ID", row.Id);
+        await ShowDialogAsync("连接详情", details, 720, 700);
     }
 
     private async Task ShowDialogAsync(string title, Control content, double width, double height)

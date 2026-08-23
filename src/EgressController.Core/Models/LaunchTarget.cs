@@ -39,8 +39,8 @@ public sealed class LaunchTarget
 
     public IReadOnlyList<string> OwnedRoots { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> OwnedExecutables { get; init; } = Array.Empty<string>();
-    /// <summary>User-selected launch/routing toggle. Newly discovered targets start unchecked.</summary>
-    public bool Managed { get; set; }
+    /// <summary>User-selected eSIM route toggle. Newly discovered targets start unchecked.</summary>
+    public bool EsimSelected { get; set; }
 
     /// <summary>Optional local icon path; the UI falls back to a kind-specific glyph.</summary>
     public string? IconPath { get; init; }
@@ -60,6 +60,24 @@ public sealed class LaunchTarget
     };
 
     public bool ResolutionUnsupported { get; init; }
+
+    /// <summary>
+    /// Whether the current discovery result contains at least one concrete executable path that
+    /// can be used by the sing-box process_path compiler. This is deliberately independent from
+    /// launchability: a packaged or wrapper entry may be routable after discovery even when the
+    /// controller cannot safely start it.
+    /// </summary>
+    public bool CanRoute
+        => OwnedExecutables.Count > 0
+            || (!string.IsNullOrWhiteSpace(CanonicalExecutable)
+                && Path.GetExtension(CanonicalExecutable).Equals(".exe", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Whether the launch service has a supported way to start this target.</summary>
+    public bool CanLaunch
+        => !ResolutionUnsupported
+            && (Kind is LaunchKind.DirectExe or LaunchKind.CliNative
+                ? !string.IsNullOrWhiteSpace(CanonicalExecutable ?? Command)
+                : Kind == LaunchKind.PackagedAumid && !string.IsNullOrWhiteSpace(Aumid));
 
     private static string Prefix(string prefix, string? value, string? fallback)
         => string.IsNullOrWhiteSpace(value) ? prefix + (fallback ?? "") : prefix + value;

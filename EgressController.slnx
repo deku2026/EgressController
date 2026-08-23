@@ -4,34 +4,30 @@
     <Platform Name="x64" />
   </Configurations>
   <Folder Name="/probes/">
-    <Project Path="probes/EgressController.Probe.ConnectionPolicy/EgressController.Probe.ConnectionPolicy.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/EgressController.App/EgressController.App.csproj" />
     <Project Path="src/EgressController.Core/EgressController.Core.csproj" />
     <Project Path="src/EgressController.Diagnostics/EgressController.Diagnostics.csproj" />
+    <Project Path="src/EgressController.ElevatedHost/EgressController.ElevatedHost.csproj" />
     <Project Path="src/EgressController.Launcher/EgressController.Launcher.csproj" />
-    <Project Path="src/EgressController.Proxy/EgressController.Proxy.csproj" />
     <Project Path="src/EgressController.Rules/EgressController.Rules.csproj" />
+    <Project Path="src/EgressController.SingBox/EgressController.SingBox.csproj" />
     <Project Path="src/EgressController.State/EgressController.State.csproj" />
     <Project Path="src/EgressController.Transport/EgressController.Transport.csproj" />
     <Project Path="src/EgressController.Windows/EgressController.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EgressController.Core.Tests/EgressController.Core.Tests.csproj" />
+    <Project Path="tests/EgressController.ElevatedHost.Tests/EgressController.ElevatedHost.Tests.csproj" />
     <Project Path="tests/EgressController.Launcher.Tests/EgressController.Launcher.Tests.csproj" />
-    <Project Path="tests/EgressController.Proxy.Tests/EgressController.Proxy.Tests.csproj" />
     <Project Path="tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj" />
+    <Project Path="tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj" />
     <Project Path="tests/EgressController.State.Tests/EgressController.State.Tests.csproj" />
     <Project Path="tests/EgressController.Windows.IntegrationTests/EgressController.Windows.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/EgressController.AotSmoke/EgressController.AotSmoke.csproj" />
-    <Project Path="tools/EgressController.EchoServer/EgressController.EchoServer.csproj" />
-    <Project Path="tools/EgressController.FakeUpstream/EgressController.FakeUpstream.csproj" />
-    <Project Path="tools/EgressController.NetProbe/EgressController.NetProbe.csproj" />
-    <Project Path="tools/EgressController.SystemProxyProbe/EgressController.SystemProxyProbe.csproj" />
-    <Project Path="tools/EgressController.TestGuard/EgressController.TestGuard.csproj" />
     <Project Path="tools/TestApp.Helper/TestApp.Helper.csproj" />
     <Project Path="tools/TestApp.Parent/TestApp.Parent.csproj" />
     <Project Path="tools/TestCliShim/TestCliShim.csproj" />

@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\EgressController.Core\EgressController.Core.csproj" />
+    <ProjectReference Include="..\..\src\EgressController.SingBox\EgressController.SingBox.csproj" />
   </ItemGroup>
 
 </Project>

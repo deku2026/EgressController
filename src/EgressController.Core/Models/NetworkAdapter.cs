@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 
 namespace EgressController.Core.Models;
 
@@ -35,4 +36,66 @@ public sealed class NetworkAdapterInfo
     public required IReadOnlyList<IPAddress> Gateways { get; init; }
 
     public required IReadOnlyList<IPAddress> DnsServers { get; init; }
+
+    /// <summary>Windows IF_TYPE value. It is runtime metadata, never persisted in Profile.</summary>
+    public uint InterfaceType { get; init; }
+
+    public AdapterAddressState AddressState
+    {
+        get
+        {
+            if (!IsUp)
+                return AdapterAddressState.Offline;
+
+            bool hasV4 = GetUsableAddresses(AddressFamily.InterNetwork).Count > 0;
+            bool hasV6 = GetUsableAddresses(AddressFamily.InterNetworkV6).Count > 0;
+            return (hasV4, hasV6) switch
+            {
+                (true, true) => AdapterAddressState.DualStack,
+                (true, false) => AdapterAddressState.Ipv4Only,
+                (false, true) => AdapterAddressState.Ipv6Only,
+                _ => AdapterAddressState.NoAddress,
+            };
+        }
+    }
+
+    public IPAddress? Ipv4BindAddress
+        => GetUsableAddresses(AddressFamily.InterNetwork).FirstOrDefault();
+
+    public IPAddress? Ipv6BindAddress
+        => GetUsableAddresses(AddressFamily.InterNetworkV6).FirstOrDefault();
+
+    public IReadOnlyList<IPAddress> GetUsableAddresses(AddressFamily family)
+        => Addresses
+            .Where(address => address.AddressFamily == family && IsUsableUnicast(address))
+            .Distinct()
+            .OrderBy(address => address.ToString(), StringComparer.Ordinal)
+            .ToArray();
+
+    private static bool IsUsableUnicast(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)
+            || address.IsIPv4MappedToIPv6 || address.GetAddressBytes().All(b => b == 0))
+            return false;
+
+        byte[] bytes = address.GetAddressBytes();
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            // 169.254/16 is link-local and cannot be used as a stable Internet source.
+            return !(bytes[0] == 169 && bytes[1] == 254);
+        }
+
+        // fe80::/10 is IPv6 link-local. ULA is retained because it can be the valid source for
+        // a carrier/private eSIM route, while multicast/unspecified addresses are excluded above.
+        return !(bytes[0] == 0xff || (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80));
+    }
+}
+
+public enum AdapterAddressState
+{
+    Offline = 0,
+    NoAddress = 1,
+    Ipv4Only = 2,
+    Ipv6Only = 3,
+    DualStack = 4,
 }

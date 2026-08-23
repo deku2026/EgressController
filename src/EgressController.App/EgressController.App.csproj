@@ -32,12 +32,12 @@
   <ItemGroup>
     <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
     <ProjectReference Include="..\EgressController.Transport\EgressController.Transport.csproj" />
-    <ProjectReference Include="..\EgressController.Proxy\EgressController.Proxy.csproj" />
     <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
     <ProjectReference Include="..\EgressController.Rules\EgressController.Rules.csproj" />
     <ProjectReference Include="..\EgressController.Launcher\EgressController.Launcher.csproj" />
     <ProjectReference Include="..\EgressController.Diagnostics\EgressController.Diagnostics.csproj" />
     <ProjectReference Include="..\EgressController.State\EgressController.State.csproj" />
+    <ProjectReference Include="..\EgressController.SingBox\EgressController.SingBox.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -9,7 +9,7 @@ namespace EgressController.App;
 
 public partial class App : Application
 {
-    public RouterHost Host { get; private set; } = new();
+    public AppController Controller { get; } = new();
     internal static SingleInstanceGuard? InstanceGuard { get; set; }
 
     private TrayIcon? _tray;
@@ -23,27 +23,16 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var window = new MainWindow { DataContext = new MainViewModel(Host) };
+            var window = new MainWindow { DataContext = new MainViewModel(Controller) };
             desktop.MainWindow = window;
-            EventHandler<EsimConnectivityChangedEventArgs> connectivityHandler = (_, args) =>
-            {
-                if (!args.IsOnline)
-                    Dispatcher.UIThread.Post(() => _ = ShowEsimWarningAsync(window, args));
-            };
-            Host.EsimConnectivityChanged += connectivityHandler;
-
-            // Subscribe to fail-closed alerts before the background start can observe an
-            // initially disconnected eSIM.
-            System.Threading.Tasks.Task.Run(Host.Start);
             InstanceGuard?.StartActivationLoop(() => Dispatcher.UIThread.Post(() => ShowWindow(window)));
             CreateTray(desktop, window);
             desktop.Exit += (_, _) =>
             {
-                Host.EsimConnectivityChanged -= connectivityHandler;
                 _trayTimer?.Stop();
                 _tray?.Dispose();
                 _trayIcons?.Clear();
-                Host.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                Controller.DisposeAsync().AsTask().GetAwaiter().GetResult();
             };
         }
 
@@ -55,12 +44,12 @@ public partial class App : Application
         var menu = new NativeMenu();
         var open = new NativeMenuItem("打开 EgressController");
         open.Click += (_, _) => ShowWindow(window);
-        var stop = new NativeMenuItem("停止路由并恢复代理");
-        stop.Click += (_, _) => Host.StopRouting();
+        var toggle = new NativeMenuItem("启动/停止 TUN");
+        toggle.Click += (_, _) => _ = Controller.ToggleTunAsync();
         var exit = new NativeMenuItem("退出");
         exit.Click += (_, _) => desktop.Shutdown();
         menu.Items.Add(open);
-        menu.Items.Add(stop);
+        menu.Items.Add(toggle);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exit);
 
@@ -70,7 +59,7 @@ public partial class App : Application
         {
             Icon = new WindowIcon(iconStream),
             Menu = menu,
-            ToolTipText = "EgressController · 启动中",
+            ToolTipText = "EgressController · TUN 已停止",
             IsVisible = true,
         };
         _trayIcons = new TrayIcons { _tray };
@@ -80,7 +69,7 @@ public partial class App : Application
         _trayTimer.Tick += (_, _) =>
         {
             if (_tray is not null)
-                _tray.ToolTipText = "EgressController · " + Host.SystemProxySummary;
+                _tray.ToolTipText = "EgressController · TUN " + Controller.TunStatus;
         };
         _trayTimer.Start();
     }
@@ -90,21 +79,5 @@ public partial class App : Application
         window.WindowState = WindowState.Normal;
         window.Show();
         window.Activate();
-    }
-
-    private static async Task ShowEsimWarningAsync(
-        MainWindow window,
-        EsimConnectivityChangedEventArgs args)
-    {
-        try
-        {
-            ShowWindow(window);
-            await window.ShowEsimDisconnectedWarningAsync(args);
-        }
-        catch
-        {
-            // The fail-closed gate is owned by RouterHost and remains active even if the window
-            // is closing while the notification is being displayed.
-        }
     }
 }

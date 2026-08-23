@@ -7,11 +7,4 @@ public class SmokeTests
     public void True_is_true()
         => Assert.True(true);
 
-    [Fact]
-    public void Egress_enum_has_exactly_two_egresses()
-    {
-        Assert.Equal(2, Enum.GetNames<Core.Routing.Egress>().Length);
-        Assert.True(Enum.IsDefined(Core.Routing.Egress.Esim));
-        Assert.True(Enum.IsDefined(Core.Routing.Egress.UpstreamProxy));
-    }
 }
