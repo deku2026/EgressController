@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
+    <!-- Build/restore the UAC boundary host with the UI, but keep its assembly out of the UI graph. -->
+    <ProjectReference Include="..\EgressController.ElevatedHost\EgressController.ElevatedHost.csproj"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\EgressController.Transport\EgressController.Transport.csproj" />
     <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
     <ProjectReference Include="..\EgressController.Rules\EgressController.Rules.csproj" />
@@ -39,6 +42,41 @@
     <ProjectReference Include="..\EgressController.State\EgressController.State.csproj" />
     <ProjectReference Include="..\EgressController.SingBox\EgressController.SingBox.csproj" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <ElevatedHostProjectPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\EgressController.ElevatedHost\EgressController.ElevatedHost.csproj'))</ElevatedHostProjectPath>
+    <ElevatedHostBuildDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\EgressController.ElevatedHost\bin\$(Configuration)\$(TargetFramework)'))</ElevatedHostBuildDirectory>
+    <ElevatedHostBuildDirectory Condition="'$(RuntimeIdentifier)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\EgressController.ElevatedHost\bin\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)'))</ElevatedHostBuildDirectory>
+    <ElevatedHostPublishDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\EgressController.ElevatedHost\bin\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\publish'))</ElevatedHostPublishDirectory>
+  </PropertyGroup>
+
+  <Target Name="CopyElevatedHostAfterBuild"
+          AfterTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(IsPublishing)' != 'true' and '$(PublishAot)' != 'true' and '$(RuntimeIdentifier)' == ''">
+    <Copy SourceFiles="$(ElevatedHostBuildDirectory)\EgressController.ElevatedHost.exe"
+          DestinationFolder="$(TargetDir)"
+          SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(TargetDir)EgressController.ElevatedHost.exe')"
+           Text="EgressController.ElevatedHost.exe was not produced beside the App build output." />
+  </Target>
+
+  <Target Name="PublishElevatedHost"
+          BeforeTargets="Publish"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(RuntimeIdentifier)' != ''">
+    <MSBuild Projects="$(ElevatedHostProjectPath)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);PublishAot=$(PublishAot);SelfContained=$(SelfContained);PublishDir=$(ElevatedHostPublishDirectory)\" />
+  </Target>
+
+  <Target Name="CopyElevatedHostAfterPublish"
+          AfterTargets="Publish"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(RuntimeIdentifier)' != ''">
+    <Copy SourceFiles="$(ElevatedHostPublishDirectory)\EgressController.ElevatedHost.exe"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(PublishDir)EgressController.ElevatedHost.exe')"
+           Text="EgressController.ElevatedHost.exe was not included in the App publish output." />
+  </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="EgressController.Windows.IntegrationTests" />

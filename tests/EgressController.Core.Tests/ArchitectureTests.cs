@@ -138,6 +138,7 @@ public class ArchitectureTests
                 XDocument doc = XDocument.Load(path);
                 XNamespace msbuild = "http://schemas.microsoft.com/developer/msbuild/2003";
                 var references = doc.Descendants(msbuild + "ProjectReference")
+                    .Where(item => !string.Equals((string?)item.Attribute("ReferenceOutputAssembly"), "false", StringComparison.OrdinalIgnoreCase))
                     .Select(item => (string?)item.Attribute("Include"))
                     .Where(value => value is not null)
                     .Select(value => Path.GetFileNameWithoutExtension(Path.GetFileName(Path.GetFullPath(value!, root))))

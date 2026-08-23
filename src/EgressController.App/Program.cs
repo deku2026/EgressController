@@ -20,8 +20,5 @@ class Program
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
-#if DEBUG
-            .WithDeveloperTools()
-#endif
             .LogToTrace();
 }
