@@ -93,11 +93,44 @@ public sealed class TargetProcessStatusTests
         }
         finally
         {
-            if (background is { HasExited: false })
-                background.Kill(entireProcessTree: true);
-            background?.Dispose();
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
+            await StopAsync(background);
+            await DeleteDirectoryWithRetryAsync(root);
+        }
+    }
+
+    private static async Task StopAsync(System.Diagnostics.Process? process)
+    {
+        if (process is null)
+            return;
+
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (InvalidOperationException) { }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+
+    private static async Task DeleteDirectoryWithRetryAsync(string path)
+    {
+        for (int attempt = 1; attempt <= 10; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                    Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (
+                attempt < 10 && exception is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100 * attempt), CancellationToken.None);
+            }
         }
     }
 
