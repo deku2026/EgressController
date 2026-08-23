@@ -878,7 +878,7 @@ public sealed class ConnectionsViewModel : ObservableObject
         OnPropertyChanged(nameof(TotalSummary));
         OnPropertyChanged(nameof(MonitorStatus));
         OnPropertyChanged(nameof(Count));
-        LastUpdated = DateTime.Now.ToString("HH:mm:ss");
+        LastUpdated = TrafficFormat.UpdatedAt(_controller.ConnectionsUpdatedAtUtc);
     }
 
     private async Task CloseAllAsync()
@@ -947,7 +947,7 @@ public sealed class TrafficViewModel : ObservableObject
         Total = $"↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
         Active = _controller.ConnectionHistory.ActiveCount.ToString("N0");
         OnPropertyChanged(nameof(MonitorStatus));
-        LastUpdated = DateTime.Now.ToString("HH:mm:ss");
+        LastUpdated = TrafficFormat.UpdatedAt(_controller.TrafficUpdatedAtUtc);
     }
 }
 
@@ -980,8 +980,8 @@ public sealed class ConnectionRowViewModel : ObservableObject
     public string Reason => string.IsNullOrWhiteSpace(_item.Rule) ? "final" : _item.Rule;
     public string Rule => string.IsNullOrWhiteSpace(_item.Rule) ? "未提供" : _item.Rule;
     public string DnsMode => string.IsNullOrWhiteSpace(_item.DnsMode) ? "未提供" : _item.DnsMode;
-    public string Traffic => TrafficFormat.Bytes(_item.Upload + _item.Download);
-    public string Speed => TrafficFormat.Rate(_item.UploadRate + _item.DownloadRate);
+    public string Traffic => TrafficFormat.Bytes(TrafficFormat.AddCounters(_item.Upload, _item.Download));
+    public string Speed => TrafficFormat.Rate(TrafficFormat.AddCounters(_item.UploadRate, _item.DownloadRate));
     public string Duration => TrafficFormat.Duration(DurationValue());
     public string StartedAt => _item.StartedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
     public string ClosedAt => _item.ClosedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz") ?? "仍在活动";
@@ -1034,6 +1034,13 @@ public sealed class ConnectionRowViewModel : ObservableObject
 
 internal static class TrafficFormat
 {
+    public static long AddCounters(long left, long right)
+    {
+        left = Math.Max(0, left);
+        right = Math.Max(0, right);
+        return left > long.MaxValue - right ? long.MaxValue : left + right;
+    }
+
     public static string Bytes(long value)
     {
         double amount = Math.Max(0, value);
@@ -1048,6 +1055,9 @@ internal static class TrafficFormat
     }
 
     public static string Rate(long value) => Bytes(value) + "/s";
+
+    public static string UpdatedAt(DateTimeOffset? value)
+        => value is null ? "等待 sing-box API" : value.Value.ToLocalTime().ToString("HH:mm:ss");
 
     public static string Duration(TimeSpan value)
     {

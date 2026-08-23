@@ -81,6 +81,8 @@ public sealed class AppController : IAsyncDisposable
     private long _trafficDown;
     private long _trafficUpRate;
     private long _trafficDownRate;
+    private DateTimeOffset? _connectionsUpdatedAtUtc;
+    private DateTimeOffset? _trafficUpdatedAtUtc;
     private string _connectionMonitorStatus = "未启动";
     private string _trafficMonitorStatus = "未启动";
     private string? _lastConnectionMonitorError;
@@ -132,6 +134,22 @@ public sealed class AppController : IAsyncDisposable
     public long TrafficDown => Interlocked.Read(ref _trafficDown);
     public long TrafficUpRate => Interlocked.Read(ref _trafficUpRate);
     public long TrafficDownRate => Interlocked.Read(ref _trafficDownRate);
+    public DateTimeOffset? ConnectionsUpdatedAtUtc
+    {
+        get
+        {
+            lock (_diagnosticsStateGate)
+                return _connectionsUpdatedAtUtc;
+        }
+    }
+    public DateTimeOffset? TrafficUpdatedAtUtc
+    {
+        get
+        {
+            lock (_diagnosticsStateGate)
+                return _trafficUpdatedAtUtc;
+        }
+    }
     public string DiagnosticsStatus
     {
         get
@@ -832,6 +850,8 @@ public sealed class AppController : IAsyncDisposable
             Interlocked.Exchange(ref _trafficDown, 0);
             Interlocked.Exchange(ref _trafficUpRate, 0);
             Interlocked.Exchange(ref _trafficDownRate, 0);
+            _connectionsUpdatedAtUtc = null;
+            _trafficUpdatedAtUtc = null;
         }
         SetMonitorStatuses("未运行", "未运行");
     }
@@ -981,6 +1001,7 @@ public sealed class AppController : IAsyncDisposable
             Interlocked.Exchange(ref _trafficUp, Math.Max(0, snapshot.UploadTotal));
             Interlocked.Exchange(ref _trafficDown, Math.Max(0, snapshot.DownloadTotal));
             _connectionHistory.ApplySnapshot(observations, observedAtUtc);
+            _connectionsUpdatedAtUtc = observedAtUtc;
         }
     }
 
@@ -1061,6 +1082,7 @@ public sealed class AppController : IAsyncDisposable
                 return;
             Interlocked.Exchange(ref _trafficUpRate, Math.Max(0, traffic.Up));
             Interlocked.Exchange(ref _trafficDownRate, Math.Max(0, traffic.Down));
+            _trafficUpdatedAtUtc = DateTimeOffset.UtcNow;
         }
     }
 
