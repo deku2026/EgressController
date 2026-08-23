@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Principal;
 using EgressController.SingBox.Runtime;
 
 namespace EgressController.App.Services;
@@ -14,8 +15,9 @@ public sealed record ElevatedHostLaunchOptions
 }
 
 /// <summary>
-/// Starts one session-scoped ElevatedHost with the Windows runas verb. The UI remains asInvoker;
-/// only this tiny host crosses the UAC boundary and owns the named pipe session.
+/// Starts one session-scoped ElevatedHost. The App requests administrator execution, so the host
+/// normally starts directly with the same token; the runas fallback keeps dotnet-run/dev launches
+/// usable when the App executable is not the process carrying the manifest.
 /// </summary>
 public sealed class ElevatedHostLauncher : IAsyncDisposable
 {
@@ -48,14 +50,8 @@ public sealed class ElevatedHostLauncher : IAsyncDisposable
         Process process;
         try
         {
-            process = Process.Start(new ProcessStartInfo
-            {
-                FileName = hostPath,
-                Arguments = arguments,
-                Verb = "runas",
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(hostPath) ?? Environment.CurrentDirectory,
-            }) ?? throw new InvalidOperationException("无法启动 ElevatedHost。");
+            ProcessStartInfo startInfo = CreateStartInfo(hostPath, arguments, IsCurrentProcessElevated());
+            process = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 ElevatedHost。");
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -102,6 +98,30 @@ public sealed class ElevatedHostLauncher : IAsyncDisposable
         return string.Join(' ', parts);
     }
 
+    internal static ProcessStartInfo CreateStartInfo(string hostPath, string arguments, bool isElevated)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostPath);
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = hostPath,
+            Arguments = arguments,
+            WorkingDirectory = Path.GetDirectoryName(hostPath) ?? Environment.CurrentDirectory,
+        };
+        if (isElevated)
+        {
+            startInfo.UseShellExecute = false;
+            startInfo.CreateNoWindow = true;
+        }
+        else
+        {
+            startInfo.Verb = "runas";
+            startInfo.UseShellExecute = true;
+        }
+        return startInfo;
+    }
+
     public async ValueTask DisposeAsync()
     {
         NamedPipeElevatedHostClient? client;
@@ -125,6 +145,12 @@ public sealed class ElevatedHostLauncher : IAsyncDisposable
         if (value.Any(char.IsWhiteSpace) || value.Contains('"'))
             return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
         return value;
+    }
+
+    private static bool IsCurrentProcessElevated()
+    {
+        using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
     }
 }
 
