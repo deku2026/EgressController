@@ -21,6 +21,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EgressController.Core.Tests/EgressController.Core.Tests.csproj" />
+    <Project Path="tests/EgressController.ElevatedHost.Tests/EgressController.ElevatedHost.Tests.csproj" />
     <Project Path="tests/EgressController.Launcher.Tests/EgressController.Launcher.Tests.csproj" />
     <Project Path="tests/EgressController.Proxy.Tests/EgressController.Proxy.Tests.csproj" />
     <Project Path="tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj" />

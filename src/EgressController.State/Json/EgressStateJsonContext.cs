@@ -20,6 +20,8 @@ namespace EgressController.State.Json;
 [JsonSerializable(typeof(UiStateDocument))]
 [JsonSerializable(typeof(Dictionary<string, double>))]
 [JsonSerializable(typeof(SingBoxCorePointer))]
+[JsonSerializable(typeof(SingBoxRuntimePointer))]
+[JsonSerializable(typeof(SingBoxPendingApply))]
 internal sealed partial class EgressStateJsonContext : JsonSerializerContext;
 
 /// <summary>Cross-cutting accessor so State.Storage can use the generated context without exposing it.</summary>

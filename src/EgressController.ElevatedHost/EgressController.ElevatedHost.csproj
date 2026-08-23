@@ -2,6 +2,12 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
+  </ItemGroup>
 
 </Project>

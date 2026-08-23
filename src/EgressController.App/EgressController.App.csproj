@@ -38,6 +38,7 @@
     <ProjectReference Include="..\EgressController.Launcher\EgressController.Launcher.csproj" />
     <ProjectReference Include="..\EgressController.Diagnostics\EgressController.Diagnostics.csproj" />
     <ProjectReference Include="..\EgressController.State\EgressController.State.csproj" />
+    <ProjectReference Include="..\EgressController.SingBox\EgressController.SingBox.csproj" />
   </ItemGroup>
 
   <ItemGroup>

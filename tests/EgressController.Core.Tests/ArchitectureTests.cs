@@ -39,12 +39,12 @@ public class ArchitectureTests
         {
             "EgressController.Core", "EgressController.State", "EgressController.Transport",
         },
-        ["EgressController.ElevatedHost"] = new(StringComparer.OrdinalIgnoreCase),
+        ["EgressController.ElevatedHost"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Core" },
         ["EgressController.App"] = new(StringComparer.OrdinalIgnoreCase)
         {
             "EgressController.Core", "EgressController.Transport", "EgressController.Proxy",
             "EgressController.Windows", "EgressController.Rules", "EgressController.Launcher",
-            "EgressController.Diagnostics", "EgressController.State",
+            "EgressController.Diagnostics", "EgressController.State", "EgressController.SingBox",
         },
     };
 
