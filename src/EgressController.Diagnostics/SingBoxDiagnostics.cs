@@ -156,7 +156,7 @@ public sealed record CoreLogEntry(
 /// <summary>Bounded core/stdout/stderr log storage shared by the diagnostics view.</summary>
 public sealed class BoundedLogStore
 {
-    private const int DefaultCapacity = 4096;
+    private const int DefaultCapacity = 1024;
     private const int DefaultMaxMessageLength = 32 * 1024;
     private readonly object _gate = new();
     private readonly int _capacity;

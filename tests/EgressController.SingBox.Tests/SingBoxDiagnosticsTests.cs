@@ -48,6 +48,19 @@ public sealed class SingBoxDiagnosticsTests
     }
 
     [Fact]
+    public void Default_log_store_keeps_a_finite_diagnostic_window()
+    {
+        var logs = new BoundedLogStore();
+        for (int index = 0; index < 1025; index++)
+            logs.Append("sing-box", "warn", $"message-{index}");
+
+        Assert.Equal(1024, logs.Count);
+        Assert.Equal(1, logs.Dropped);
+        Assert.DoesNotContain("message-0", logs.Snapshot().Select(entry => entry.Message));
+        Assert.Contains("message-1024", logs.Snapshot().Select(entry => entry.Message));
+    }
+
+    [Fact]
     public void MarkClosed_is_idempotent_and_does_not_duplicate_history()
     {
         var history = new ConnectionHistoryStore();

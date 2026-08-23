@@ -776,6 +776,9 @@ public sealed class ConnectionsViewModel : ObservableObject
     public int Count => Rows.Count;
     public long DroppedConnections { get => _droppedConnections; private set => SetProperty(ref _droppedConnections, value); }
     public long DroppedLogs { get => _droppedLogs; private set => SetProperty(ref _droppedLogs, value); }
+    public string DroppedLogsSummary => DroppedLogs == 0
+        ? "日志缓存：正常"
+        : $"日志缓存已淘汰 {DroppedLogs:N0} 条旧记录";
     public string MonitorStatus => _controller.DiagnosticsStatus;
     public string ActiveSummary => $"活动 {ActiveConnections} · ↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
     public string TotalSummary => $"当前会话 ↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
@@ -864,6 +867,7 @@ public sealed class ConnectionsViewModel : ObservableObject
         ActiveConnections = active.Count;
         DroppedConnections = _controller.ConnectionHistory.DroppedClosed;
         DroppedLogs = _controller.Logs.Dropped;
+        OnPropertyChanged(nameof(DroppedLogsSummary));
         OnPropertyChanged(nameof(ActiveSummary));
         OnPropertyChanged(nameof(TotalSummary));
         OnPropertyChanged(nameof(MonitorStatus));

@@ -359,7 +359,7 @@
                 <DockPanel>
                     <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,0,0,10">
                         <TextBlock Classes="muted" Text="仅显示 sing-box 警告、错误和生命周期输出；连接明细请到“连接”页双击查看。" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Classes="warning" Text="{Binding Connections.DroppedLogs}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Classes="warning" Text="{Binding Connections.DroppedLogsSummary}" VerticalAlignment="Center" />
                     </Grid>
                     <Border Classes="list-card">
                         <ListBox ItemsSource="{Binding Connections.CoreLogs}">

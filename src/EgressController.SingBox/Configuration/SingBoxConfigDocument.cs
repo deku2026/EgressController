@@ -31,7 +31,7 @@ public sealed record SingBoxConfigDocument
 public sealed record SingBoxLogDocument
 {
     [JsonPropertyName("level")]
-    public string Level { get; init; } = "info";
+    public string Level { get; init; } = "warn";
 
     [JsonPropertyName("output")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -13,6 +13,7 @@ public sealed class EgressProfileCompilerTests
     {
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input(new EgressProfileDocument())).JsonBytes);
         JsonElement root = json.RootElement;
+        Assert.Equal("warn", root.GetProperty("log").GetProperty("level").GetString());
         JsonElement dns = root.GetProperty("dns");
         JsonElement inbound = root.GetProperty("inbounds")[0];
         JsonElement route = root.GetProperty("route");
