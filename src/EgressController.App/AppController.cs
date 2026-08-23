@@ -56,6 +56,8 @@ public sealed class AppController : IAsyncDisposable
     private readonly LaunchSessionRegistry _sessions = new();
     private readonly TcpListenerOwnerResolver _ownerResolver = new();
     private readonly UpstreamSocksProbe _upstreamProbe = new();
+    private readonly WindowsProcessIdentityResolver _processIdentity =
+        new(new ExecutablePathCanonicalizer());
     private readonly EgressProfileCompiler _compiler = new();
     private readonly DirectSingBoxProcessClient _directSingBox = new();
     private readonly SingBoxService _singBox;
@@ -455,7 +457,7 @@ public sealed class AppController : IAsyncDisposable
 
         LaunchSession session = new WindowsLaunchService().StartPlain(target);
         _sessions.Register(session);
-        SetMessage($"已启动普通进程：{target.Name} (PID {session.RootPid})；网络规则由 sing-box 按 EXE 路径决定。");
+        SetMessage($"已发送启动请求：{target.Name} (启动器 PID {session.RootPid})；网络规则由 sing-box 按 EXE 路径决定。");
         return LastMessage;
     }
 
@@ -466,23 +468,59 @@ public sealed class AppController : IAsyncDisposable
             .ToArray();
         if (sessions.Length == 0)
             return string.Empty;
-        LaunchSession? live = sessions.FirstOrDefault(session =>
-        {
-            try
-            {
-                using var process = Process.GetProcessById(checked((int)session.RootPid));
-                return !process.HasExited;
-            }
-            catch
-            {
-                return false;
-            }
-        });
+        LaunchSession? live = sessions.FirstOrDefault(IsLiveRoot);
         if (live is not null)
             return $"运行中 · PID {live.RootPid}";
+
+        LaunchTarget? target = _targets.Get(targetId);
+        uint? ownedPid = target is null ? null : FindLiveTargetProcess(target);
+        if (ownedPid is not null)
+            return $"运行中 · PID {ownedPid.Value}（目标进程）";
+
         foreach (LaunchSession session in sessions)
             _sessions.MarkRootExited(session.SessionId);
-        return "根进程已退出";
+        return "未运行";
+    }
+
+    private bool IsLiveRoot(LaunchSession session)
+    {
+        ProcessIdentity? identity = _processIdentity.Resolve(session.RootPid);
+        return identity is not null && identity.StartTimeUtc == session.RootStartTimeUtc;
+    }
+
+    private uint? FindLiveTargetProcess(LaunchTarget target)
+    {
+        HashSet<string> executablePaths = target.OwnedExecutables
+            .Append(target.CanonicalExecutable)
+            .OfType<string>()
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (executablePaths.Count == 0)
+            return null;
+
+        HashSet<string> processNames = executablePaths
+            .Select(Path.GetFileNameWithoutExtension)
+            .OfType<string>()
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (string processName in processNames)
+        {
+            Process[] processes;
+            try { processes = Process.GetProcessesByName(processName); }
+            catch { continue; }
+
+            foreach (Process process in processes)
+            {
+                using (process)
+                {
+                    ProcessIdentity? identity = _processIdentity.Resolve(checked((uint)process.Id));
+                    if (identity?.ExePathFinal is not null && executablePaths.Contains(identity.ExePathFinal))
+                        return identity.Pid;
+                }
+            }
+        }
+        return null;
     }
 
     public async ValueTask DisposeAsync()
