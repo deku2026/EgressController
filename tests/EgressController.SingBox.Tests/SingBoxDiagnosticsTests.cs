@@ -32,6 +32,7 @@ public sealed class SingBoxDiagnosticsTests
     public void Bounded_log_store_truncates_messages_and_reports_drops()
     {
         var logs = new BoundedLogStore(capacity: 2, maxMessageLength: 12);
+        long initialVersion = logs.Version;
         logs.Append("sing-box", "info", "first");
         logs.Append("elevated-host", "stderr", new string('x', 100));
         logs.Append("sing-box", "warn", "last");
@@ -41,11 +42,23 @@ public sealed class SingBoxDiagnosticsTests
         Assert.DoesNotContain("first", logs.Snapshot().Select(entry => entry.Message));
         Assert.Contains("truncated", logs.Snapshot()[0].Message, StringComparison.Ordinal);
         Assert.Equal("last", logs.Snapshot()[1].Message);
+        Assert.Equal(initialVersion + 3, logs.Version);
 
         logs.Clear();
         Assert.Empty(logs.Snapshot());
         Assert.Equal(0, logs.Dropped);
+        Assert.Equal(initialVersion + 4, logs.Version);
     }
+
+    [Theory]
+    [InlineData("stdout", "+0800 2026-08-23 WARN router: retry", "warn")]
+    [InlineData("stderr", "+0800 2026-08-23 ERROR router: failed", "error")]
+    [InlineData("stdout", "FATAL[0000] startup failed", "fatal")]
+    [InlineData("lifecycle", "sing-box exited with code 1.", "lifecycle")]
+    [InlineData("stderr", "unstructured failure", "error")]
+    [InlineData("stdout", "this warningly word is not a level", "output")]
+    public void Core_log_classifier_normalizes_process_output(string source, string message, string expected)
+        => Assert.Equal(expected, CoreLogClassifier.Classify(source, message));
 
     [Fact]
     public void Default_log_store_keeps_a_finite_diagnostic_window()

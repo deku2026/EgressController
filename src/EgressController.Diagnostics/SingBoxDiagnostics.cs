@@ -153,6 +153,48 @@ public sealed record CoreLogEntry(
     string Level,
     string Message);
 
+/// <summary>Normalizes sing-box process output into stable levels for the UI.</summary>
+public static class CoreLogClassifier
+{
+    public static string Classify(string source, string message)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (source.Equals("lifecycle", StringComparison.OrdinalIgnoreCase))
+            return "lifecycle";
+        if (ContainsToken(message, "PANIC") || ContainsToken(message, "FATAL"))
+            return "fatal";
+        if (ContainsToken(message, "ERROR"))
+            return "error";
+        if (ContainsToken(message, "WARN") || ContainsToken(message, "WARNING"))
+            return "warn";
+        if (ContainsToken(message, "DEBUG"))
+            return "debug";
+        if (ContainsToken(message, "INFO"))
+            return "info";
+        return source.Equals("stderr", StringComparison.OrdinalIgnoreCase) ? "error" : "output";
+    }
+
+    private static bool ContainsToken(string message, string token)
+    {
+        int searchFrom = 0;
+        while (searchFrom < message.Length)
+        {
+            int index = message.IndexOf(token, searchFrom, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+                return false;
+            int end = index + token.Length;
+            bool startsAtBoundary = index == 0 || !char.IsLetterOrDigit(message[index - 1]);
+            bool endsAtBoundary = end == message.Length || !char.IsLetterOrDigit(message[end]);
+            if (startsAtBoundary && endsAtBoundary)
+                return true;
+            searchFrom = index + 1;
+        }
+        return false;
+    }
+}
+
 /// <summary>Bounded core/stdout/stderr log storage shared by the diagnostics view.</summary>
 public sealed class BoundedLogStore
 {
@@ -163,6 +205,7 @@ public sealed class BoundedLogStore
     private readonly int _maxMessageLength;
     private readonly Queue<CoreLogEntry> _entries = new();
     private long _dropped;
+    private long _version;
 
     public BoundedLogStore(int capacity = DefaultCapacity, int maxMessageLength = DefaultMaxMessageLength)
     {
@@ -175,6 +218,7 @@ public sealed class BoundedLogStore
     }
 
     public long Dropped => Interlocked.Read(ref _dropped);
+    public long Version => Interlocked.Read(ref _version);
 
     public int Count
     {
@@ -209,6 +253,7 @@ public sealed class BoundedLogStore
                 Interlocked.Increment(ref _dropped);
             }
             _entries.Enqueue(entry);
+            Interlocked.Increment(ref _version);
         }
     }
 
@@ -224,6 +269,7 @@ public sealed class BoundedLogStore
         {
             _entries.Clear();
             Interlocked.Exchange(ref _dropped, 0);
+            Interlocked.Increment(ref _version);
         }
     }
 }

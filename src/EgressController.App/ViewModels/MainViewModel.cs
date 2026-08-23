@@ -748,6 +748,7 @@ public sealed class ConnectionsViewModel : ObservableObject
     private string _lastUpdated = "等待 sing-box API";
     private string _actionMessage = string.Empty;
     private ConnectionRowViewModel? _selectedRow;
+    private long _renderedLogVersion = -1;
 
     public ConnectionsViewModel(AppController controller)
     {
@@ -860,9 +861,14 @@ public sealed class ConnectionsViewModel : ObservableObject
         if (SelectedRow is not null && !Rows.Contains(SelectedRow))
             SelectedRow = null;
 
-        CoreLogs.Clear();
-        foreach (CoreLogEntry entry in _controller.Logs.Snapshot().Reverse().Take(500))
-            CoreLogs.Add(new CoreLogRowViewModel(entry));
+        long logVersion = _controller.Logs.Version;
+        if (_renderedLogVersion != logVersion)
+        {
+            CoreLogs.Clear();
+            foreach (CoreLogEntry entry in _controller.Logs.Snapshot().Reverse().Take(500))
+                CoreLogs.Add(new CoreLogRowViewModel(entry));
+            _renderedLogVersion = logVersion;
+        }
 
         ActiveConnections = active.Count;
         DroppedConnections = _controller.ConnectionHistory.DroppedClosed;

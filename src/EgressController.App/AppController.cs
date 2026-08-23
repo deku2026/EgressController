@@ -1076,7 +1076,7 @@ public sealed class AppController : IAsyncDisposable
     }
 
     private void OnSingBoxOutput(SingBoxOutputEvent output)
-        => _logs.Append(output.Source, output.Source.Equals("stderr", StringComparison.OrdinalIgnoreCase) ? "error" : "output", output.Line);
+        => _logs.Append(output.Source, CoreLogClassifier.Classify(output.Source, output.Line), output.Line);
 
     private void SetConnectionMonitorConnected(int generation)
     {
