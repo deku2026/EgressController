@@ -99,20 +99,22 @@ jobs:
             -OutputFile $env:GITHUB_OUTPUT
 
       - name: Restore
-        if: steps.target.outputs.eligible == 'true'
+        # A workflow_run release already targets the exact SHA that passed main CI.
+        # Tag and manual releases do not have that gate, so keep the full validation there.
+        if: steps.target.outputs.eligible == 'true' && github.event_name != 'workflow_run'
         run: dotnet restore EgressController.slnx
 
       - name: Build
-        if: steps.target.outputs.eligible == 'true'
+        if: steps.target.outputs.eligible == 'true' && github.event_name != 'workflow_run'
         run: dotnet build EgressController.slnx --configuration Release --no-restore
 
       - name: Test
-        if: steps.target.outputs.eligible == 'true'
+        if: steps.target.outputs.eligible == 'true' && github.event_name != 'workflow_run'
         shell: pwsh
         run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
 
       - name: Test release version resolver
-        if: steps.target.outputs.eligible == 'true'
+        if: steps.target.outputs.eligible == 'true' && github.event_name != 'workflow_run'
         shell: pwsh
         run: ./build/Test-ReleaseVersion.ps1
 
