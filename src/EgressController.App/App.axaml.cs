@@ -15,6 +15,7 @@ public partial class App : Application
     private TrayIcon? _tray;
     private TrayIcons? _trayIcons;
     private DispatcherTimer? _trayTimer;
+    private readonly ApplicationExitCoordinator _exitCoordinator = new();
 
     public override void Initialize()
         => AvaloniaXamlLoader.Load(this);
@@ -23,6 +24,7 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             var window = new MainWindow { DataContext = new MainViewModel(Controller) };
             desktop.MainWindow = window;
             InstanceGuard?.StartActivationLoop(() => Dispatcher.UIThread.Post(() => ShowWindow(window)));
@@ -39,15 +41,22 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void CreateTray(IClassicDesktopStyleApplicationLifetime desktop, Window window)
+    private void CreateTray(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window)
     {
         var menu = new NativeMenu();
         var open = new NativeMenuItem("打开 EgressController");
         open.Click += (_, _) => ShowWindow(window);
         var toggle = new NativeMenuItem("启动/停止 TUN");
         toggle.Click += (_, _) => _ = Controller.ToggleTunAsync();
-        var exit = new NativeMenuItem("退出");
-        exit.Click += (_, _) => desktop.Shutdown();
+        var exit = new NativeMenuItem("关闭 EgressController");
+        exit.Click += async (_, _) =>
+        {
+            exit.IsEnabled = false;
+            await _exitCoordinator.ExitAsync(
+                async () => await Controller.StopTunAsync(),
+                window.AllowApplicationExit,
+                () => desktop.Shutdown());
+        };
         menu.Items.Add(open);
         menu.Items.Add(toggle);
         menu.Items.Add(new NativeMenuItemSeparator());

@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private MainViewModel? _vm;
     private DispatcherTimer? _timer;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
+    private bool _applicationExitAllowed;
 
     public MainWindow()
     {
@@ -37,6 +38,21 @@ public partial class MainWindow : Window
         _timer?.Stop();
         base.OnClosed(e);
     }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        if (ApplicationClosePolicy.ShouldHideToTray(_applicationExitAllowed, e.CloseReason))
+        {
+            e.Cancel = true;
+            WindowState = WindowState.Minimized;
+            Hide();
+        }
+
+        base.OnClosing(e);
+    }
+
+    internal void AllowApplicationExit()
+        => _applicationExitAllowed = true;
 
     private async void OnUpstreamPortLostFocus(object? sender, RoutedEventArgs e)
     {
