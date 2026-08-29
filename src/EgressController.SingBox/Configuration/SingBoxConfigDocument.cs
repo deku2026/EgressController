@@ -60,6 +60,10 @@ public sealed record SingBoxDnsDocument
 
 public sealed record SingBoxDnsRuleDocument
 {
+    [JsonPropertyName("domain")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Domain { get; init; }
+
     [JsonPropertyName("process_name")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? ProcessName { get; init; }
@@ -212,6 +216,10 @@ public sealed record SingBoxRuleSetDocument
 
 public sealed record SingBoxRouteRuleDocument
 {
+    [JsonPropertyName("inbound")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Inbound { get; init; }
+
     [JsonPropertyName("ip_version")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? IpVersion { get; init; }

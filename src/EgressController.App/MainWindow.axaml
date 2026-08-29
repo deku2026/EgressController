@@ -116,6 +116,79 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="网络与内核">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="14">
+                            <Border Classes="card">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="eyebrow" Text="DoH 保护" />
+                                    <TextBlock Classes="card-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="故障时只拒绝 TUN 外部流量，控制面仍可检测并恢复。" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Column="1">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="eyebrow" Text="检测状态" />
+                                    <TextBlock Classes="card-title" Text="{Binding Network.MonitorStatus}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="每 60 秒通过 sing-box Clash API 的 DNS query 检测。" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="card" Grid.Column="2">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="eyebrow" Text="最后检测" />
+                                    <TextBlock Classes="card-title" Text="{Binding Network.LastChecked}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="每个探测域名只命中对应的 DoH server tag。" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Button Grid.Column="3" Classes="primary" Content="立即检测"
+                                    Command="{Binding Network.CheckCommand}"
+                                    VerticalAlignment="Center" />
+                        </Grid>
+                        <Border Classes="list-card">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="14,12">
+                                    <TextBlock Classes="section-title" Text="DoH 配置与连接状态" />
+                                    <TextBlock Classes="muted" Text="dns-esim 与 dns-clash 是两个不同出口；Cloudflare/Google 只在各自出口内作为候选。" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Network.DohStatuses}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:DohEndpointViewModel">
+                                                <Border Padding="14,11" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
+                                                    <Grid ColumnDefinitions="1.1*,1.6*,1.3*,1.2*,Auto" ColumnSpacing="14">
+                                                        <StackPanel Spacing="3">
+                                                            <TextBlock FontWeight="SemiBold" Text="{Binding RoutePlane}" />
+                                                            <TextBlock Classes="tag" Text="{Binding Tag}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" Spacing="3">
+                                                            <TextBlock FontWeight="SemiBold" Text="{Binding Provider}" />
+                                                            <TextBlock Classes="muted" Text="{Binding Endpoint}" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Classes="muted" Text="{Binding ServerName}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="2" Spacing="3">
+                                                            <TextBlock Text="{Binding Detour}" />
+                                                            <TextBlock Classes="muted" Text="{Binding Marker}" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="3" Text="{Binding Detail}" Classes="muted"
+                                                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="4" Text="{Binding State}" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                        <Border Classes="notice" IsVisible="{Binding Network.HasStatus}">
+                            <TextBlock Text="{Binding Network.Status}" TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="Windows 应用">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Spacing="10">

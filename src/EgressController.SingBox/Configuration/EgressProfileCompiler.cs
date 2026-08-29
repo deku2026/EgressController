@@ -20,6 +20,7 @@ public sealed record EgressProfileCompileInput
     public string ControllerSecret { get; init; } = string.Empty;
     public string? LogPath { get; init; }
     public string TunInterfaceName { get; init; } = "sing-box";
+    public DohRoutingDecision DohRouting { get; init; } = DohRoutingDecision.Default;
 }
 
 public sealed record EgressProfileCompilationResult(
@@ -40,8 +41,8 @@ public sealed class EgressProfileCompiler
     public const string PrimaryDirectTag = "primary-direct";
     public const string EsimDirectTag = "esim-direct";
     public const string UpstreamSocksTag = "clash-7890";
-    public const string DnsTag = "dns-clash";
-    public const string EsimDnsTag = "dns-esim";
+    public const string DnsTag = EgressDohConfiguration.ClashCloudflareTag;
+    public const string EsimDnsTag = EgressDohConfiguration.EsimCloudflareTag;
     public const string ControllerHost = "127.0.0.1";
 
     public EgressProfileCompilationResult Compile(EgressProfileCompileInput input)
@@ -61,6 +62,8 @@ public sealed class EgressProfileCompiler
         ValidateEnvironment(input.Environment);
         ValidateControllerEndpoint(input.ControllerPort, input.ControllerSecret);
         string tunName = NormalizeTunName(input.TunInterfaceName);
+        DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
+        ValidateDohRouting(dohRouting, input.Environment.IsEsimReady);
 
         var rules = new List<SingBoxRouteRuleDocument>
         {
@@ -69,6 +72,14 @@ public sealed class EgressProfileCompiler
             new() { IpVersion = 6, Action = "reject" },
             new() { ProcessName = NormalizeProcessNames(owners), Action = "route", Outbound = PrimaryDirectTag },
         };
+        if (dohRouting.FailClosed)
+        {
+            rules.Insert(0, new SingBoxRouteRuleDocument
+            {
+                Inbound = [TunTag],
+                Action = "reject",
+            });
+        }
         string esimAction = input.Environment.IsEsimReady ? "route" : "reject";
         if (applications.Length > 0)
         {
@@ -99,13 +110,22 @@ public sealed class EgressProfileCompiler
         }
 
         var dnsRules = new List<SingBoxDnsRuleDocument>();
+        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsEsimReady))
+        {
+            dnsRules.Add(new SingBoxDnsRuleDocument
+            {
+                DomainSuffix = [endpoint.ProbeSuffix],
+                Action = "route",
+                Server = endpoint.Tag,
+            });
+        }
         if (applications.Length > 0)
         {
             dnsRules.Add(new SingBoxDnsRuleDocument
             {
                 ProcessName = applications,
                 Action = input.Environment.IsEsimReady ? "route" : "reject",
-                Server = input.Environment.IsEsimReady ? EsimDnsTag : null,
+                Server = input.Environment.IsEsimReady ? dohRouting.EsimDnsTag : null,
             });
         }
         if (selectedRuleSets.Count > 0)
@@ -114,7 +134,7 @@ public sealed class EgressProfileCompiler
             {
                 RuleSet = selectedRuleSets.Select(item => item.Name).ToArray(),
                 Action = input.Environment.IsEsimReady ? "route" : "reject",
-                Server = input.Environment.IsEsimReady ? EsimDnsTag : null,
+                Server = input.Environment.IsEsimReady ? dohRouting.EsimDnsTag : null,
             });
         }
         if (profile.EsimDomains.Count > 0)
@@ -123,32 +143,23 @@ public sealed class EgressProfileCompiler
             {
                 DomainSuffix = profile.EsimDomains,
                 Action = input.Environment.IsEsimReady ? "route" : "reject",
-                Server = input.Environment.IsEsimReady ? EsimDnsTag : null,
+                Server = input.Environment.IsEsimReady ? dohRouting.EsimDnsTag : null,
             });
         }
 
         var dnsServers = new List<SingBoxHttpsDnsServerDocument>();
-        if (input.Environment.IsEsimReady)
+        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsEsimReady))
         {
             dnsServers.Add(new SingBoxHttpsDnsServerDocument
             {
-                Tag = EsimDnsTag,
-                Server = "1.1.1.1",
-                ServerPort = 443,
-                Path = "/dns-query",
-                Tls = new SingBoxTlsDocument { ServerName = "cloudflare-dns.com" },
-                Detour = EsimDirectTag,
+                Tag = endpoint.Tag,
+                Server = endpoint.Server,
+                ServerPort = endpoint.ServerPort,
+                Path = endpoint.Path,
+                Tls = new SingBoxTlsDocument { ServerName = endpoint.ServerName },
+                Detour = endpoint.Detour,
             });
         }
-        dnsServers.Add(new SingBoxHttpsDnsServerDocument
-        {
-            Tag = DnsTag,
-            Server = "1.1.1.1",
-            ServerPort = 443,
-            Path = "/dns-query",
-            Tls = new SingBoxTlsDocument { ServerName = "cloudflare-dns.com" },
-            Detour = UpstreamSocksTag,
-        });
 
         var outbounds = new List<SingBoxOutboundDocument>();
         if (input.Environment.IsEsimReady)
@@ -170,7 +181,7 @@ public sealed class EgressProfileCompiler
             {
                 Servers = dnsServers,
                 Rules = dnsRules.Count == 0 ? null : dnsRules,
-                Final = DnsTag,
+                Final = dohRouting.ClashDnsTag,
                 Strategy = "ipv4_only",
             },
             Inbounds = new[]
@@ -197,7 +208,7 @@ public sealed class EgressProfileCompiler
                     Format = "binary",
                 }).ToArray(),
                 Final = UpstreamSocksTag,
-                DefaultDomainResolver = DnsTag,
+                DefaultDomainResolver = dohRouting.ClashDnsTag,
                 AutoDetectInterface = true,
                 FindProcess = true,
             },
@@ -257,6 +268,20 @@ public sealed class EgressProfileCompiler
             Inet4BindAddress = adapter.Ipv4BindAddress?.ToString(),
             Inet6BindAddress = adapter.Ipv6BindAddress?.ToString(),
         };
+
+    private static IEnumerable<SingBoxDohEndpointDefinition> AvailableDohEndpoints(bool esimReady)
+        => EgressDohConfiguration.Endpoints.Where(endpoint => EgressDohConfiguration.IsAvailable(endpoint, esimReady));
+
+    private static void ValidateDohRouting(DohRoutingDecision routing, bool esimReady)
+    {
+        if (EgressDohConfiguration.Find(routing.ClashDnsTag) is not { RoutePlane: DohRoutePlane.Clash })
+            throw Failure("doh.routing.clash", "7890 DoH 路由选择无效。");
+        if (esimReady
+            && EgressDohConfiguration.Find(routing.EsimDnsTag) is not { RoutePlane: DohRoutePlane.Esim })
+        {
+            throw Failure("doh.routing.esim", "eSIM DoH 路由选择无效。");
+        }
+    }
 
     private static string[] NormalizeProcessNames(IEnumerable<string> paths)
     {

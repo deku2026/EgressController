@@ -19,8 +19,10 @@ public sealed class MainViewModel : ObservableObject
         Domains = new DomainsViewModel(controller);
         Connections = new ConnectionsViewModel(controller);
         Traffic = new TrafficViewModel(controller);
+        Network = new NetworkViewModel(controller);
         Domains.RefreshSearch();
         Overview.Refresh();
+        Network.Refresh();
         _ = InitializeAsync();
     }
 
@@ -30,6 +32,7 @@ public sealed class MainViewModel : ObservableObject
     public DomainsViewModel Domains { get; }
     public ConnectionsViewModel Connections { get; }
     public TrafficViewModel Traffic { get; }
+    public NetworkViewModel Network { get; }
 
     private async Task InitializeAsync()
     {
@@ -58,10 +61,78 @@ public sealed class MainViewModel : ObservableObject
         Domains.RefreshStatus();
         Connections.Refresh();
         Traffic.Refresh();
+        Network.Refresh();
         Status = string.IsNullOrWhiteSpace(Controller.LastMessage)
             ? $"TUN：{Controller.TunStatus}"
             : Controller.LastMessage;
     }
+}
+
+public sealed class NetworkViewModel : ObservableObject
+{
+    private readonly AppController _controller;
+    private string _monitorStatus = "未启动";
+    private string _protectionStatus = "TUN 未运行";
+    private string _lastChecked = "尚未检测";
+    private string _status = string.Empty;
+
+    public NetworkViewModel(AppController controller)
+    {
+        _controller = controller;
+        CheckCommand = new AsyncRelayCommand(CheckAsync);
+    }
+
+    public ObservableCollection<DohEndpointViewModel> DohStatuses { get; } = new();
+    public string MonitorStatus { get => _monitorStatus; private set => SetProperty(ref _monitorStatus, value); }
+    public string ProtectionStatus { get => _protectionStatus; private set => SetProperty(ref _protectionStatus, value); }
+    public string LastChecked { get => _lastChecked; private set => SetProperty(ref _lastChecked, value); }
+    public string Status
+    {
+        get => _status;
+        private set
+        {
+            if (!SetProperty(ref _status, value))
+                return;
+            OnPropertyChanged(nameof(HasStatus));
+        }
+    }
+    public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
+    public IAsyncRelayCommand CheckCommand { get; }
+
+    public void Refresh()
+    {
+        MonitorStatus = _controller.DohMonitorStatus;
+        ProtectionStatus = _controller.DohProtectionStatus;
+        LastChecked = _controller.DohLastCheckedAtUtc is { } checkedAt
+            ? checkedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            : "尚未检测";
+
+        DohStatuses.Clear();
+        foreach (DohStatusSnapshot status in _controller.DohStatuses)
+            DohStatuses.Add(new DohEndpointViewModel(status));
+    }
+
+    private async Task CheckAsync()
+    {
+        ControllerOperationResult result = await _controller.CheckDohHealthAsync();
+        Status = result.Succeeded ? "DoH 检测完成。" : result.Error ?? "DoH 检测失败。";
+        Refresh();
+    }
+}
+
+public sealed class DohEndpointViewModel(DohStatusSnapshot status)
+{
+    public string Tag => status.Tag;
+    public string RoutePlane => status.RoutePlane;
+    public string Provider => status.Provider + (status.IsFallback ? " · 候选" : " · 默认");
+    public string Endpoint => $"https://{status.Server}:{status.ServerPort}{status.Path}";
+    public string ServerName => "TLS SNI · " + status.ServerName;
+    public string Detour => "detour · " + status.Detour;
+    public string State => status.State;
+    public string Detail => status.LatencyMilliseconds is { } latency
+        ? $"{status.Detail} · {latency} ms"
+        : status.Detail;
+    public string Marker => status.IsActive ? "当前路由" : status.IsAvailable ? "已配置" : "未启用";
 }
 
 public sealed class OverviewViewModel : ObservableObject

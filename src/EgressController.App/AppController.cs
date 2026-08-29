@@ -65,6 +65,8 @@ public sealed class AppController : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
     private readonly object _runtimeStateGate = new();
+    private readonly object _dohStateGate = new();
+    private readonly SemaphoreSlim _dohProbeGate = new(1, 1);
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
 
     private Socks5RemoteFetcher _remoteFetcher = null!;
@@ -76,6 +78,8 @@ public sealed class AppController : IAsyncDisposable
     private CancellationTokenSource? _diagnosticsCts;
     private Task? _runtimeMonitorTask;
     private CancellationTokenSource? _runtimeMonitorCts;
+    private Task? _dohMonitorTask;
+    private CancellationTokenSource? _dohMonitorCts;
     private string _runtimeFingerprint = string.Empty;
     private EgressProfileDocument _profile;
     private IReadOnlyList<NetworkAdapterInfo> _adapters = Array.Empty<NetworkAdapterInfo>();
@@ -91,6 +95,10 @@ public sealed class AppController : IAsyncDisposable
     private string? _lastConnectionMonitorError;
     private string? _lastTrafficMonitorError;
     private int _diagnosticsGeneration;
+    private DohRoutingDecision _dohRouting = DohRoutingDecision.Default;
+    private IReadOnlyList<DohStatusSnapshot> _dohStatuses = CreateStoppedDohStatuses();
+    private string _dohMonitorStatus = "未启动";
+    private DateTimeOffset? _dohLastCheckedAtUtc;
 
     public AppController(string? dataRoot = null, string? rulesetRoot = null)
     {
@@ -165,6 +173,60 @@ public sealed class AppController : IAsyncDisposable
         {
             lock (_gate)
                 return $"连接：{_connectionMonitorStatus} · 流量：{_trafficMonitorStatus}";
+        }
+    }
+
+    public IReadOnlyList<DohStatusSnapshot> DohStatuses
+    {
+        get
+        {
+            lock (_dohStateGate)
+                return _dohStatuses;
+        }
+    }
+
+    public string DohMonitorStatus
+    {
+        get
+        {
+            lock (_dohStateGate)
+                return _dohMonitorStatus;
+        }
+    }
+
+    public DateTimeOffset? DohLastCheckedAtUtc
+    {
+        get
+        {
+            lock (_dohStateGate)
+                return _dohLastCheckedAtUtc;
+        }
+    }
+
+    public string DohProtectionStatus
+    {
+        get
+        {
+            DohRoutingDecision routing;
+            string monitorStatus;
+            lock (_dohStateGate)
+            {
+                routing = _dohRouting;
+                monitorStatus = _dohMonitorStatus;
+            }
+
+            if (routing.FailClosed)
+                return "故障保护：TUN 已拒绝外部流量";
+            return IsTunRunning ? monitorStatus : "TUN 未运行";
+        }
+    }
+
+    public bool IsDohFailClosed
+    {
+        get
+        {
+            lock (_dohStateGate)
+                return _dohRouting.FailClosed;
         }
     }
 
@@ -420,6 +482,12 @@ public sealed class AppController : IAsyncDisposable
         {
             if (IsTunRunning)
                 return ControllerOperationResult.Success();
+
+            // Start in a fail-closed state until the first sing-box DNS probes have completed.
+            // The probe rules are not TUN-bound, so the monitor can still verify and unlock the
+            // data plane without allowing a startup window with unknown DNS health.
+            lock (_dohStateGate)
+                _dohRouting = new DohRoutingDecision { FailClosed = true };
             SingBoxApplyResult result = await _singBox.StartAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
@@ -429,6 +497,7 @@ public sealed class AppController : IAsyncDisposable
 
             StartDiagnostics(LoadControllerEndpoint());
             StartRuntimeMonitor();
+            StartDohMonitor();
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -443,6 +512,7 @@ public sealed class AppController : IAsyncDisposable
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            StopDohMonitor();
             await _singBox.StopAsync(cancellationToken).ConfigureAwait(false);
             StopRuntimeMonitor();
             StopDiagnostics();
@@ -507,6 +577,36 @@ public sealed class AppController : IAsyncDisposable
         return await api.QueryDnsAsync(host, recordType, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ControllerOperationResult> CheckDohHealthAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsTunRunning)
+            return ControllerOperationResult.Failure("TUN 未运行，暂不能检测 DoH。");
+        if (!await _dohProbeGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            return ControllerOperationResult.Failure("DoH 检测正在进行中。");
+
+        try
+        {
+            await RunDohHealthCheckAsync(cancellationToken, announce: true).ConfigureAwait(false);
+            return IsDohFailClosed
+                ? ControllerOperationResult.Failure("DoH 不可用，TUN 已启用拒绝保护。")
+                : ControllerOperationResult.Success();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return ControllerOperationResult.Failure("DoH 检测已取消。");
+        }
+        catch (Exception exception)
+        {
+            SetDohMonitorFailure(DescribeDiagnosticsFailure(exception));
+            return ControllerOperationResult.Failure("DoH 检测失败：" + DescribeDiagnosticsFailure(exception));
+        }
+        finally
+        {
+            _dohProbeGate.Release();
+        }
+    }
+
     public async Task<ControllerOperationResult> FlushDnsCacheAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -524,6 +624,7 @@ public sealed class AppController : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _lifetimeCts.Cancel();
+        StopDohMonitor();
         StopRuntimeMonitor();
         StopDiagnostics();
         _singBox.Output -= OnSingBoxOutput;
@@ -536,6 +637,11 @@ public sealed class AppController : IAsyncDisposable
     }
 
     private async Task<SingBoxRuntimeCandidate> PrepareRuntimeAsync(CancellationToken cancellationToken)
+        => await PrepareRuntimeAsync(cancellationToken, GetDohRouting()).ConfigureAwait(false);
+
+    private async Task<SingBoxRuntimeCandidate> PrepareRuntimeAsync(
+        CancellationToken cancellationToken,
+        DohRoutingDecision dohRouting)
     {
         EgressProfileDocument profile = _profile.NormalizeAndValidate();
         Socks5ProbeResult upstream = await _upstreamProbe.ProbeAsync(profile.UpstreamPort, cancellationToken).ConfigureAwait(false);
@@ -570,6 +676,7 @@ public sealed class AppController : IAsyncDisposable
             RuleSets = ruleSets,
             ControllerPort = endpoint.Port,
             ControllerSecret = endpoint.Secret,
+            DohRouting = dohRouting,
         });
         // Keep each candidate immutable.  SingBoxService can then restart the last-good
         // candidate if process start or the API health check fails after this candidate was
@@ -699,6 +806,7 @@ public sealed class AppController : IAsyncDisposable
             if (applied.Succeeded)
             {
                 StartDiagnostics(LoadControllerEndpoint());
+                StartDohMonitor();
                 SetMessage("配置已校验并应用，sing-box 已重启。");
                 return ControllerOperationResult.Success();
             }
@@ -756,6 +864,329 @@ public sealed class AppController : IAsyncDisposable
             return EgressProfileDocument.Default;
         }
     }
+
+    private void StartDohMonitor()
+    {
+        StopDohMonitor(resetRouting: false);
+        _dohMonitorCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+        CancellationToken token = _dohMonitorCts.Token;
+        _dohMonitorTask = Task.Run(() => DohMonitorLoopAsync(token), token);
+    }
+
+    private void StopDohMonitor(bool resetRouting = true)
+    {
+        CancellationTokenSource? cts = _dohMonitorCts;
+        Task? task = _dohMonitorTask;
+        _dohMonitorCts = null;
+        _dohMonitorTask = null;
+        cts?.Cancel();
+        if (cts is not null)
+        {
+            if (task is null || task.IsCompleted)
+                cts.Dispose();
+            else
+                _ = task.ContinueWith(
+                    static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+                    cts,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+        }
+
+        lock (_dohStateGate)
+        {
+            if (resetRouting)
+                _dohRouting = DohRoutingDecision.Default;
+            _dohMonitorStatus = resetRouting ? "未运行" : "重新连接中…";
+            _dohLastCheckedAtUtc = null;
+            if (resetRouting)
+                _dohStatuses = CreateStoppedDohStatuses();
+        }
+    }
+
+    private async Task DohMonitorLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (await _dohProbeGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        await RunDohHealthCheckAsync(cancellationToken, announce: false).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        _dohProbeGate.Release();
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                SetDohMonitorFailure(DescribeDiagnosticsFailure(exception));
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private async Task RunDohHealthCheckAsync(
+        CancellationToken cancellationToken,
+        bool announce)
+    {
+        if (!IsTunRunning)
+        {
+            lock (_dohStateGate)
+            {
+                _dohMonitorStatus = "TUN 未运行";
+                _dohLastCheckedAtUtc = null;
+                _dohStatuses = CreateStoppedDohStatuses();
+            }
+            return;
+        }
+
+        bool esimReady = ResolveCurrentEsimReady();
+        SingBoxDohEndpointDefinition[] endpoints = EgressDohConfiguration.Endpoints.ToArray();
+        SetDohChecking(endpoints, esimReady);
+
+        using SingBoxApiClient api = CreateApiClient();
+        string nonce = Guid.NewGuid().ToString("N");
+        var probes = new List<DohProbeResult>(endpoints.Length);
+        foreach (SingBoxDohEndpointDefinition endpoint in endpoints)
+        {
+            if (!EgressDohConfiguration.IsAvailable(endpoint, esimReady))
+                continue;
+
+            DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(8));
+                SingBoxDnsResponse response = await api.QueryDnsAsync(
+                    endpoint.CreateProbeHost(nonce),
+                    "A",
+                    timeout.Token).ConfigureAwait(false);
+                long latency = Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
+                bool healthy = response.Status is 0 or 3;
+                probes.Add(new DohProbeResult(
+                    endpoint.Tag,
+                    healthy,
+                    healthy ? DescribeDnsStatus(response.Status) : $"DNS 返回状态 {response.Status}。",
+                    response.Status,
+                    latency));
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                probes.Add(new DohProbeResult(
+                    endpoint.Tag,
+                    false,
+                    DescribeDiagnosticsFailure(exception),
+                    LatencyMilliseconds: Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds)));
+            }
+        }
+
+        DohRoutingDecision current = GetDohRouting();
+        DohRoutingDecision desired = EgressDohConfiguration.Decide(probes, esimReady, current);
+        DohRoutingDecision applied = current;
+        string? applyError = null;
+        if (!Equals(current, desired))
+        {
+            (bool succeeded, string? error) = await ApplyDohRoutingAsync(desired, cancellationToken).ConfigureAwait(false);
+            if (succeeded)
+            {
+                applied = desired;
+                if (announce || desired.FailClosed || !string.Equals(current.ClashDnsTag, desired.ClashDnsTag, StringComparison.Ordinal)
+                    || !string.Equals(current.EsimDnsTag, desired.EsimDnsTag, StringComparison.Ordinal))
+                {
+                    SetMessage(desired.FailClosed
+                        ? "DoH 不可用，TUN 已启用拒绝保护。"
+                        : $"DoH 已切换：eSIM={desired.EsimDnsTag}，7890={desired.ClashDnsTag}。");
+                }
+            }
+            else
+            {
+                applyError = error ?? "配置应用失败。";
+            }
+        }
+
+        DateTimeOffset observedAt = DateTimeOffset.UtcNow;
+        UpdateDohStatuses(endpoints, esimReady, probes, applied, observedAt, applyError);
+    }
+
+    private async Task<(bool Succeeded, string? Error)> ApplyDohRoutingAsync(
+        DohRoutingDecision desired,
+        CancellationToken cancellationToken)
+    {
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!IsTunRunning)
+                return (false, "TUN 已停止。");
+
+            SingBoxApplyResult applied = await _singBox.ApplyAsync(
+                token => PrepareRuntimeAsync(token, desired),
+                cancellationToken).ConfigureAwait(false);
+            if (!applied.Succeeded)
+                return (false, applied.ErrorMessage ?? "DoH 配置应用失败。");
+
+            lock (_dohStateGate)
+                _dohRouting = desired;
+            StartDiagnostics(LoadControllerEndpoint());
+            return (true, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return (false, "DoH 配置应用已取消。");
+        }
+        catch (Exception exception)
+        {
+            return (false, DescribeDiagnosticsFailure(exception));
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
+    }
+
+    private void SetDohChecking(
+        IReadOnlyList<SingBoxDohEndpointDefinition> endpoints,
+        bool esimReady)
+    {
+        DohRoutingDecision routing = GetDohRouting();
+        lock (_dohStateGate)
+        {
+            _dohMonitorStatus = "检测中…";
+            _dohStatuses = endpoints.Select(endpoint =>
+            {
+                bool available = EgressDohConfiguration.IsAvailable(endpoint, esimReady);
+                return DohStatusSnapshot.Create(
+                    endpoint,
+                    available,
+                    available && string.Equals(endpoint.Tag, ActiveTag(routing, endpoint.RoutePlane), StringComparison.Ordinal),
+                    isHealthy: null,
+                    available ? "检测中…" : "未启用",
+                    available ? "等待 sing-box DNS query 返回。" : "eSIM 网卡当前不可用。");
+            })
+                .ToArray();
+        }
+    }
+
+    private void UpdateDohStatuses(
+        IReadOnlyList<SingBoxDohEndpointDefinition> endpoints,
+        bool esimReady,
+        IReadOnlyList<DohProbeResult> probes,
+        DohRoutingDecision routing,
+        DateTimeOffset observedAt,
+        string? applyError)
+    {
+        int availableCount = 0;
+        int healthyCount = 0;
+        lock (_dohStateGate)
+        {
+            _dohStatuses = endpoints.Select(endpoint =>
+            {
+                bool available = EgressDohConfiguration.IsAvailable(endpoint, esimReady);
+                DohProbeResult? probe = probes.FirstOrDefault(item =>
+                    string.Equals(item.Tag, endpoint.Tag, StringComparison.Ordinal));
+                bool active = string.Equals(endpoint.Tag, ActiveTag(routing, endpoint.RoutePlane), StringComparison.Ordinal);
+                if (!available)
+                {
+                    return DohStatusSnapshot.Create(
+                        endpoint,
+                        isAvailable: false,
+                        isActive: false,
+                        isHealthy: null,
+                        "未启用",
+                        "eSIM 网卡当前不可用。",
+                        observedAt);
+                }
+
+                availableCount++;
+                if (probe?.IsHealthy == true)
+                    healthyCount++;
+                string state = probe is null
+                    ? "未知"
+                    : probe.IsHealthy
+                        ? active ? "正常 · 当前" : "正常 · 候选"
+                        : "失败";
+                string detail = probe?.Detail ?? "没有收到 sing-box DNS query 响应。";
+                if (!string.IsNullOrWhiteSpace(applyError))
+                    detail += " 配置应用失败：" + applyError;
+                return DohStatusSnapshot.Create(
+                    endpoint,
+                    isAvailable: true,
+                    isActive: active,
+                    isHealthy: probe?.IsHealthy,
+                    state,
+                    detail,
+                    observedAt,
+                    probe?.LatencyMilliseconds);
+            }).ToArray();
+            _dohLastCheckedAtUtc = observedAt;
+            _dohMonitorStatus = routing.FailClosed
+                ? "故障保护：TUN 已拒绝外部流量"
+                : $"检测完成：{healthyCount}/{availableCount} 个 DoH 可用";
+        }
+    }
+
+    private void SetDohMonitorFailure(string detail)
+    {
+        lock (_dohStateGate)
+            _dohMonitorStatus = "检测失败：" + detail;
+    }
+
+    private DohRoutingDecision GetDohRouting()
+    {
+        lock (_dohStateGate)
+            return _dohRouting;
+    }
+
+    private bool ResolveCurrentEsimReady()
+    {
+        try
+        {
+            return _environmentResolver.Resolve(_profile.NormalizeAndValidate(), _adapters).IsEsimReady;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string ActiveTag(DohRoutingDecision routing, DohRoutePlane plane)
+        => plane == DohRoutePlane.Esim ? routing.EsimDnsTag : routing.ClashDnsTag;
+
+    private static string DescribeDnsStatus(int status)
+        => status switch
+        {
+            0 => "NOERROR",
+            3 => "NXDOMAIN（上游已返回）",
+            _ => "DNS 返回状态 " + status,
+        };
+
+    private static IReadOnlyList<DohStatusSnapshot> CreateStoppedDohStatuses()
+        => EgressDohConfiguration.Endpoints
+            .Select(endpoint => DohStatusSnapshot.Create(
+                endpoint,
+                isAvailable: false,
+                isActive: false,
+                isHealthy: null,
+                "未运行",
+                "TUN 未运行。"))
+            .ToArray();
 
     private void StartDiagnostics(ControllerEndpoint? endpoint)
     {
@@ -902,6 +1333,7 @@ public sealed class AppController : IAsyncDisposable
             if (applied.Succeeded)
             {
                 StartDiagnostics(LoadControllerEndpoint());
+                StartDohMonitor();
                 SetMessage("检测到网络或 7890 owner 变化，配置已重新校验并应用。");
             }
             else

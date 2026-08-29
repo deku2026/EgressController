@@ -11,14 +11,18 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
   ElevatedHost、Named Pipe 或其他第二套提权控制面。
 - 应用发现只使用 Windows Store/MSIX、卸载注册表、App Paths 和 Program Files 目录；
   PATH、CLI、快捷方式和手工选择 EXE 不参与发现。已发现应用的目录会递归收集全部 EXE。
-- 勾选应用的递归 EXE 会转换为 sing-box `process_name` 规则，同时包含带 `.exe` 和不带扩展名
-  形式。sing-box 在每条新连接上实时解析进程，不依赖启动按钮、PID 表或 LaunchSession。
+- 勾选应用的递归 EXE 会转换为 sing-box `process_name` 规则，同时包含带 `.exe`/不带扩展名和
+  Windows 常见大小写形式（例如 `claude.exe`、`Claude.exe`）。sing-box 在每条新连接上实时解析
+  进程，不依赖启动按钮、PID 表或 LaunchSession。
 - 勾选的应用、SRS 和手工域名组成一个 eSIM 集合。命中且 eSIM 网卡可用时走 eSIM 直连；
   eSIM 不存在或离线时直接 `reject`，绝不回退到 7890。
 - 未命中规则的流量固定走用户已有的 `127.0.0.1:7890` SOCKS5。7890 的监听进程由 Windows
   owner table 动态识别，并优先绑定主网卡，避免 sing-box 回流到自身。
 - sing-box 管理 DoH、DNS 劫持、IPv4-only DNS 策略、IPv6 防漏规则以及 Windows 全流量 TUN。
   主网卡和 eSIM 网卡分别绑定到对应 direct 出口。
+- “网络与内核”页展示实际生成的 DoH server、TLS SNI、detour 和连接状态。eSIM 与 7890 是两个
+  不同出口，各自配置 Cloudflare 与 Google 候选；程序每 60 秒通过 sing-box DNS query 检测，
+  当前候选不可用时只在同一出口内切换，两个候选都失败时保持 TUN 并拒绝 TUN 外部流量。
 - TUN 运行时会定期重新检查网卡和 7890 owner；环境发生变化时重新生成、校验并应用配置。
 - “连接”页展示真实活动/历史连接、进程、目标、协议、出口、规则和流量，支持双击详情、关闭
   单条/全部连接和清空历史；不提供独立的核心日志页面。sing-box 输出只保留有界的本地诊断日志。

@@ -39,7 +39,7 @@ public sealed class CompiledConfigCheckLiveTests
             Assert.True(artifact.Succeeded, artifact.Error);
 
             var compiler = new EgressProfileCompiler();
-            EgressProfileCompilationResult compiled = compiler.Compile(new EgressProfileCompileInput
+            EgressProfileCompileInput input = new()
             {
                 Profile = new EgressProfileDocument
                 {
@@ -53,7 +53,8 @@ public sealed class CompiledConfigCheckLiveTests
                 ControllerPort = 19091,
                 ControllerSecret = EgressProfileCompiler.CreateControllerSecret(),
                 LogPath = Path.Combine(root, "sing-box.log"),
-            });
+            };
+            EgressProfileCompilationResult compiled = compiler.Compile(input);
             string configPath = Path.Combine(root, "config.next.json");
             EgressProfileCompiler.WriteNext(configPath, compiled);
 
@@ -63,6 +64,18 @@ public sealed class CompiledConfigCheckLiveTests
                 TestContext.Current.CancellationToken);
 
             Assert.True(check.Succeeded, check.StandardError + check.StandardOutput);
+
+            EgressProfileCompilationResult failClosed = compiler.Compile(input with
+            {
+                DohRouting = new DohRoutingDecision { FailClosed = true },
+            });
+            string failClosedPath = Path.Combine(root, "config.fail-closed.json");
+            EgressProfileCompiler.WriteNext(failClosedPath, failClosed);
+            SingBoxCommandResult failClosedCheck = await new SingBoxCli().CheckAsync(
+                executable,
+                failClosedPath,
+                TestContext.Current.CancellationToken);
+            Assert.True(failClosedCheck.Succeeded, failClosedCheck.StandardError + failClosedCheck.StandardOutput);
         }
         finally
         {

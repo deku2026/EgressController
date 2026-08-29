@@ -23,8 +23,13 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal("0123456789abcdef0123456789abcdef", clashApi.GetProperty("secret").GetString());
         Assert.Equal("dns-esim", dns.GetProperty("servers")[0].GetProperty("tag").GetString());
         Assert.Equal("esim-direct", dns.GetProperty("servers")[0].GetProperty("detour").GetString());
-        Assert.Equal("dns-clash", dns.GetProperty("servers")[1].GetProperty("tag").GetString());
-        Assert.Equal("clash-7890", dns.GetProperty("servers")[1].GetProperty("detour").GetString());
+        Assert.Equal(4, dns.GetProperty("servers").GetArrayLength());
+        Assert.Equal("dns-esim-backup", dns.GetProperty("servers")[1].GetProperty("tag").GetString());
+        Assert.Equal("cloudflare-dns.com", dns.GetProperty("servers")[0].GetProperty("tls").GetProperty("server_name").GetString());
+        Assert.Equal("dns.google", dns.GetProperty("servers")[1].GetProperty("tls").GetProperty("server_name").GetString());
+        Assert.Equal("dns-clash", dns.GetProperty("servers")[2].GetProperty("tag").GetString());
+        Assert.Equal("dns-clash-backup", dns.GetProperty("servers")[3].GetProperty("tag").GetString());
+        Assert.Equal("clash-7890", dns.GetProperty("servers")[2].GetProperty("detour").GetString());
         Assert.Equal("ipv4_only", dns.GetProperty("strategy").GetString());
         Assert.Equal("sing-box", inbound.GetProperty("interface_name").GetString());
         Assert.Equal(2, inbound.GetProperty("address").GetArrayLength());
@@ -87,6 +92,48 @@ public sealed class EgressProfileCompilerTests
         {
             DeleteRoot(root);
         }
+    }
+
+    [Fact]
+    public void DoH_routing_can_select_the_fallback_per_exit_without_crossing_exit_planes()
+    {
+        EgressProfileCompileInput input = Input(
+            new EgressProfileDocument(),
+            applicationPaths: new[] { @"C:\Apps\Claude\claude.exe" }) with
+        {
+            DohRouting = new DohRoutingDecision
+            {
+                EsimDnsTag = EgressDohConfiguration.EsimGoogleTag,
+                ClashDnsTag = EgressDohConfiguration.ClashGoogleTag,
+            },
+        };
+
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        JsonElement root = json.RootElement;
+        JsonElement dns = root.GetProperty("dns");
+        JsonElement appDnsRule = dns.GetProperty("rules").EnumerateArray()
+            .First(rule => rule.TryGetProperty("process_name", out _));
+
+        Assert.Equal(EgressDohConfiguration.EsimGoogleTag, appDnsRule.GetProperty("server").GetString());
+        Assert.Equal(EgressDohConfiguration.ClashGoogleTag, dns.GetProperty("final").GetString());
+        Assert.Equal(EgressDohConfiguration.ClashGoogleTag, root.GetProperty("route")
+            .GetProperty("default_domain_resolver").GetString());
+        Assert.Equal(EgressProfileCompiler.EsimDirectTag, dns.GetProperty("servers")[1].GetProperty("detour").GetString());
+        Assert.Equal(EgressProfileCompiler.UpstreamSocksTag, dns.GetProperty("servers")[3].GetProperty("detour").GetString());
+    }
+
+    [Fact]
+    public void Fail_closed_rejects_only_tun_inbound_before_any_route()
+    {
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(
+            Input(new EgressProfileDocument()) with
+            {
+                DohRouting = new DohRoutingDecision { FailClosed = true },
+            }).JsonBytes);
+
+        JsonElement firstRule = json.RootElement.GetProperty("route").GetProperty("rules")[0];
+        Assert.Equal("reject", firstRule.GetProperty("action").GetString());
+        Assert.Equal("tun-in", firstRule.GetProperty("inbound")[0].GetString());
     }
 
     [Fact]
@@ -199,7 +246,12 @@ public sealed class EgressProfileCompilerTests
             item.GetProperty("tag").GetString() == EgressProfileCompiler.EsimDirectTag);
         Assert.DoesNotContain(root.GetProperty("dns").GetProperty("servers").EnumerateArray(), item =>
             item.GetProperty("tag").GetString() == EgressProfileCompiler.EsimDnsTag);
-        Assert.Equal("reject", root.GetProperty("dns").GetProperty("rules")[0].GetProperty("action").GetString());
+        Assert.Contains(root.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
+            rule.TryGetProperty("process_name", out _)
+            && rule.GetProperty("action").GetString() == "reject");
+        Assert.Contains(root.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
+            rule.TryGetProperty("domain_suffix", out _)
+            && rule.GetProperty("server").GetString() == EgressDohConfiguration.ClashGoogleTag);
     }
 
     [Fact]
