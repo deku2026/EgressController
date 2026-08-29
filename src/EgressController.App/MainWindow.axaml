@@ -119,12 +119,12 @@
             <TabItem Header="Windows 应用">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Spacing="10">
-                        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                             <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用或路径…" />
                             <Button Grid.Column="1" Classes="primary" Content="{Binding Apps.ScanText}" Command="{Binding Apps.ScanCommand}" />
                             <Button Grid.Column="2" Content="全选 eSIM" Command="{Binding Apps.SelectAllCommand}" />
                             <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}" />
-                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
                         </Grid>
                         <TextBlock Classes="muted" Text="{Binding Apps.Status}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>

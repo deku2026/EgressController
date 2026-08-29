@@ -108,7 +108,6 @@ public sealed class AppController : IAsyncDisposable
         _adapterService = new WindowsNetworkAdapterService();
         _profile = LoadProfile();
         ConfigureControlPlane(_profile.UpstreamPort);
-        LoadCachedCatalog();
         RefreshAdapters();
 
         _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync);
@@ -695,6 +694,7 @@ public sealed class AppController : IAsyncDisposable
                 return ControllerOperationResult.Success();
             }
 
+            string previousRuntimeFingerprint = GetRuntimeFingerprint();
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
@@ -703,6 +703,7 @@ public sealed class AppController : IAsyncDisposable
                 return ControllerOperationResult.Success();
             }
 
+            SetRuntimeFingerprint(previousRuntimeFingerprint);
             _profile = previous;
             try
             {
@@ -733,6 +734,7 @@ public sealed class AppController : IAsyncDisposable
             new SingBoxReleaseClient(_releaseHttpClient),
             new SingBoxCli(),
             _stateStore);
+        LoadCachedCatalog();
     }
 
     private void LoadCachedCatalog()
@@ -895,6 +897,7 @@ public sealed class AppController : IAsyncDisposable
             if (!IsTunRunning)
                 return;
 
+            string previousRuntimeFingerprint = GetRuntimeFingerprint();
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
@@ -903,6 +906,7 @@ public sealed class AppController : IAsyncDisposable
             }
             else
             {
+                SetRuntimeFingerprint(previousRuntimeFingerprint);
                 SetMessage("网络状态变化后的配置应用失败，已保留当前配置：" + (applied.ErrorMessage ?? "未知错误"));
             }
         }
@@ -914,7 +918,17 @@ public sealed class AppController : IAsyncDisposable
 
     private void SetRuntimeFingerprint(NetworkEnvironmentSnapshot environment, IReadOnlyList<string> ownerPaths)
     {
-        string fingerprint = BuildRuntimeFingerprint(environment, ownerPaths);
+        SetRuntimeFingerprint(BuildRuntimeFingerprint(environment, ownerPaths));
+    }
+
+    private string GetRuntimeFingerprint()
+    {
+        lock (_runtimeStateGate)
+            return _runtimeFingerprint;
+    }
+
+    private void SetRuntimeFingerprint(string fingerprint)
+    {
         lock (_runtimeStateGate)
             _runtimeFingerprint = fingerprint;
     }

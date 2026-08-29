@@ -36,7 +36,7 @@ public sealed class LocalLogSink
 
         lock (_gate)
         {
-            RotateIfNeeded(line.Length * sizeof(char));
+            RotateIfNeeded(Encoding.UTF8.GetByteCount(line));
             using var stream = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
             using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             writer.Write(line);

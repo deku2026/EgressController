@@ -248,8 +248,12 @@ public sealed class DirectSingBoxProcessClient : ISingBoxProcessClient
             if (ReferenceEquals(_process, process))
             {
                 int exitCode = TryGetExitCode(process);
-                SetStatus(new SingBoxProcessStatus(false, "stopped", null, _dropped, "process.exited", $"sing-box 已退出，退出码 {exitCode}。"));
-                Output?.Invoke(new SingBoxOutputEvent("lifecycle", $"sing-box exited with code {exitCode}.", _dropped));
+                SingBoxProcessStatus current = Status;
+                if (current.State is not ("stopping" or "stopped"))
+                {
+                    SetStatus(new SingBoxProcessStatus(false, "stopped", null, _dropped, "process.exited", $"sing-box 已退出，退出码 {exitCode}。"));
+                    Output?.Invoke(new SingBoxOutputEvent("lifecycle", $"sing-box exited with code {exitCode}.", _dropped));
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
