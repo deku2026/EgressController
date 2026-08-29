@@ -260,18 +260,39 @@ public sealed class EgressProfileCompiler
 
     private static string[] NormalizeProcessNames(IEnumerable<string> paths)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // sing-box receives the process name from Windows. Keep the casing variants explicit:
+        // process_name matching is owned by sing-box and must not rely on the host filesystem's
+        // case-insensitivity. Ordinal de-duplication also makes the generated JSON prove which
+        // spellings are accepted instead of silently collapsing them on the C# side.
+        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (string path in paths)
         {
             string fileName = Path.GetFileName(path);
             if (string.IsNullOrWhiteSpace(fileName))
                 throw Failure("upstream.owner.name", "上游 SOCKS5 owner executable name 为空。");
-            names.Add(fileName);
+            AddProcessNameVariants(names, fileName);
             string withoutExtension = Path.GetFileNameWithoutExtension(fileName);
             if (!string.IsNullOrWhiteSpace(withoutExtension))
-                names.Add(withoutExtension);
+                AddProcessNameVariants(names, withoutExtension);
         }
-        return names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+        return names
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static void AddProcessNameVariants(HashSet<string> names, string value)
+    {
+        names.Add(value);
+
+        string lower = value.ToLowerInvariant();
+        names.Add(lower);
+
+        if (value.Length > 0)
+        {
+            string title = char.ToUpperInvariant(value[0]) + value[1..].ToLowerInvariant();
+            names.Add(title);
+        }
     }
 
     private static List<SingBoxRuleSetInput> NormalizeRuleSets(

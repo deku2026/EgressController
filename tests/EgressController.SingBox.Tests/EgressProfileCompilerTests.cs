@@ -132,6 +132,41 @@ public sealed class EgressProfileCompilerTests
     }
 
     [Fact]
+    public void Process_name_matching_keeps_windows_case_variants_for_the_same_application()
+    {
+        EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(Input(
+            new EgressProfileDocument(),
+            applicationPaths: new[]
+            {
+                @"C:\Apps\Claude\claude.exe",
+                @"C:\Apps\Claude\Claude.exe",
+            }));
+
+        using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
+        JsonElement routeRule = json.RootElement.GetProperty("route").GetProperty("rules")[4];
+        string[] routeNames = routeRule.GetProperty("process_name")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        JsonElement dnsRule = json.RootElement.GetProperty("dns").GetProperty("rules")
+            .EnumerateArray()
+            .First(rule => rule.TryGetProperty("process_name", out _));
+        string[] dnsNames = dnsRule.GetProperty("process_name")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+
+        Assert.Equal(4, routeNames.Length);
+        Assert.Contains("Claude", routeNames);
+        Assert.Contains("Claude.exe", routeNames);
+        Assert.Contains("claude", routeNames);
+        Assert.Contains("claude.exe", routeNames);
+        Assert.Equal(routeNames, dnsNames);
+        Assert.Equal(4, routeNames.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain(routeNames, name => name == "CLAUDE.EXE");
+    }
+
+    [Fact]
     public void Owner_self_overlap_is_rejected_with_precise_code()
     {
         string owner = Path.GetFullPath(@"C:\Apps\EgressController\sing-box.exe");
