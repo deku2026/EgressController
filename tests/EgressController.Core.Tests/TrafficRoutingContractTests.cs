@@ -14,10 +14,12 @@ public sealed class TrafficRoutingContractTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input()).JsonBytes);
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
 
-        Assert.Equal(3, rules.GetArrayLength());
+        Assert.Equal(4, rules.GetArrayLength());
         Assert.Equal("sniff", rules[0].GetProperty("action").GetString());
         Assert.Equal("hijack-dns", rules[1].GetProperty("action").GetString());
-        Assert.Equal("primary-direct", rules[2].GetProperty("outbound").GetString());
+        Assert.Equal(6, rules[2].GetProperty("ip_version").GetInt32());
+        Assert.Equal("reject", rules[2].GetProperty("action").GetString());
+        Assert.Equal("primary-direct", rules[3].GetProperty("outbound").GetString());
     }
 
     [Fact]
@@ -40,9 +42,9 @@ public sealed class TrafficRoutingContractTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
 
-        Assert.Equal(5, rules.GetArrayLength());
-        Assert.Equal("esim-direct", rules[3].GetProperty("outbound").GetString());
+        Assert.Equal(6, rules.GetArrayLength());
         Assert.Equal("esim-direct", rules[4].GetProperty("outbound").GetString());
+        Assert.Equal("esim-direct", rules[5].GetProperty("outbound").GetString());
     }
 
     private static EgressProfileCompileInput Input()

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Text.Json;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
@@ -22,22 +21,46 @@ public sealed class EgressProfileCompilerTests
         JsonElement clashApi = root.GetProperty("experimental").GetProperty("clash_api");
         Assert.Equal("127.0.0.1:19090", clashApi.GetProperty("external_controller").GetString());
         Assert.Equal("0123456789abcdef0123456789abcdef", clashApi.GetProperty("secret").GetString());
-        Assert.Equal("dns-clash", dns.GetProperty("servers")[0].GetProperty("tag").GetString());
-        Assert.Equal("clash-7890", dns.GetProperty("servers")[0].GetProperty("detour").GetString());
-        Assert.Equal("prefer_ipv4", dns.GetProperty("strategy").GetString());
+        JsonElement dnsServers = dns.GetProperty("servers");
+        Assert.Equal(5, dnsServers.GetArrayLength());
+        JsonElement bootstrap = dnsServers[0];
+        Assert.Equal("local", bootstrap.GetProperty("type").GetString());
+        Assert.Equal(EgressProfileCompiler.DohBootstrapTag, bootstrap.GetProperty("tag").GetString());
+
+        JsonElement esimCloudflare = dnsServers.EnumerateArray()
+            .Single(server => server.GetProperty("tag").GetString() == EgressDohConfiguration.EsimCloudflareTag);
+        JsonElement esimDnsPod = dnsServers.EnumerateArray()
+            .Single(server => server.GetProperty("tag").GetString() == EgressDohConfiguration.EsimDnsPodTag);
+        JsonElement clashCloudflare = dnsServers.EnumerateArray()
+            .Single(server => server.GetProperty("tag").GetString() == EgressDohConfiguration.ClashCloudflareTag);
+        JsonElement clashDnsPod = dnsServers.EnumerateArray()
+            .Single(server => server.GetProperty("tag").GetString() == EgressDohConfiguration.ClashDnsPodTag);
+        Assert.Equal("https", esimCloudflare.GetProperty("type").GetString());
+        Assert.Equal("cloudflare-dns.com", esimCloudflare.GetProperty("server").GetString());
+        Assert.Equal("esim-direct", esimCloudflare.GetProperty("detour").GetString());
+        Assert.Equal("doh.pub", esimDnsPod.GetProperty("server").GetString());
+        Assert.Equal("doh.pub", esimDnsPod.GetProperty("tls").GetProperty("server_name").GetString());
+        Assert.Equal("cloudflare-dns.com", clashCloudflare.GetProperty("tls").GetProperty("server_name").GetString());
+        Assert.Equal("doh.pub", clashDnsPod.GetProperty("tls").GetProperty("server_name").GetString());
+        Assert.Equal("clash-7890", clashCloudflare.GetProperty("detour").GetString());
+        Assert.All(dnsServers.EnumerateArray().Where(server => server.GetProperty("type").GetString() == "https"), server =>
+            Assert.Equal(EgressProfileCompiler.DohBootstrapTag, server.GetProperty("domain_resolver").GetString()));
+        Assert.Equal("ipv4_only", dns.GetProperty("strategy").GetString());
         Assert.Equal("sing-box", inbound.GetProperty("interface_name").GetString());
-        Assert.Single(inbound.GetProperty("address").EnumerateArray());
+        Assert.Equal(2, inbound.GetProperty("address").GetArrayLength());
         Assert.Equal("esim-direct", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
         Assert.Equal("primary-direct", root.GetProperty("outbounds")[1].GetProperty("tag").GetString());
         Assert.Equal("clash-7890", root.GetProperty("outbounds")[2].GetProperty("tag").GetString());
         Assert.False(route.TryGetProperty("rule_set", out _));
-        Assert.False(route.TryGetProperty("auto_detect_interface", out _));
-        Assert.False(route.TryGetProperty("find_process", out _));
+        Assert.True(route.GetProperty("auto_detect_interface").GetBoolean());
+        Assert.True(route.GetProperty("find_process").GetBoolean());
         Assert.Equal("sniff", route.GetProperty("rules")[0].GetProperty("action").GetString());
         Assert.Equal("dns", route.GetProperty("rules")[1].GetProperty("protocol").GetString());
         Assert.Equal("hijack-dns", route.GetProperty("rules")[1].GetProperty("action").GetString());
-        Assert.True(route.GetProperty("rules")[2].TryGetProperty("process_name", out _));
-        Assert.False(route.GetProperty("rules")[2].TryGetProperty("process_path", out _));
+        Assert.Equal(6, route.GetProperty("rules")[2].GetProperty("ip_version").GetInt32());
+        Assert.Equal("reject", route.GetProperty("rules")[2].GetProperty("action").GetString());
+        Assert.True(route.GetProperty("rules")[3].TryGetProperty("process_name", out _));
+        Assert.False(route.GetProperty("rules")[3].TryGetProperty("process_path", out _));
     }
 
     [Fact]
@@ -63,15 +86,18 @@ public sealed class EgressProfileCompilerTests
             JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
             JsonElement outbounds = json.RootElement.GetProperty("outbounds");
 
-            Assert.Equal(6, rules.GetArrayLength());
+            Assert.Equal(7, rules.GetArrayLength());
             Assert.Equal("sniff", rules[0].GetProperty("action").GetString());
             Assert.Equal("hijack-dns", rules[1].GetProperty("action").GetString());
-            Assert.Equal("primary-direct", rules[2].GetProperty("outbound").GetString());
-            Assert.False(rules[3].TryGetProperty("process_path", out _));
-            Assert.Equal(@"(?i)^C:\\Apps\\Chrome\\chrome\.exe$", rules[3].GetProperty("process_path_regex")[0].GetString());
-            Assert.Equal("google", rules[4].GetProperty("rule_set")[0].GetString());
-            Assert.Equal("openai.com", rules[5].GetProperty("domain_suffix")[0].GetString());
+            Assert.Equal("reject", rules[2].GetProperty("action").GetString());
+            Assert.Equal("primary-direct", rules[3].GetProperty("outbound").GetString());
+            Assert.False(rules[4].TryGetProperty("process_path", out _));
+            Assert.Contains("chrome.exe", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+            Assert.Contains("chrome", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+            Assert.Equal("google", rules[5].GetProperty("rule_set")[0].GetString());
+            Assert.Equal("openai.com", rules[6].GetProperty("domain_suffix")[0].GetString());
             Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
+            Assert.Equal(EgressProfileCompiler.DohBootstrapTag, json.RootElement.GetProperty("route").GetProperty("default_domain_resolver").GetString());
             Assert.Equal("esim-direct", outbounds[0].GetProperty("tag").GetString());
             Assert.Equal("primary-direct", outbounds[1].GetProperty("tag").GetString());
             Assert.Equal("clash-7890", outbounds[2].GetProperty("tag").GetString());
@@ -81,6 +107,53 @@ public sealed class EgressProfileCompilerTests
         {
             DeleteRoot(root);
         }
+    }
+
+    [Fact]
+    public void DoH_routing_can_select_the_fallback_per_exit_without_crossing_exit_planes()
+    {
+        EgressProfileCompileInput input = Input(
+            new EgressProfileDocument(),
+            applicationPaths: new[] { @"C:\Apps\Claude\claude.exe" }) with
+        {
+            DohRouting = new DohRoutingDecision
+            {
+                EsimDnsTag = EgressDohConfiguration.EsimDnsPodTag,
+                ClashDnsTag = EgressDohConfiguration.ClashDnsPodTag,
+            },
+        };
+
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        JsonElement root = json.RootElement;
+        JsonElement dns = root.GetProperty("dns");
+        JsonElement appDnsRule = dns.GetProperty("rules").EnumerateArray()
+            .First(rule => rule.TryGetProperty("process_name", out _));
+
+        Assert.Equal(EgressDohConfiguration.EsimDnsPodTag, appDnsRule.GetProperty("server").GetString());
+        Assert.Equal(EgressDohConfiguration.ClashDnsPodTag, dns.GetProperty("final").GetString());
+        Assert.Equal(EgressProfileCompiler.DohBootstrapTag, root.GetProperty("route")
+            .GetProperty("default_domain_resolver").GetString());
+        JsonElement servers = dns.GetProperty("servers");
+        Assert.Equal(EgressProfileCompiler.EsimDirectTag, servers.EnumerateArray()
+            .Single(server => server.GetProperty("tag").GetString() == EgressDohConfiguration.EsimDnsPodTag)
+            .GetProperty("detour").GetString());
+        Assert.Equal(EgressProfileCompiler.UpstreamSocksTag, servers.EnumerateArray()
+            .Single(server => server.GetProperty("tag").GetString() == EgressDohConfiguration.ClashDnsPodTag)
+            .GetProperty("detour").GetString());
+    }
+
+    [Fact]
+    public void Fail_closed_rejects_only_tun_inbound_before_any_route()
+    {
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(
+            Input(new EgressProfileDocument()) with
+            {
+                DohRouting = new DohRoutingDecision { FailClosed = true },
+            }).JsonBytes);
+
+        JsonElement firstRule = json.RootElement.GetProperty("route").GetProperty("rules")[0];
+        Assert.Equal("reject", firstRule.GetProperty("action").GetString());
+        Assert.Equal("tun-in", firstRule.GetProperty("inbound")[0].GetString());
     }
 
     [Fact]
@@ -100,15 +173,15 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal(first.Sha256, second.Sha256);
         using JsonDocument json = JsonDocument.Parse(first.JsonBytes);
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
-        Assert.Equal(4, rules.GetArrayLength());
-        Assert.Equal("primary-direct", rules[2].GetProperty("outbound").GetString());
-        Assert.Contains("proxy.exe", rules[2].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
-        Assert.Contains("proxy", rules[2].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
-        Assert.Equal(2, rules[3].GetProperty("process_path_regex").GetArrayLength());
+        Assert.Equal(5, rules.GetArrayLength());
+        Assert.Equal("primary-direct", rules[3].GetProperty("outbound").GetString());
+        Assert.Contains("proxy.exe", rules[3].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("proxy", rules[3].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("brave.exe", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]
-    public void Application_paths_are_case_insensitive_but_remain_exact_and_regex_safe()
+    public void Application_paths_are_compiled_to_stable_process_names()
     {
         const string configuredPath = @"C:\Program Files\Vendor (Preview)\App[1]+.EXE";
         EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(Input(
@@ -116,14 +189,48 @@ public sealed class EgressProfileCompilerTests
             applicationPaths: new[] { configuredPath }));
 
         using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
-        JsonElement applicationRule = json.RootElement.GetProperty("route").GetProperty("rules")[3];
-        string expression = Assert.Single(applicationRule.GetProperty("process_path_regex").EnumerateArray()).GetString()!;
-        var matcher = new Regex(expression, RegexOptions.CultureInvariant);
+        JsonElement applicationRule = json.RootElement.GetProperty("route").GetProperty("rules")[4];
+        string[] processNames = applicationRule.GetProperty("process_name").EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        Assert.Contains("App[1]+.EXE", processNames);
+        Assert.Contains("App[1]+", processNames);
+        Assert.False(applicationRule.TryGetProperty("process_path_regex", out _));
+    }
 
-        Assert.Matches(matcher, configuredPath.ToLowerInvariant());
-        Assert.Matches(matcher, configuredPath.ToUpperInvariant());
-        Assert.DoesNotMatch(matcher, configuredPath + ".helper");
-        Assert.DoesNotMatch(matcher, @"D:\Program Files\Vendor (Preview)\App[1]+.EXE");
+    [Fact]
+    public void Process_name_matching_keeps_windows_case_variants_for_the_same_application()
+    {
+        EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(Input(
+            new EgressProfileDocument(),
+            applicationPaths: new[]
+            {
+                @"C:\Apps\Claude\claude.exe",
+                @"C:\Apps\Claude\Claude.exe",
+            }));
+
+        using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
+        JsonElement routeRule = json.RootElement.GetProperty("route").GetProperty("rules")[4];
+        string[] routeNames = routeRule.GetProperty("process_name")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        JsonElement dnsRule = json.RootElement.GetProperty("dns").GetProperty("rules")
+            .EnumerateArray()
+            .First(rule => rule.TryGetProperty("process_name", out _));
+        string[] dnsNames = dnsRule.GetProperty("process_name")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+
+        Assert.Equal(4, routeNames.Length);
+        Assert.Contains("Claude", routeNames);
+        Assert.Contains("Claude.exe", routeNames);
+        Assert.Contains("claude", routeNames);
+        Assert.Contains("claude.exe", routeNames);
+        Assert.Equal(routeNames, dnsNames);
+        Assert.Equal(4, routeNames.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain(routeNames, name => name == "CLAUDE.EXE");
     }
 
     [Fact]
@@ -137,6 +244,34 @@ public sealed class EgressProfileCompilerTests
                 selfPaths: new[] { owner })));
 
         Assert.Equal("upstream.owner.self", exception.Code);
+    }
+
+    [Fact]
+    public void Offline_esim_rejects_selected_process_and_domain_without_an_esim_outbound()
+    {
+        EgressProfileCompileInput input = Input(
+            new EgressProfileDocument { EsimDomains = new[] { "openai.com" } },
+            applicationPaths: new[] { @"C:\Apps\Chrome\chrome.exe" },
+            environment: EnvironmentSnapshot(esimReady: false));
+
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        JsonElement root = json.RootElement;
+        JsonElement routeRules = root.GetProperty("route").GetProperty("rules");
+        JsonElement processRule = routeRules[4];
+        JsonElement domainRule = routeRules[5];
+        Assert.Equal("reject", processRule.GetProperty("action").GetString());
+        Assert.Equal("reject", domainRule.GetProperty("action").GetString());
+        Assert.Equal(2, root.GetProperty("outbounds").GetArrayLength());
+        Assert.DoesNotContain(root.GetProperty("outbounds").EnumerateArray(), item =>
+            item.GetProperty("tag").GetString() == EgressProfileCompiler.EsimDirectTag);
+        Assert.DoesNotContain(root.GetProperty("dns").GetProperty("servers").EnumerateArray(), item =>
+            item.GetProperty("tag").GetString() == EgressProfileCompiler.EsimDnsTag);
+        Assert.Contains(root.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
+            rule.TryGetProperty("process_name", out _)
+            && rule.GetProperty("action").GetString() == "reject");
+        Assert.Contains(root.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
+            rule.TryGetProperty("domain_suffix", out _)
+            && rule.GetProperty("server").GetString() == EgressDohConfiguration.ClashDnsPodTag);
     }
 
     [Fact]
@@ -224,18 +359,20 @@ public sealed class EgressProfileCompilerTests
             ControllerSecret = "0123456789abcdef0123456789abcdef",
         };
 
-    private static NetworkEnvironmentSnapshot EnvironmentSnapshot(bool hasPrimaryAddress = true)
+    private static NetworkEnvironmentSnapshot EnvironmentSnapshot(
+        bool hasPrimaryAddress = true,
+        bool esimReady = true)
     {
         Guid primaryId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         Guid esimId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         return new NetworkEnvironmentSnapshot
         {
             Primary = Adapter(primaryId, "Ethernet", hasPrimaryAddress ? "192.0.2.10" : null),
-            Esim = Adapter(esimId, "Cellular", "198.51.100.10"),
+            Esim = Adapter(esimId, "Cellular", esimReady ? "198.51.100.10" : null, isUp: esimReady),
         };
     }
 
-    private static AdapterSelection Adapter(Guid id, string alias, string? ipv4)
+    private static AdapterSelection Adapter(Guid id, string alias, string? ipv4, bool isUp = true)
         => new()
         {
             AdapterId = id,
@@ -243,7 +380,7 @@ public sealed class EgressProfileCompilerTests
             Luid = 1,
             IfIndex = 10,
             Ipv6IfIndex = 10,
-            IsUp = true,
+            IsUp = isUp,
             AddressState = ipv4 is null ? AdapterAddressState.NoAddress : AdapterAddressState.Ipv4Only,
             Ipv4BindAddress = ipv4 is null ? null : IPAddress.Parse(ipv4),
             Ipv6BindAddress = null,

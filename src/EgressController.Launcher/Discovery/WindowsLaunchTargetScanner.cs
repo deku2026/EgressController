@@ -11,10 +11,9 @@ namespace EgressController.Launcher.Discovery;
 /// <summary>
 /// Discovers launchable Windows applications from the same primary sources used by
 /// BCUninstaller: the per-user Store package API, the 32/64-bit uninstall registry and
-/// App Paths. PATH/CLI entries are deliberately excluded from the Windows catalog; a user can
-/// add an explicit EXE path from the UI when needed. Start Menu/Desktop shortcuts are deliberately
-/// not a catalog source; they duplicate the same application many times and do not provide a
-/// reliable process ownership root.
+/// App Paths. PATH/CLI entries and shortcuts are excluded. The resulting broad discovery is
+/// filtered through <see cref="SupportedApplicationCatalog"/> so the UI only exposes AI clients
+/// and browsers; no manual EXE fallback exists.
 /// </summary>
 public sealed class WindowsLaunchTargetScanner
 {
@@ -32,7 +31,7 @@ public sealed class WindowsLaunchTargetScanner
         DiscoverInstalledRegistryApps(registry);
         DiscoverAppPaths(registry);
         DiscoverProgramFilesApps(registry);
-        return registry.All();
+        return registry.All().Where(SupportedApplicationCatalog.IsSupported).ToArray();
     }
 
     /// <summary>

@@ -69,6 +69,20 @@ public sealed class SingBoxServiceTests : IDisposable
         Assert.Equal(SingBoxServiceState.Stopped, service.Status.State);
     }
 
+    [Fact]
+    public async Task Unexpected_core_exit_changes_running_service_to_failed()
+    {
+        var host = new FakeHost();
+        await using var service = new SingBoxService(host, new SingBoxStateStore(_root));
+        Assert.True((await service.ApplyCandidateAsync(Candidate("running"), TestContext.Current.CancellationToken)).Succeeded);
+
+        host.Emit(new SingBoxOutputEvent("lifecycle", "sing-box exited with code 1.", 0));
+
+        Assert.Equal(SingBoxServiceState.Failed, service.Status.State);
+        Assert.Equal("process.exited", service.Status.ErrorCode);
+        Assert.Contains("exited", service.Status.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static SingBoxRuntimeCandidate Candidate(string suffix)
         => new()
         {
@@ -85,33 +99,31 @@ public sealed class SingBoxServiceTests : IDisposable
             Directory.Delete(_root, recursive: true);
     }
 
-    private sealed class FakeHost : IElevatedHostClient
+    private sealed class FakeHost : ISingBoxProcessClient
     {
         public List<(SingBoxRuntimeCandidate Candidate, bool Restart)> Started { get; } = new();
         public int StopCount { get; private set; }
-        event Action<SingBoxOutputEvent>? IElevatedHostClient.Output
-        {
-            add { }
-            remove { }
-        }
+        public event Action<SingBoxOutputEvent>? Output;
 
-        public Task<ElevatedHostClientStatus> StartAsync(
+        public void Emit(SingBoxOutputEvent output) => Output?.Invoke(output);
+
+        public Task<SingBoxProcessStatus> StartAsync(
             SingBoxRuntimeCandidate candidate,
             bool restart,
             CancellationToken cancellationToken = default)
         {
             Started.Add((candidate, restart));
-            return Task.FromResult(new ElevatedHostClientStatus(true, "running", 1234, 0, null, null));
+            return Task.FromResult(new SingBoxProcessStatus(true, "running", 1234, 0, null, null));
         }
 
-        public Task<ElevatedHostClientStatus> StopAsync(CancellationToken cancellationToken = default)
+        public Task<SingBoxProcessStatus> StopAsync(CancellationToken cancellationToken = default)
         {
             StopCount++;
-            return Task.FromResult(new ElevatedHostClientStatus(true, "stopped", null, 0, null, null));
+            return Task.FromResult(new SingBoxProcessStatus(true, "stopped", null, 0, null, null));
         }
 
-        public Task<ElevatedHostClientStatus> GetStatusAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new ElevatedHostClientStatus(true, "stopped", null, 0, null, null));
+        public Task<SingBoxProcessStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new SingBoxProcessStatus(true, "stopped", null, 0, null, null));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

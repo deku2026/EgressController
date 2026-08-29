@@ -26,4 +26,15 @@ public sealed record NetworkEnvironmentSnapshot
     public DateTimeOffset CapturedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 
     public bool IsDualStack => Primary.HasIpv4 && Primary.HasIpv6 && Esim.HasIpv4 && Esim.HasIpv6;
+
+    /// <summary>
+    /// Whether the selected eSIM interface can currently be used as an Internet-bound direct
+    /// exit. A missing/offline eSIM is valid for TUN startup; callers must fail closed for rules
+    /// assigned to eSIM instead of falling back to another interface.
+    /// </summary>
+    public bool IsEsimReady
+        => Esim.AdapterId != Guid.Empty
+            && !string.IsNullOrWhiteSpace(Esim.Alias)
+            && Esim.IsUp
+            && (Esim.HasIpv4 || Esim.HasIpv6);
 }

@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" />
+    <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
   </ItemGroup>
 

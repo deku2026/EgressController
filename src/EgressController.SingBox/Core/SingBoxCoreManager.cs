@@ -45,12 +45,9 @@ public sealed class SingBoxCoreManager
     {
         ArgumentNullException.ThrowIfNull(selection);
         string mode = (selection.Mode ?? string.Empty).Trim().ToLowerInvariant();
-        return mode switch
-        {
-            EgressProfileSchema.ManagedCore => await PrepareManagedAsync(cancellationToken).ConfigureAwait(false),
-            EgressProfileSchema.SystemCore => await PrepareSystemAsync(selection.SystemPath, cancellationToken).ConfigureAwait(false),
-            _ => throw new SingBoxCoreException("Core mode 必须是 managed 或 system。", "core.mode"),
-        };
+        if (mode != EgressProfileSchema.ManagedCore)
+            throw new SingBoxCoreException("只支持由 EgressController 管理的 sing-box core。", "core.mode");
+        return await PrepareManagedAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<SingBoxCoreCandidate> PrepareManagedAsync(CancellationToken cancellationToken = default)
@@ -58,7 +55,22 @@ public sealed class SingBoxCoreManager
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            SingBoxRelease release = await _releaseClient.GetLatestStableAsync(cancellationToken).ConfigureAwait(false);
+            SingBoxRelease release;
+            try
+            {
+                release = await _releaseClient.GetLatestStableAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                SingBoxCoreCandidate? cached = await TryUseCachedCurrentAsync(cancellationToken).ConfigureAwait(false);
+                if (cached is not null)
+                    return cached;
+
+                throw new SingBoxCoreException(
+                    "无法获取 sing-box stable release，且没有可验证的本地 core。",
+                    "core.release",
+                    exception);
+            }
             if (!SingBoxReleaseClient.TryParseSupportedVersion(release.TagName, out Version? version))
                 throw new SingBoxCoreException($"当前 stable core {release.TagName} 超出 EgressController 支持范围。", "core.version");
             Version supportedVersion = version
@@ -158,30 +170,26 @@ public sealed class SingBoxCoreManager
         }
     }
 
-    public async Task<SingBoxCoreCandidate> PrepareSystemAsync(
-        string? executablePath,
-        CancellationToken cancellationToken = default)
+    private async Task<SingBoxCoreCandidate?> TryUseCachedCurrentAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(executablePath))
-            throw new SingBoxCoreException("System core 必须选择 sing-box.exe。", "core.system.missing");
-        string fullPath = Path.GetFullPath(executablePath.Trim());
-        if (!string.Equals(Path.GetFileName(fullPath), "sing-box.exe", StringComparison.OrdinalIgnoreCase))
-            throw new SingBoxCoreException("System core 必须是 sing-box.exe。", "core.system.name");
-        if (!File.Exists(fullPath))
-            throw new SingBoxCoreException("System core 路径不存在。", "core.system.path");
+        SingBoxCorePointer? current = _stateStore.LoadCurrent();
+        if (current is null || !File.Exists(current.ExecutablePath))
+            return null;
 
-        string digest = await ComputeSha256Async(fullPath, cancellationToken).ConfigureAwait(false);
-        SingBoxVersionInfo version = await _cli.GetVersionAsync(fullPath, cancellationToken).ConfigureAwait(false);
-        EnsureSupportedVersion(version.Version, "core.system.version");
-        await CheckMinimalConfigAsync(fullPath, cancellationToken).ConfigureAwait(false);
-        return new SingBoxCoreCandidate
+        try
         {
-            Mode = EgressProfileSchema.SystemCore,
-            Version = version.Version.ToString(),
-            ExecutablePath = fullPath,
-            Sha256 = digest,
-            IsManaged = false,
-        };
+            return await ValidateCandidateAsync(
+                EgressProfileSchema.ManagedCore,
+                current.Version,
+                current.ExecutablePath,
+                current.Sha256,
+                isManaged: true,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (SingBoxCoreException)
+        {
+            return null;
+        }
     }
 
     public void MarkLastGood(SingBoxCoreCandidate candidate)
@@ -194,6 +202,29 @@ public sealed class SingBoxCoreManager
             Sha256 = candidate.Sha256,
             VerifiedAtUtc = DateTimeOffset.UtcNow,
         });
+    }
+
+    /// <summary>Runs the real core check against the complete generated runtime config.</summary>
+    public async Task CheckConfigAsync(
+        SingBoxCoreCandidate candidate,
+        string configPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
+            throw new SingBoxCoreException("生成的 sing-box 配置文件不存在。", "config.missing");
+
+        SingBoxCommandResult result = await _cli.CheckAsync(
+            candidate.ExecutablePath,
+            Path.GetFullPath(configPath),
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            string detail = TrimOutput(result.StandardError, result.StandardOutput);
+            throw new SingBoxCoreException(
+                "sing-box 配置校验失败：" + detail,
+                "config.check");
+        }
     }
 
     private async Task<SingBoxCoreCandidate> ValidateCandidateAsync(

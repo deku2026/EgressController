@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using EgressController.Core.Profile;
 using EgressController.SingBox.Cli;
 using EgressController.SingBox.Core;
 using EgressController.State.SingBox;
@@ -80,19 +81,37 @@ public sealed class SingBoxCoreManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task System_core_uses_the_same_version_and_check_gate_without_copying_the_file()
+    public async Task Non_managed_core_mode_is_rejected_before_any_download()
     {
-        string? executable = FindOnPath("sing-box.exe");
-        if (executable is null)
-            Assert.Skip("sing-box.exe is not installed on this test machine.");
-
         var manager = new SingBoxCoreManager(_directory, new FakeReleaseClient([], null), new SingBoxCli());
-        SingBoxCoreCandidate candidate = await manager.PrepareSystemAsync(executable, TestContext.Current.CancellationToken);
+        SingBoxCoreException exception = await Assert.ThrowsAsync<SingBoxCoreException>(
+            () => manager.PrepareAsync(
+                new EgressCoreSelection { Mode = "system" },
+                TestContext.Current.CancellationToken));
 
-        Assert.False(candidate.IsManaged);
-        Assert.Equal(Path.GetFullPath(executable), candidate.ExecutablePath);
-        Assert.True(File.Exists(candidate.ExecutablePath));
-        Assert.False(File.Exists(Path.Combine(_directory, "core", candidate.Version, "sing-box.exe")));
+        Assert.Equal("core.mode", exception.Code);
+    }
+
+    [Fact]
+    public async Task Verified_cached_core_survives_release_rate_limit()
+    {
+        string executable = Path.Combine(_directory, "core", "1.13.19", "sing-box.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "cached-sing-box");
+        string digest = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(executable))).ToLowerInvariant();
+        new SingBoxStateStore(_directory).SaveCurrent(new SingBoxCorePointer
+        {
+            Version = "1.13.19",
+            ExecutablePath = executable,
+            Sha256 = digest,
+            VerifiedAtUtc = DateTimeOffset.UtcNow,
+        });
+
+        var manager = new SingBoxCoreManager(_directory, new RateLimitedReleaseClient(), new FakeCli());
+        SingBoxCoreCandidate candidate = await manager.PrepareManagedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(executable, candidate.ExecutablePath);
+        Assert.Equal(digest, candidate.Sha256);
     }
 
     private static byte[] MakeZip(params (string Path, string Content)[] entries)
@@ -110,12 +129,6 @@ public sealed class SingBoxCoreManagerTests : IDisposable
         }
         return output.ToArray();
     }
-
-    private static string? FindOnPath(string fileName)
-        => Environment.GetEnvironmentVariable("PATH")?
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(directory => Path.Combine(directory, fileName))
-            .FirstOrDefault(File.Exists);
 
     public void Dispose()
     {
@@ -167,5 +180,14 @@ public sealed class SingBoxCoreManagerTests : IDisposable
                 StandardOutput = string.Empty,
                 StandardError = string.Empty,
             });
+    }
+
+    private sealed class RateLimitedReleaseClient : ISingBoxReleaseClient
+    {
+        public Task<SingBoxRelease> GetLatestStableAsync(CancellationToken cancellationToken = default)
+            => Task.FromException<SingBoxRelease>(new HttpRequestException("403 (rate limit exceeded)"));
+
+        public Task DownloadAsync(SingBoxReleaseAsset asset, Stream destination, CancellationToken cancellationToken = default)
+            => Task.FromException(new HttpRequestException("download must not be attempted"));
     }
 }
