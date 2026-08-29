@@ -1,5 +1,3 @@
-using System.IO.Pipes;
-using EgressController.Core.Ipc;
 using EgressController.SingBox.Core;
 using EgressController.State.SingBox;
 
@@ -95,7 +93,7 @@ public sealed record SingBoxApplyResult(
     string? ErrorCode,
     string? ErrorMessage);
 
-public sealed record ElevatedHostClientStatus(
+public sealed record SingBoxProcessStatus(
     bool Succeeded,
     string State,
     int? ProcessId,
@@ -103,15 +101,15 @@ public sealed record ElevatedHostClientStatus(
     string? ErrorCode,
     string? ErrorMessage);
 
-public interface IElevatedHostClient : IAsyncDisposable
+public interface ISingBoxProcessClient : IAsyncDisposable
 {
     event Action<SingBoxOutputEvent>? Output;
-    Task<ElevatedHostClientStatus> StartAsync(
+    Task<SingBoxProcessStatus> StartAsync(
         SingBoxRuntimeCandidate candidate,
         bool restart,
         CancellationToken cancellationToken = default);
-    Task<ElevatedHostClientStatus> StopAsync(CancellationToken cancellationToken = default);
-    Task<ElevatedHostClientStatus> GetStatusAsync(CancellationToken cancellationToken = default);
+    Task<SingBoxProcessStatus> StopAsync(CancellationToken cancellationToken = default);
+    Task<SingBoxProcessStatus> GetStatusAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record SingBoxOutputEvent(string Source, string Line, int DroppedCount);
@@ -123,7 +121,7 @@ public sealed record SingBoxOutputEvent(string Source, string Line, int DroppedC
 /// </summary>
 public sealed class SingBoxService : IAsyncDisposable
 {
-    private readonly IElevatedHostClient _host;
+    private readonly ISingBoxProcessClient _processClient;
     private readonly SingBoxStateStore _stateStore;
     private readonly Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>> _healthCheck;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
@@ -132,14 +130,14 @@ public sealed class SingBoxService : IAsyncDisposable
     private SingBoxServiceStatus _status = new(SingBoxServiceState.Stopped, null, null, null, false);
 
     public SingBoxService(
-        IElevatedHostClient host,
+        ISingBoxProcessClient processClient,
         SingBoxStateStore stateStore,
         Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>>? healthCheck = null)
     {
-        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _processClient = processClient ?? throw new ArgumentNullException(nameof(processClient));
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
         _healthCheck = healthCheck ?? ((_, _) => Task.FromResult(true));
-        _host.Output += OnOutput;
+        _processClient.Output += OnOutput;
     }
 
     public event Action<SingBoxOutputEvent>? Output;
@@ -176,7 +174,7 @@ public sealed class SingBoxService : IAsyncDisposable
         try
         {
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopping, null, null, null, HasPending()));
-            await _host.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _processClient.StopAsync(cancellationToken).ConfigureAwait(false);
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopped, null, null, null, HasPending()));
         }
         finally
@@ -202,7 +200,7 @@ public sealed class SingBoxService : IAsyncDisposable
         {
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.RollingBack, null, null, null, true));
             SingBoxRuntimeCandidate candidate = SingBoxRuntimeCandidate.FromPointer(lastGood);
-            ElevatedHostClientStatus status = await _host.StartAsync(candidate, restart: true, cancellationToken).ConfigureAwait(false);
+            SingBoxProcessStatus status = await _processClient.StartAsync(candidate, restart: true, cancellationToken).ConfigureAwait(false);
             if (!status.Succeeded)
             {
                 SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, status.ProcessId, status.ErrorCode, status.ErrorMessage, true));
@@ -223,8 +221,8 @@ public sealed class SingBoxService : IAsyncDisposable
     {
         CancelPreparation();
         try { await StopAsync().ConfigureAwait(false); } catch { }
-        _host.Output -= OnOutput;
-        await _host.DisposeAsync().ConfigureAwait(false);
+        _processClient.Output -= OnOutput;
+        await _processClient.DisposeAsync().ConfigureAwait(false);
         _lifecycleGate.Dispose();
     }
 
@@ -288,9 +286,9 @@ public sealed class SingBoxService : IAsyncDisposable
                 null,
                 true));
 
-            ElevatedHostClientStatus started = await _host.StartAsync(candidate, restart: apply, cancellationToken).ConfigureAwait(false);
+            SingBoxProcessStatus started = await _processClient.StartAsync(candidate, restart: apply, cancellationToken).ConfigureAwait(false);
             if (!started.Succeeded || started.State is not ("running" or "starting"))
-                throw new SingBoxServiceException(started.ErrorCode ?? "host.start", started.ErrorMessage ?? "ElevatedHost 启动失败。");
+                throw new SingBoxServiceException(started.ErrorCode ?? "process.start", started.ErrorMessage ?? "sing-box 进程启动失败。");
 
             bool healthy = await _healthCheck(candidate, cancellationToken).ConfigureAwait(false);
             if (!healthy)
@@ -334,7 +332,7 @@ public sealed class SingBoxService : IAsyncDisposable
         SetStatus(new SingBoxServiceStatus(SingBoxServiceState.RollingBack, null, null, null, true));
         try
         {
-            ElevatedHostClientStatus restored = await _host.StartAsync(
+            SingBoxProcessStatus restored = await _processClient.StartAsync(
                 SingBoxRuntimeCandidate.FromPointer(lastGood),
                 restart: true,
                 CancellationToken.None).ConfigureAwait(false);
@@ -388,118 +386,4 @@ public sealed class SingBoxService : IAsyncDisposable
 public sealed class SingBoxServiceException(string code, string message) : InvalidOperationException(message)
 {
     public string Code { get; } = code;
-}
-
-/// <summary>Named Pipe client used by the ordinary-permission App after it starts ElevatedHost.</summary>
-public sealed class NamedPipeElevatedHostClient : IElevatedHostClient
-{
-    private readonly string _pipeName;
-    private readonly int _connectTimeoutMs;
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private NamedPipeClientStream? _pipe;
-    private bool _disposed;
-
-    public NamedPipeElevatedHostClient(string pipeName, int connectTimeoutMs = 15_000)
-    {
-        if (string.IsNullOrWhiteSpace(pipeName))
-            throw new ArgumentException("Pipe name is required.", nameof(pipeName));
-        _pipeName = pipeName;
-        _connectTimeoutMs = connectTimeoutMs is < 100 or > 120_000
-            ? throw new ArgumentOutOfRangeException(nameof(connectTimeoutMs))
-            : connectTimeoutMs;
-    }
-
-    public event Action<SingBoxOutputEvent>? Output;
-
-    public Task<ElevatedHostClientStatus> StartAsync(
-        SingBoxRuntimeCandidate candidate,
-        bool restart,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(candidate);
-        return SendAsync(new ElevatedIpcMessage
-        {
-            Version = ElevatedIpcProtocol.CurrentVersion,
-            Kind = restart ? ElevatedIpcKind.Restart : ElevatedIpcKind.Start,
-            RequestId = Guid.NewGuid().ToString("N"),
-            ClientProcessId = Environment.ProcessId,
-            CorePath = candidate.CorePath,
-            ConfigPath = candidate.ConfigPath,
-            CoreSha256 = candidate.CoreSha256,
-            ConfigSha256 = candidate.ConfigSha256,
-        }, cancellationToken);
-    }
-
-    public Task<ElevatedHostClientStatus> StopAsync(CancellationToken cancellationToken = default)
-        => SendAsync(ElevatedIpcMessage.Request(ElevatedIpcKind.Stop, Environment.ProcessId), cancellationToken);
-
-    public Task<ElevatedHostClientStatus> GetStatusAsync(CancellationToken cancellationToken = default)
-        => SendAsync(ElevatedIpcMessage.Request(ElevatedIpcKind.GetStatus, Environment.ProcessId), cancellationToken);
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-            return;
-        try { await SendAsync(ElevatedIpcMessage.Request(ElevatedIpcKind.Shutdown, Environment.ProcessId)).ConfigureAwait(false); } catch { }
-        _disposed = true;
-        _pipe?.Dispose();
-        _gate.Dispose();
-    }
-
-    private async Task<ElevatedHostClientStatus> SendAsync(
-        ElevatedIpcMessage message,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            await ElevatedIpcProtocol.WriteAsync(_pipe!, message, cancellationToken).ConfigureAwait(false);
-            while (true)
-            {
-                ElevatedIpcMessage response = await ElevatedIpcProtocol.ReadAsync(_pipe!, cancellationToken).ConfigureAwait(false)
-                    ?? throw new IOException("ElevatedHost pipe closed.");
-                if (response.Kind == ElevatedIpcKind.OutputEvent)
-                {
-                    if (response.OutputLine is not null)
-                        Output?.Invoke(new SingBoxOutputEvent(
-                            response.OutputSource ?? "host",
-                            response.OutputLine,
-                            response.DroppedOutputCount));
-                    continue;
-                }
-                if (!string.Equals(response.RequestId, message.RequestId, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("ElevatedHost response request-id mismatch.");
-                return new ElevatedHostClientStatus(
-                    response.ErrorCode is null,
-                    response.State ?? "unknown",
-                    response.ProcessId,
-                    response.DroppedOutputCount,
-                    response.ErrorCode,
-                    response.ErrorMessage);
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    private async Task EnsureConnectedAsync(CancellationToken cancellationToken)
-    {
-        if (_pipe is { IsConnected: true })
-            return;
-        _pipe?.Dispose();
-        _pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_connectTimeoutMs);
-        await _pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
-        ElevatedIpcMessage hello = ElevatedIpcMessage.Request(ElevatedIpcKind.Hello, Environment.ProcessId);
-        await ElevatedIpcProtocol.WriteAsync(_pipe, hello, timeout.Token).ConfigureAwait(false);
-        ElevatedIpcMessage response = await ElevatedIpcProtocol.ReadAsync(_pipe, timeout.Token).ConfigureAwait(false)
-            ?? throw new IOException("ElevatedHost closed during hello.");
-        if (response.ErrorCode is not null)
-            throw new SingBoxServiceException(response.ErrorCode, response.ErrorMessage ?? "ElevatedHost hello failed.");
-    }
 }

@@ -63,7 +63,7 @@ public sealed class LaunchTarget
 
     /// <summary>
     /// Whether the current discovery result contains at least one concrete executable path that
-    /// can be used by the sing-box process_path compiler. This is deliberately independent from
+    /// can be used by the sing-box process-name compiler. This is deliberately independent from
     /// launchability: a packaged or wrapper entry may be routable after discovery even when the
     /// controller cannot safely start it.
     /// </summary>

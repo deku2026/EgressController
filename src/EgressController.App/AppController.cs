@@ -620,7 +620,7 @@ public sealed class AppController : IAsyncDisposable
             if (target is null)
                 throw new ControllerPreparationException("application.missing", $"找不到已选择的应用：{selection.DiscoveryKey}。");
             if (!target.CanRoute)
-                throw new ControllerPreparationException("application.unresolved", $"应用没有可用于 process_path 的 EXE：{target.Name}。");
+                throw new ControllerPreparationException("application.unresolved", $"应用没有可用于进程名匹配的 EXE：{target.Name}。");
             paths.AddRange(target.OwnedExecutables);
             if (target.OwnedExecutables.Count == 0 && target.CanonicalExecutable is not null)
                 paths.Add(target.CanonicalExecutable);

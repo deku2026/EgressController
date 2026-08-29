@@ -29,7 +29,7 @@ public sealed class DirectSingBoxProcessClientTests
         try
         {
             await using var client = new DirectSingBoxProcessClient();
-            ElevatedHostClientStatus started = await client.StartAsync(
+            SingBoxProcessStatus started = await client.StartAsync(
                 Candidate(corePath, configPath),
                 restart: false,
                 TestContext.Current.CancellationToken);
@@ -38,11 +38,11 @@ public sealed class DirectSingBoxProcessClientTests
             Assert.Equal("running", started.State);
             Assert.NotNull(started.ProcessId);
 
-            ElevatedHostClientStatus status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
+            SingBoxProcessStatus status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
             Assert.True(status.Succeeded, status.ErrorMessage);
             Assert.Equal("running", status.State);
 
-            ElevatedHostClientStatus stopped = await client.StopAsync(TestContext.Current.CancellationToken);
+            SingBoxProcessStatus stopped = await client.StopAsync(TestContext.Current.CancellationToken);
             Assert.True(stopped.Succeeded, stopped.ErrorMessage);
             Assert.Equal("stopped", stopped.State);
         }
@@ -57,7 +57,7 @@ public sealed class DirectSingBoxProcessClientTests
     public async Task Missing_candidate_is_reported_before_process_start()
     {
         await using var client = new DirectSingBoxProcessClient();
-        ElevatedHostClientStatus result = await client.StartAsync(
+        SingBoxProcessStatus result = await client.StartAsync(
             new SingBoxRuntimeCandidate
             {
                 CoreVersion = "test",

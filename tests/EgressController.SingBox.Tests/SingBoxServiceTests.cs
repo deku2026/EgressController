@@ -99,7 +99,7 @@ public sealed class SingBoxServiceTests : IDisposable
             Directory.Delete(_root, recursive: true);
     }
 
-    private sealed class FakeHost : IElevatedHostClient
+    private sealed class FakeHost : ISingBoxProcessClient
     {
         public List<(SingBoxRuntimeCandidate Candidate, bool Restart)> Started { get; } = new();
         public int StopCount { get; private set; }
@@ -107,23 +107,23 @@ public sealed class SingBoxServiceTests : IDisposable
 
         public void Emit(SingBoxOutputEvent output) => Output?.Invoke(output);
 
-        public Task<ElevatedHostClientStatus> StartAsync(
+        public Task<SingBoxProcessStatus> StartAsync(
             SingBoxRuntimeCandidate candidate,
             bool restart,
             CancellationToken cancellationToken = default)
         {
             Started.Add((candidate, restart));
-            return Task.FromResult(new ElevatedHostClientStatus(true, "running", 1234, 0, null, null));
+            return Task.FromResult(new SingBoxProcessStatus(true, "running", 1234, 0, null, null));
         }
 
-        public Task<ElevatedHostClientStatus> StopAsync(CancellationToken cancellationToken = default)
+        public Task<SingBoxProcessStatus> StopAsync(CancellationToken cancellationToken = default)
         {
             StopCount++;
-            return Task.FromResult(new ElevatedHostClientStatus(true, "stopped", null, 0, null, null));
+            return Task.FromResult(new SingBoxProcessStatus(true, "stopped", null, 0, null, null));
         }
 
-        public Task<ElevatedHostClientStatus> GetStatusAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new ElevatedHostClientStatus(true, "stopped", null, 0, null, null));
+        public Task<SingBoxProcessStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new SingBoxProcessStatus(true, "stopped", null, 0, null, null));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

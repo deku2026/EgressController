@@ -9,7 +9,6 @@
     <Project Path="src/EgressController.App/EgressController.App.csproj" />
     <Project Path="src/EgressController.Core/EgressController.Core.csproj" />
     <Project Path="src/EgressController.Diagnostics/EgressController.Diagnostics.csproj" />
-    <Project Path="src/EgressController.ElevatedHost/EgressController.ElevatedHost.csproj" />
     <Project Path="src/EgressController.Launcher/EgressController.Launcher.csproj" />
     <Project Path="src/EgressController.Rules/EgressController.Rules.csproj" />
     <Project Path="src/EgressController.SingBox/EgressController.SingBox.csproj" />
@@ -19,7 +18,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EgressController.Core.Tests/EgressController.Core.Tests.csproj" />
-    <Project Path="tests/EgressController.ElevatedHost.Tests/EgressController.ElevatedHost.Tests.csproj" />
     <Project Path="tests/EgressController.Launcher.Tests/EgressController.Launcher.Tests.csproj" />
     <Project Path="tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj" />
     <Project Path="tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj" />

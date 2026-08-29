@@ -7,9 +7,9 @@ namespace EgressController.App.Services;
 
 /// <summary>
 /// Starts the managed core directly from the administrator App. The App manifest is the UAC
-/// boundary, so a second elevated host and a named pipe are unnecessary for the sing-box child.
+/// boundary, so a separate privileged helper process and IPC channel are unnecessary.
 /// </summary>
-public sealed class DirectSingBoxProcessClient : IElevatedHostClient
+public sealed class DirectSingBoxProcessClient : ISingBoxProcessClient
 {
     private const int OutputCapacity = 256;
     private const int RecentOutputCapacity = 24;
@@ -25,11 +25,11 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
     private Channel<SingBoxOutputEvent>? _outputChannel;
     private int _dropped;
     private bool _disposed;
-    private ElevatedHostClientStatus _status = new(true, "stopped", null, 0, null, null);
+    private SingBoxProcessStatus _status = new(true, "stopped", null, 0, null, null);
 
     public event Action<SingBoxOutputEvent>? Output;
 
-    public ElevatedHostClientStatus Status
+    public SingBoxProcessStatus Status
     {
         get
         {
@@ -38,7 +38,7 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
         }
     }
 
-    public async Task<ElevatedHostClientStatus> StartAsync(
+    public async Task<SingBoxProcessStatus> StartAsync(
         SingBoxRuntimeCandidate candidate,
         bool restart,
         CancellationToken cancellationToken = default)
@@ -59,7 +59,7 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
                 await DisposeProcessAsync().ConfigureAwait(false);
             }
 
-            SetStatus(new ElevatedHostClientStatus(true, "starting", null, _dropped, null, null));
+            SetStatus(new SingBoxProcessStatus(true, "starting", null, _dropped, null, null));
             string validationError = await ValidateCandidateAsync(candidate, cancellationToken).ConfigureAwait(false);
             if (validationError.Length > 0)
                 return Fail("candidate.invalid", validationError);
@@ -111,7 +111,7 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
                 return Fail("process.exited", $"sing-box 启动后立即退出，退出码 {exitCode}。{detail}");
             }
 
-            SetStatus(new ElevatedHostClientStatus(true, "running", process.Id, _dropped, null, null));
+            SetStatus(new SingBoxProcessStatus(true, "running", process.Id, _dropped, null, null));
             return Status;
         }
         catch (OperationCanceledException)
@@ -128,14 +128,14 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
         }
     }
 
-    public async Task<ElevatedHostClientStatus> StopAsync(CancellationToken cancellationToken = default)
+    public async Task<SingBoxProcessStatus> StopAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await StopCoreAsync(cancellationToken).ConfigureAwait(false);
-            SetStatus(new ElevatedHostClientStatus(true, "stopped", null, _dropped, null, null));
+            SetStatus(new SingBoxProcessStatus(true, "stopped", null, _dropped, null, null));
             return Status;
         }
         finally
@@ -144,11 +144,11 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
         }
     }
 
-    public Task<ElevatedHostClientStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+    public Task<SingBoxProcessStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_process is not null && !IsAlive(_process))
-            SetStatus(new ElevatedHostClientStatus(false, "stopped", null, _dropped, "process.exited", "sing-box 已退出。"));
+            SetStatus(new SingBoxProcessStatus(false, "stopped", null, _dropped, "process.exited", "sing-box 已退出。"));
         return Task.FromResult(Status);
     }
 
@@ -194,7 +194,7 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
         if (process is null)
             return;
 
-        SetStatus(new ElevatedHostClientStatus(true, "stopping", process.Id, _dropped, null, null));
+        SetStatus(new SingBoxProcessStatus(true, "stopping", process.Id, _dropped, null, null));
         try
         {
             if (IsAlive(process))
@@ -248,7 +248,7 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
             if (ReferenceEquals(_process, process))
             {
                 int exitCode = TryGetExitCode(process);
-                SetStatus(new ElevatedHostClientStatus(false, "stopped", null, _dropped, "process.exited", $"sing-box 已退出，退出码 {exitCode}。"));
+                SetStatus(new SingBoxProcessStatus(false, "stopped", null, _dropped, "process.exited", $"sing-box 已退出，退出码 {exitCode}。"));
                 Output?.Invoke(new SingBoxOutputEvent("lifecycle", $"sing-box exited with code {exitCode}.", _dropped));
             }
         }
@@ -310,13 +310,13 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
             return string.Join(" | ", _recentOutput);
     }
 
-    private ElevatedHostClientStatus Fail(string code, string message)
+    private SingBoxProcessStatus Fail(string code, string message)
     {
-        SetStatus(new ElevatedHostClientStatus(false, "failed", null, _dropped, code, message));
+        SetStatus(new SingBoxProcessStatus(false, "failed", null, _dropped, code, message));
         return Status;
     }
 
-    private void SetStatus(ElevatedHostClientStatus status)
+    private void SetStatus(SingBoxProcessStatus status)
     {
         lock (_stateGate)
             _status = status;
