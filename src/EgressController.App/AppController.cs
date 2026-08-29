@@ -64,6 +64,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly LocalLogSink _localLog;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
+    private readonly object _runtimeStateGate = new();
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
 
     private Socks5RemoteFetcher _remoteFetcher = null!;
@@ -73,6 +74,9 @@ public sealed class AppController : IAsyncDisposable
     private SingBoxCoreManager _coreManager = null!;
     private Task? _diagnosticsTask;
     private CancellationTokenSource? _diagnosticsCts;
+    private Task? _runtimeMonitorTask;
+    private CancellationTokenSource? _runtimeMonitorCts;
+    private string _runtimeFingerprint = string.Empty;
     private EgressProfileDocument _profile;
     private IReadOnlyList<NetworkAdapterInfo> _adapters = Array.Empty<NetworkAdapterInfo>();
     private string _lastMessage = "就绪。";
@@ -107,7 +111,7 @@ public sealed class AppController : IAsyncDisposable
         LoadCachedCatalog();
         RefreshAdapters();
 
-        _singBox = new SingBoxService(_directSingBox, _stateStore);
+        _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync);
         _singBox.Output += OnSingBoxOutput;
     }
 
@@ -425,6 +429,7 @@ public sealed class AppController : IAsyncDisposable
             }
 
             StartDiagnostics(LoadControllerEndpoint());
+            StartRuntimeMonitor();
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -440,6 +445,7 @@ public sealed class AppController : IAsyncDisposable
         try
         {
             await _singBox.StopAsync(cancellationToken).ConfigureAwait(false);
+            StopRuntimeMonitor();
             StopDiagnostics();
             SetMessage("sing-box TUN 已停止。");
             return ControllerOperationResult.Success();
@@ -519,6 +525,7 @@ public sealed class AppController : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _lifetimeCts.Cancel();
+        StopRuntimeMonitor();
         StopDiagnostics();
         _singBox.Output -= OnSingBoxOutput;
         try { await _singBox.DisposeAsync().ConfigureAwait(false); } catch { }
@@ -554,7 +561,6 @@ public sealed class AppController : IAsyncDisposable
 
         string runtimeDirectory = Path.Combine(_dataRoot, "runtime");
         Directory.CreateDirectory(runtimeDirectory);
-        string configPath = Path.Combine(runtimeDirectory, "config.json");
         EgressProfileCompilationResult compiled = _compiler.Compile(new EgressProfileCompileInput
         {
             Profile = profile,
@@ -566,7 +572,13 @@ public sealed class AppController : IAsyncDisposable
             ControllerPort = endpoint.Port,
             ControllerSecret = endpoint.Secret,
         });
+        // Keep each candidate immutable.  SingBoxService can then restart the last-good
+        // candidate if process start or the API health check fails after this candidate was
+        // prepared; overwriting one shared config.json would make rollback impossible.
+        string configPath = Path.Combine(runtimeDirectory, $"config-{compiled.Sha256}.json");
         EgressProfileCompiler.WriteNext(configPath, compiled);
+        await _coreManager.CheckConfigAsync(core, configPath, cancellationToken).ConfigureAwait(false);
+        SetRuntimeFingerprint(environment, ownerPaths);
         return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256, endpoint.Port, endpoint.Secret);
     }
 
@@ -803,6 +815,133 @@ public sealed class AppController : IAsyncDisposable
         SetMonitorStatuses("未运行", "未运行");
     }
 
+    private void StartRuntimeMonitor()
+    {
+        StopRuntimeMonitor();
+        _runtimeMonitorCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+        CancellationToken token = _runtimeMonitorCts.Token;
+        _runtimeMonitorTask = Task.Run(() => RuntimeMonitorLoopAsync(token), token);
+    }
+
+    private void StopRuntimeMonitor()
+    {
+        CancellationTokenSource? cts = _runtimeMonitorCts;
+        Task? task = _runtimeMonitorTask;
+        _runtimeMonitorCts = null;
+        _runtimeMonitorTask = null;
+        cts?.Cancel();
+        if (cts is not null)
+        {
+            if (task is null || task.IsCompleted)
+                cts.Dispose();
+            else
+                _ = task.ContinueWith(
+                    static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+                    cts,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+        }
+    }
+
+    private async Task RuntimeMonitorLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                if (!IsTunRunning)
+                    continue;
+
+                RefreshAdapters();
+                EgressProfileDocument profile = _profile.NormalizeAndValidate();
+                NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
+                IReadOnlyList<TcpListenerOwner> owners = _ownerResolver.Resolve(profile.UpstreamPort, cancellationToken);
+                if (owners.Count == 0 || owners.Any(owner => !owner.IsResolved))
+                    continue;
+
+                string[] ownerPaths = owners
+                    .Select(owner => owner.CanonicalExecutablePath!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                string fingerprint = BuildRuntimeFingerprint(environment, ownerPaths);
+                bool changed;
+                lock (_runtimeStateGate)
+                    changed = _runtimeFingerprint.Length > 0 && !string.Equals(_runtimeFingerprint, fingerprint, StringComparison.Ordinal);
+                if (!changed)
+                    continue;
+
+                await ApplyRuntimeChangeAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                string detail = DescribeDiagnosticsFailure(exception);
+                if (IsTunRunning)
+                    SetMessage("网络状态检测失败，保留当前配置：" + detail);
+            }
+        }
+    }
+
+    private async Task ApplyRuntimeChangeAsync(CancellationToken cancellationToken)
+    {
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!IsTunRunning)
+                return;
+
+            SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
+            if (applied.Succeeded)
+            {
+                StartDiagnostics(LoadControllerEndpoint());
+                SetMessage("检测到网络或 7890 owner 变化，配置已重新校验并应用。");
+            }
+            else
+            {
+                SetMessage("网络状态变化后的配置应用失败，已保留当前配置：" + (applied.ErrorMessage ?? "未知错误"));
+            }
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
+    }
+
+    private void SetRuntimeFingerprint(NetworkEnvironmentSnapshot environment, IReadOnlyList<string> ownerPaths)
+    {
+        string fingerprint = BuildRuntimeFingerprint(environment, ownerPaths);
+        lock (_runtimeStateGate)
+            _runtimeFingerprint = fingerprint;
+    }
+
+    private static string BuildRuntimeFingerprint(
+        NetworkEnvironmentSnapshot environment,
+        IEnumerable<string> ownerPaths)
+    {
+        static string AdapterFingerprint(AdapterSelection adapter)
+            => string.Join(
+                ":",
+                adapter.AdapterId,
+                adapter.Alias,
+                adapter.IsUp,
+                adapter.Ipv4BindAddress,
+                adapter.Ipv6BindAddress,
+                adapter.AddressState);
+
+        return string.Join(
+            "|",
+            new[]
+            {
+                AdapterFingerprint(environment.Primary),
+                AdapterFingerprint(environment.Esim),
+            }.Concat(ownerPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)));
+    }
+
     private async Task DiagnosticsLoopAsync(
         ControllerEndpoint endpoint,
         int generation,
@@ -937,11 +1076,11 @@ public sealed class AppController : IAsyncDisposable
                 DateTimeOffset startedAtUtc = connection.Start ?? previous?.StartedAtUtc ?? observedAtUtc;
                 observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate));
                 string? outbound = connection.Chains.FirstOrDefault();
-                if (string.Equals(outbound, EgressProfileCompiler.EsimDirectTag, StringComparison.OrdinalIgnoreCase)
-                    && previous is not null)
+                if (string.Equals(outbound, EgressProfileCompiler.EsimDirectTag, StringComparison.OrdinalIgnoreCase))
                 {
-                    esimDelta = SafeAdd(esimDelta, SafeDelta(connection.Upload, previous.Upload));
-                    esimDelta = SafeAdd(esimDelta, SafeDelta(connection.Download, previous.Download));
+                    esimDelta = SafeAdd(esimDelta, previous is null
+                        ? SafeAdd(Math.Max(0, connection.Upload), Math.Max(0, connection.Download))
+                        : SafeAdd(SafeDelta(connection.Upload, previous.Upload), SafeDelta(connection.Download, previous.Download)));
                 }
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
                     observedAtUtc,

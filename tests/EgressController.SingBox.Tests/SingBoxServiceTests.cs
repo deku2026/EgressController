@@ -69,6 +69,20 @@ public sealed class SingBoxServiceTests : IDisposable
         Assert.Equal(SingBoxServiceState.Stopped, service.Status.State);
     }
 
+    [Fact]
+    public async Task Unexpected_core_exit_changes_running_service_to_failed()
+    {
+        var host = new FakeHost();
+        await using var service = new SingBoxService(host, new SingBoxStateStore(_root));
+        Assert.True((await service.ApplyCandidateAsync(Candidate("running"), TestContext.Current.CancellationToken)).Succeeded);
+
+        host.Emit(new SingBoxOutputEvent("lifecycle", "sing-box exited with code 1.", 0));
+
+        Assert.Equal(SingBoxServiceState.Failed, service.Status.State);
+        Assert.Equal("process.exited", service.Status.ErrorCode);
+        Assert.Contains("exited", service.Status.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static SingBoxRuntimeCandidate Candidate(string suffix)
         => new()
         {
@@ -89,11 +103,9 @@ public sealed class SingBoxServiceTests : IDisposable
     {
         public List<(SingBoxRuntimeCandidate Candidate, bool Restart)> Started { get; } = new();
         public int StopCount { get; private set; }
-        event Action<SingBoxOutputEvent>? IElevatedHostClient.Output
-        {
-            add { }
-            remove { }
-        }
+        public event Action<SingBoxOutputEvent>? Output;
+
+        public void Emit(SingBoxOutputEvent output) => Output?.Invoke(output);
 
         public Task<ElevatedHostClientStatus> StartAsync(
             SingBoxRuntimeCandidate candidate,

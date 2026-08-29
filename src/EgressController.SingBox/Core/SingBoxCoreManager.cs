@@ -167,6 +167,29 @@ public sealed class SingBoxCoreManager
         });
     }
 
+    /// <summary>Runs the real core check against the complete generated runtime config.</summary>
+    public async Task CheckConfigAsync(
+        SingBoxCoreCandidate candidate,
+        string configPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
+            throw new SingBoxCoreException("生成的 sing-box 配置文件不存在。", "config.missing");
+
+        SingBoxCommandResult result = await _cli.CheckAsync(
+            candidate.ExecutablePath,
+            Path.GetFullPath(configPath),
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            string detail = TrimOutput(result.StandardError, result.StandardOutput);
+            throw new SingBoxCoreException(
+                "sing-box 配置校验失败：" + detail,
+                "config.check");
+        }
+    }
+
     private async Task<SingBoxCoreCandidate> ValidateCandidateAsync(
         string mode,
         string version,

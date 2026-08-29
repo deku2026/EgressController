@@ -79,6 +79,22 @@ public sealed class NetworkEnvironmentResolverTests
     }
 
     [Fact]
+    public void Selected_but_temporarily_missing_esim_is_also_a_valid_fail_closed_state()
+    {
+        NetworkEnvironmentSnapshot snapshot = new NetworkEnvironmentResolver().Resolve(
+            new EgressProfileDocument
+            {
+                PrimaryAdapterId = PrimaryId.ToString(),
+                EsimAdapterId = EsimId.ToString(),
+            },
+            [Adapter(PrimaryId, "primary", true, ["192.0.2.1"])]);
+
+        Assert.Equal(Guid.Empty, snapshot.Esim.AdapterId);
+        Assert.Equal("eSIM unavailable", snapshot.Esim.Alias);
+        Assert.False(snapshot.IsEsimReady);
+    }
+
+    [Fact]
     public void Offline_and_single_stack_statuses_are_not_collapsed_into_global_failure()
     {
         var primary = Adapter(PrimaryId, "primary", true, ["192.0.2.1"]);

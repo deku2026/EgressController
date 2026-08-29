@@ -18,12 +18,16 @@ public sealed class NetworkEnvironmentResolver
             throw new NetworkEnvironmentException("主网卡和 eSIM 网卡不能是同一个接口。", "adapter.same");
 
         NetworkAdapterInfo primary = FindAdapter(adapters, primaryId, "主网卡");
+        // The eSIM is an optional fail-closed route.  It is normal for a selected
+        // cellular interface to disappear while the modem reconnects, so a missing
+        // eSIM must become the synthetic unavailable selection instead of preventing
+        // the TUN from starting or refreshing.
         NetworkAdapterInfo? esim = esimId is Guid selectedEsim
-            ? FindAdapter(adapters, selectedEsim, "eSIM 网卡")
+            ? adapters.FirstOrDefault(adapter => adapter.Identity.Guid == selectedEsim)
             : null;
         if (!IsSelectable(primary))
             throw new NetworkEnvironmentException("选中的主网卡不是可用的物理出口。", "primary.invalid");
-        if (esim is not null && !IsSelectable(esim))
+        if (esimId is not null && esim is not null && !IsSelectable(esim))
             throw new NetworkEnvironmentException("选中的 eSIM 网卡不是可用的物理出口。", "esim.invalid");
 
         return new NetworkEnvironmentSnapshot

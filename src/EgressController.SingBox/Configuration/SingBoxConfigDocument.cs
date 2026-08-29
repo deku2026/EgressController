@@ -182,6 +182,10 @@ public sealed record SingBoxRouteDocument
     [JsonPropertyName("final")]
     public required string Final { get; init; }
 
+    [JsonPropertyName("default_domain_resolver")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultDomainResolver { get; init; }
+
     [JsonPropertyName("auto_detect_interface")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? AutoDetectInterface { get; init; }

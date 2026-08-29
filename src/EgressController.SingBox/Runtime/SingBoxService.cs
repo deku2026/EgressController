@@ -365,7 +365,24 @@ public sealed class SingBoxService : IAsyncDisposable
         StatusChanged?.Invoke(status);
     }
 
-    private void OnOutput(SingBoxOutputEvent output) => Output?.Invoke(output);
+    private void OnOutput(SingBoxOutputEvent output)
+    {
+        Output?.Invoke(output);
+        if (!string.Equals(output.Source, "lifecycle", StringComparison.OrdinalIgnoreCase)
+            || !output.Line.Contains("exited", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        SingBoxServiceStatus current = Status;
+        if (current.State == SingBoxServiceState.Running)
+        {
+            SetStatus(new SingBoxServiceStatus(
+                SingBoxServiceState.Failed,
+                current.ProcessId,
+                "process.exited",
+                output.Line,
+                HasPending()));
+        }
+    }
 }
 
 public sealed class SingBoxServiceException(string code, string message) : InvalidOperationException(message)

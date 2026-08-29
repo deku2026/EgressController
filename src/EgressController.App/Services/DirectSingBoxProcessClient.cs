@@ -12,11 +12,16 @@ namespace EgressController.App.Services;
 public sealed class DirectSingBoxProcessClient : IElevatedHostClient
 {
     private const int OutputCapacity = 256;
+    private const int RecentOutputCapacity = 24;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateGate = new();
+    private readonly Queue<string> _recentOutput = new();
     private Process? _process;
     private CancellationTokenSource? _outputLifetime;
     private Task? _outputPump;
+    private Task? _stdoutReader;
+    private Task? _stderrReader;
+    private Task? _exitObserver;
     private Channel<SingBoxOutputEvent>? _outputChannel;
     private int _dropped;
     private bool _disposed;
@@ -88,18 +93,22 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
             });
             _outputLifetime = new CancellationTokenSource();
             CancellationToken outputToken = _outputLifetime.Token;
+            ClearRecentOutput();
             _outputPump = PumpOutputAsync(outputToken);
-            _ = ReadOutputAsync(process.StandardOutput, "stdout", outputToken);
-            _ = ReadOutputAsync(process.StandardError, "stderr", outputToken);
-            _ = ObserveExitAsync(process, outputToken);
+            _stdoutReader = ReadOutputAsync(process.StandardOutput, "stdout", outputToken);
+            _stderrReader = ReadOutputAsync(process.StandardError, "stderr", outputToken);
+            _exitObserver = ObserveExitAsync(process, outputToken);
 
             // Catch invalid configs and immediate exits before reporting a successful start.
             await Task.Delay(150, cancellationToken).ConfigureAwait(false);
             if (!IsAlive(process))
             {
                 int exitCode = TryGetExitCode(process);
+                await DrainOutputReadersAsync().ConfigureAwait(false);
+                string output = GetRecentOutput();
                 await DisposeProcessAsync().ConfigureAwait(false);
-                return Fail("process.exited", $"sing-box 启动后立即退出，退出码 {exitCode}。请查看核心输出。");
+                string detail = output.Length == 0 ? "请查看核心输出。" : "核心输出：" + output;
+                return Fail("process.exited", $"sing-box 启动后立即退出，退出码 {exitCode}。{detail}");
             }
 
             SetStatus(new ElevatedHostClientStatus(true, "running", process.Id, _dropped, null, null));
@@ -208,6 +217,7 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
         {
             while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
+                RecordOutput(source, line);
                 var output = new SingBoxOutputEvent(source, line, _dropped);
                 if (!(_outputChannel?.Writer.TryWrite(output) ?? false))
                     Interlocked.Increment(ref _dropped);
@@ -251,15 +261,53 @@ public sealed class DirectSingBoxProcessClient : IElevatedHostClient
         _outputLifetime = null;
         outputLifetime?.Cancel();
         _outputChannel?.Writer.TryComplete();
+        await DrainOutputReadersAsync().ConfigureAwait(false);
         if (_outputPump is not null)
         {
             try { await _outputPump.ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
         _outputPump = null;
+        _stdoutReader = null;
+        _stderrReader = null;
+        _exitObserver = null;
         outputLifetime?.Dispose();
         _process?.Dispose();
         _process = null;
         _outputChannel = null;
+    }
+
+    private async Task DrainOutputReadersAsync()
+    {
+        Task[] readers = new[] { _stdoutReader, _stderrReader, _exitObserver }
+            .Where(task => task is not null)
+            .Cast<Task>()
+            .ToArray();
+        if (readers.Length == 0)
+            return;
+        try { await Task.WhenAll(readers).ConfigureAwait(false); } catch { }
+    }
+
+    private void ClearRecentOutput()
+    {
+        lock (_stateGate)
+            _recentOutput.Clear();
+    }
+
+    private void RecordOutput(string source, string line)
+    {
+        string bounded = line.Length > 2_000 ? line[..2_000] + "…" : line;
+        lock (_stateGate)
+        {
+            _recentOutput.Enqueue(source + ": " + bounded);
+            while (_recentOutput.Count > RecentOutputCapacity)
+                _recentOutput.Dequeue();
+        }
+    }
+
+    private string GetRecentOutput()
+    {
+        lock (_stateGate)
+            return string.Join(" | ", _recentOutput);
     }
 
     private ElevatedHostClientStatus Fail(string code, string message)

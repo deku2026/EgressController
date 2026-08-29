@@ -197,6 +197,7 @@ public sealed class EgressProfileCompiler
                     Format = "binary",
                 }).ToArray(),
                 Final = UpstreamSocksTag,
+                DefaultDomainResolver = DnsTag,
                 AutoDetectInterface = true,
                 FindProcess = true,
             },
@@ -253,6 +254,8 @@ public sealed class EgressProfileCompiler
             Type = "direct",
             Tag = tag,
             BindInterface = NormalizeRequired(adapter.Alias, "adapter.alias"),
+            Inet4BindAddress = adapter.Ipv4BindAddress?.ToString(),
+            Inet6BindAddress = adapter.Ipv6BindAddress?.ToString(),
         };
 
     private static string[] NormalizeProcessNames(IEnumerable<string> paths)

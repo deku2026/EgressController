@@ -77,6 +77,7 @@ public sealed class EgressProfileCompilerTests
             Assert.Equal("google", rules[5].GetProperty("rule_set")[0].GetString());
             Assert.Equal("openai.com", rules[6].GetProperty("domain_suffix")[0].GetString());
             Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
+            Assert.Equal("dns-clash", json.RootElement.GetProperty("route").GetProperty("default_domain_resolver").GetString());
             Assert.Equal("esim-direct", outbounds[0].GetProperty("tag").GetString());
             Assert.Equal("primary-direct", outbounds[1].GetProperty("tag").GetString());
             Assert.Equal("clash-7890", outbounds[2].GetProperty("tag").GetString());
