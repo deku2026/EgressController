@@ -8,19 +8,16 @@ public static class EgressProfileSchema
 {
     public const int CurrentVersion = 1;
     public const string ManagedCore = "managed";
-    public const string SystemCore = "system";
 }
 
 public sealed record EgressCoreSelection
 {
     public string Mode { get; init; } = EgressProfileSchema.ManagedCore;
-    public string? SystemPath { get; init; }
 }
 
 public sealed record EgressApplicationSelection
 {
     public required string DiscoveryKey { get; init; }
-    public string? ManualExecutablePath { get; init; }
 }
 
 /// <summary>
@@ -65,9 +62,7 @@ public sealed record EgressProfileDocument
         var applications = (EsimApplications ?? Array.Empty<EgressApplicationSelection>())
             .Select(NormalizeApplication)
             .GroupBy(x => x.DiscoveryKey, StringComparer.Ordinal)
-            .Select(group => group
-                .OrderBy(x => x.ManualExecutablePath ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                .First())
+            .Select(group => group.First())
             .OrderBy(x => x.DiscoveryKey, StringComparer.Ordinal)
             .ToArray();
 
@@ -136,22 +131,10 @@ public sealed record EgressProfileDocument
     {
         EgressCoreSelection core = value ?? new EgressCoreSelection();
         string mode = (core.Mode ?? string.Empty).Trim().ToLowerInvariant();
-        if (mode is not EgressProfileSchema.ManagedCore and not EgressProfileSchema.SystemCore)
-            throw new ArgumentException("Core mode 必须是 managed 或 system。", nameof(Core));
+        if (mode != EgressProfileSchema.ManagedCore)
+            throw new ArgumentException("Core 只能使用由 EgressController 管理的 sing-box。", nameof(Core));
 
-        string? systemPath = core.SystemPath;
-        if (mode == EgressProfileSchema.SystemCore)
-        {
-            if (string.IsNullOrWhiteSpace(systemPath) || !Path.IsPathRooted(systemPath))
-                throw new ArgumentException("System core 必须是绝对路径。", nameof(Core));
-            systemPath = Path.GetFullPath(systemPath.Trim());
-        }
-        else if (!string.IsNullOrWhiteSpace(systemPath))
-        {
-            throw new ArgumentException("Managed core 不能携带 systemPath。", nameof(Core));
-        }
-
-        return new EgressCoreSelection { Mode = mode, SystemPath = systemPath };
+        return new EgressCoreSelection { Mode = EgressProfileSchema.ManagedCore };
     }
 
     private static EgressApplicationSelection NormalizeApplication(EgressApplicationSelection? value)
@@ -159,19 +142,9 @@ public sealed record EgressProfileDocument
         if (value is null || string.IsNullOrWhiteSpace(value.DiscoveryKey))
             throw new ArgumentException("应用 DiscoveryKey 不能为空。", nameof(EsimApplications));
 
-        string? path = value.ManualExecutablePath;
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            path = path.Trim();
-            if (!Path.IsPathRooted(path))
-                throw new ArgumentException("手工 EXE 路径必须是绝对路径。", nameof(EsimApplications));
-            path = Path.GetFullPath(path);
-        }
-
         return new EgressApplicationSelection
         {
             DiscoveryKey = value.DiscoveryKey.Trim(),
-            ManualExecutablePath = path,
         };
     }
 

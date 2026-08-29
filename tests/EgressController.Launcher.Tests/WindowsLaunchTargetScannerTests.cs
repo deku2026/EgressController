@@ -14,7 +14,7 @@ public class WindowsLaunchTargetScannerTests
             EgressController.Core.Models.LaunchKind.CliNative or
             EgressController.Core.Models.LaunchKind.CliWrapperResolved);
         Assert.DoesNotContain(targets, target => string.Equals(target.Source, "PATH", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(targets, target => target.CanonicalExecutable is not null && target.OwnedExecutables.Count > 0);
+        Assert.All(targets, target => Assert.True(SupportedApplicationCatalog.IsSupported(target)));
         foreach (EgressController.Core.Models.LaunchTarget packaged in targets.Where(target => target.Kind == EgressController.Core.Models.LaunchKind.PackagedAumid))
         {
             Assert.False(string.IsNullOrWhiteSpace(packaged.PackageFamily));
@@ -35,8 +35,8 @@ public class WindowsLaunchTargetScannerTests
                 target.CanonicalExecutable,
                 revo,
                 StringComparison.OrdinalIgnoreCase));
-            Assert.NotNull(revoTarget);
-            Console.WriteLine($"revo_found=true; revo_owned_executables={revoTarget!.OwnedExecutables.Count}");
+            Assert.Null(revoTarget);
+            Console.WriteLine("revo_found=true; excluded_by_supported_catalog=true");
         }
 
         Console.WriteLine($"targets={targets.Count}; icons={targets.Count(target => !string.IsNullOrWhiteSpace(target.IconPath))}; packaged={targets.Count(target => target.Kind == EgressController.Core.Models.LaunchKind.PackagedAumid)}");

@@ -55,7 +55,7 @@ public sealed class NetworkEnvironmentResolverTests
     }
 
     [Fact]
-    public void Same_adapter_and_missing_adapter_are_precise_failures()
+    public void Same_adapter_fails_but_missing_esim_is_a_valid_fail_closed_state()
     {
         var same = new EgressProfileDocument
         {
@@ -68,15 +68,14 @@ public sealed class NetworkEnvironmentResolverTests
             () => resolver.Resolve(same, [Adapter(PrimaryId, "primary", true, ["192.0.2.1"])]));
         Assert.Equal("adapter.same", sameError.Code);
 
-        NetworkEnvironmentException missingError = Assert.Throws<NetworkEnvironmentException>(
-            () => resolver.Resolve(
-                new EgressProfileDocument
-                {
-                    PrimaryAdapterId = PrimaryId.ToString(),
-                    EsimAdapterId = EsimId.ToString(),
-                },
-                [Adapter(PrimaryId, "primary", true, ["192.0.2.1"])]));
-        Assert.Equal("eSIM 网卡.missing", missingError.Code);
+        NetworkEnvironmentSnapshot missingEsim = resolver.Resolve(
+            new EgressProfileDocument
+            {
+                PrimaryAdapterId = PrimaryId.ToString(),
+            },
+            [Adapter(PrimaryId, "primary", true, ["192.0.2.1"])]);
+        Assert.Equal(Guid.Empty, missingEsim.Esim.AdapterId);
+        Assert.False(missingEsim.IsEsimReady);
     }
 
     [Fact]
@@ -96,6 +95,24 @@ public sealed class NetworkEnvironmentResolverTests
         Assert.Equal(AdapterAddressState.Ipv4Only, snapshot.Primary.AddressState);
         Assert.Equal(AdapterAddressState.Offline, snapshot.Esim.AddressState);
         Assert.False(snapshot.IsDualStack);
+        Assert.False(snapshot.IsEsimReady);
+    }
+
+    [Fact]
+    public void Automatic_defaults_choose_primary_and_only_a_likely_esim_adapter()
+    {
+        var adapters = new[]
+        {
+            Adapter(PrimaryId, "PRIMARY-WIFI", true, ["192.0.2.10"]),
+            Adapter(EsimId, "ESIM-WIFI", true, ["198.51.100.10"]),
+        };
+
+        EgressProfileDocument profile = NetworkEnvironmentResolver.EnsureAutomaticDefaults(
+            new EgressProfileDocument(),
+            adapters);
+
+        Assert.Equal(PrimaryId.ToString("D"), profile.PrimaryAdapterId);
+        Assert.Equal(EsimId.ToString("D"), profile.EsimAdapterId);
     }
 
     private static NetworkAdapterInfo Adapter(Guid id, string name, bool isUp, IReadOnlyList<string> addresses)

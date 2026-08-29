@@ -3,6 +3,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:EgressController.App.ViewModels"
+        xmlns:local="using:EgressController.App"
         mc:Ignorable="d" d:DesignWidth="1180" d:DesignHeight="760"
         x:Class="EgressController.App.MainWindow"
         x:DataType="vm:MainViewModel"
@@ -86,7 +87,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="sing-box Core" />
                                     <TextBlock Classes="card-title" Text="{Binding Overview.Core}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="Managed core 会通过 SOCKS5 7890 下载、校验并在提权 host 中启动；UI 本身保持普通权限。" TextWrapping="Wrap" />
+                                     <TextBlock Classes="muted" Text="程序会在 exe 同级 ruleset 中管理 sing-box；配置、状态和日志写入 data。启动时自动尝试开启 TUN。" TextWrapping="Wrap" />
                                     <Button Content="启动 / 应用 TUN" Command="{Binding Overview.StartCommand}"
                                             HorizontalAlignment="Left" />
                                 </StackPanel>
@@ -104,7 +105,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="数据面" />
                                      <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                     <TextBlock Classes="muted" Text="不修改 Windows 全局代理，不向应用注入代理参数；普通 Launch 也不会暗中启动 TUN。" TextWrapping="Wrap" />
+                                      <TextBlock Classes="muted" Text="仅 sing-box 负责网络数据面；eSIM 不可用时，命中 eSIM 的流量直接拒绝，未命中流量仍走 7890。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -118,16 +119,12 @@
             <TabItem Header="Windows 应用">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Spacing="10">
-                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
                             <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用或路径…" />
                             <Button Grid.Column="1" Classes="primary" Content="{Binding Apps.ScanText}" Command="{Binding Apps.ScanCommand}" />
                             <Button Grid.Column="2" Content="全选 eSIM" Command="{Binding Apps.SelectAllCommand}" />
                             <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}" />
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <TextBox Text="{Binding Apps.ManualExecutable}" PlaceholderText="添加 .exe 的完整路径…" />
-                            <Button Grid.Column="1" Content="添加可执行文件" Command="{Binding Apps.AddExecutableCommand}" />
+                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
                         </Grid>
                         <TextBlock Classes="muted" Text="{Binding Apps.Status}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
@@ -137,7 +134,7 @@
                                 <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="vm:AppEntryViewModel">
                                         <Border Padding="8" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
-                                            <Grid ColumnDefinitions="Auto,Auto,*,190,Auto" ColumnSpacing="12">
+                                            <Grid ColumnDefinitions="Auto,Auto,*,190" ColumnSpacing="12">
                                                 <CheckBox IsChecked="{Binding IsEsim}" IsEnabled="{Binding CanManage}" VerticalAlignment="Center" />
                                                 <Border Grid.Column="1" Classes="app-glyph">
                                                     <Grid>
@@ -152,8 +149,6 @@
                                                     <TextBlock Classes="warning" Text="{Binding Status}" TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
                                                 <TextBlock Grid.Column="3" Classes="tag" Text="{Binding KindText}" VerticalAlignment="Center" />
-                                                <Button Grid.Column="4" Content="启动" Command="{Binding LaunchCommand}"
-                                                        IsEnabled="{Binding CanLaunch}" VerticalAlignment="Center" />
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -317,6 +312,32 @@
             <TabItem Header="流量">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="24">
+                            <Grid Width="220" Height="220">
+                                <local:QuotaRingControl Percentage="{Binding Traffic.UsedPercent}" />
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="3">
+                                    <TextBlock Classes="card-title" Text="{Binding Traffic.UsedPercentText}" />
+                                    <TextBlock Classes="muted" Text="套餐占用" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Grid.Column="1" Spacing="14" VerticalAlignment="Center">
+                                <TextBlock Classes="eyebrow" Text="eSIM 流量套餐" />
+                                <Grid ColumnDefinitions="Auto,180" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
+                                    <TextBlock Text="套餐总量（GB）" VerticalAlignment="Center" />
+                                    <TextBox Grid.Column="1" Text="{Binding Traffic.TotalInput, Mode=TwoWay}" />
+                                    <TextBlock Grid.Row="1" Text="当前剩余（GB）" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Traffic.RemainingInput, Mode=TwoWay}" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button Classes="primary" Content="保存并重新统计" Command="{Binding Traffic.SaveQuotaCommand}" />
+                                    <Button Content="清空已用流量" Command="{Binding Traffic.ClearUsageCommand}" />
+                                </StackPanel>
+                                <TextBlock Classes="card-title" Text="{Binding Traffic.Remaining}" />
+                                <TextBlock Classes="muted" Text="{Binding Traffic.RemainingPercentText}" />
+                                <TextBlock Classes="muted" Text="{Binding Traffic.UsedSummary}" />
+                                <TextBlock Classes="warning" Text="{Binding Traffic.Status}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
                         <Grid ColumnDefinitions="*,*,*" ColumnSpacing="14">
                             <Border Classes="card">
                                 <StackPanel Spacing="8">
@@ -327,16 +348,16 @@
                             </Border>
                             <Border Classes="card" Grid.Column="1">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="当前会话总量" />
-                                    <TextBlock Classes="card-title" Text="{Binding Traffic.Total}" />
-                                    <TextBlock Classes="muted" Text="按连接快照累计" />
+                                    <TextBlock Classes="eyebrow" Text="活动连接" />
+                                    <TextBlock Classes="card-title" Text="{Binding Traffic.Active}" />
+                                    <TextBlock Classes="muted" Text="来自连接监控快照" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="2">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="活动连接" />
-                                    <TextBlock Classes="card-title" Text="{Binding Traffic.Active}" />
-                                    <TextBlock Classes="muted" Text="来自连接监控快照" />
+                                    <TextBlock Classes="eyebrow" Text="统计范围" />
+                                    <TextBlock Classes="card-title" Text="仅 eSIM" />
+                                    <TextBlock Classes="muted" Text="按连接出口累计上下行" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -355,28 +376,6 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="核心日志">
-                <DockPanel>
-                    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,0,0,10">
-                        <TextBlock Classes="muted" Text="仅显示 sing-box 警告、错误和生命周期输出；连接明细请到“连接”页双击查看。" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Classes="warning" Text="{Binding Connections.DroppedLogsSummary}" VerticalAlignment="Center" />
-                    </Grid>
-                    <Border Classes="list-card">
-                        <ListBox ItemsSource="{Binding Connections.CoreLogs}">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="vm:CoreLogRowViewModel">
-                                    <Grid ColumnDefinitions="80,100,80,*" ColumnSpacing="10" Margin="12,7">
-                                        <TextBlock Classes="muted" Text="{Binding Time}" />
-                                        <TextBlock Grid.Column="1" Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="2" Text="{Binding Level}" />
-                                        <TextBlock Grid.Column="3" Text="{Binding Message}" TextTrimming="CharacterEllipsis" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                    </Border>
-                </DockPanel>
-            </TabItem>
         </TabControl>
     </DockPanel>
 </Window>

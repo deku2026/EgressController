@@ -45,12 +45,9 @@ public sealed class SingBoxCoreManager
     {
         ArgumentNullException.ThrowIfNull(selection);
         string mode = (selection.Mode ?? string.Empty).Trim().ToLowerInvariant();
-        return mode switch
-        {
-            EgressProfileSchema.ManagedCore => await PrepareManagedAsync(cancellationToken).ConfigureAwait(false),
-            EgressProfileSchema.SystemCore => await PrepareSystemAsync(selection.SystemPath, cancellationToken).ConfigureAwait(false),
-            _ => throw new SingBoxCoreException("Core mode 必须是 managed 或 system。", "core.mode"),
-        };
+        if (mode != EgressProfileSchema.ManagedCore)
+            throw new SingBoxCoreException("只支持由 EgressController 管理的 sing-box core。", "core.mode");
+        return await PrepareManagedAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<SingBoxCoreCandidate> PrepareManagedAsync(CancellationToken cancellationToken = default)
@@ -156,32 +153,6 @@ public sealed class SingBoxCoreManager
         {
             _gate.Release();
         }
-    }
-
-    public async Task<SingBoxCoreCandidate> PrepareSystemAsync(
-        string? executablePath,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(executablePath))
-            throw new SingBoxCoreException("System core 必须选择 sing-box.exe。", "core.system.missing");
-        string fullPath = Path.GetFullPath(executablePath.Trim());
-        if (!string.Equals(Path.GetFileName(fullPath), "sing-box.exe", StringComparison.OrdinalIgnoreCase))
-            throw new SingBoxCoreException("System core 必须是 sing-box.exe。", "core.system.name");
-        if (!File.Exists(fullPath))
-            throw new SingBoxCoreException("System core 路径不存在。", "core.system.path");
-
-        string digest = await ComputeSha256Async(fullPath, cancellationToken).ConfigureAwait(false);
-        SingBoxVersionInfo version = await _cli.GetVersionAsync(fullPath, cancellationToken).ConfigureAwait(false);
-        EnsureSupportedVersion(version.Version, "core.system.version");
-        await CheckMinimalConfigAsync(fullPath, cancellationToken).ConfigureAwait(false);
-        return new SingBoxCoreCandidate
-        {
-            Mode = EgressProfileSchema.SystemCore,
-            Version = version.Version.ToString(),
-            ExecutablePath = fullPath,
-            Sha256 = digest,
-            IsManaged = false,
-        };
     }
 
     public void MarkLastGood(SingBoxCoreCandidate candidate)

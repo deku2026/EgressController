@@ -46,12 +46,38 @@ public sealed record SingBoxDnsDocument
     [JsonPropertyName("servers")]
     public required IReadOnlyList<SingBoxHttpsDnsServerDocument> Servers { get; init; }
 
+    [JsonPropertyName("rules")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SingBoxDnsRuleDocument>? Rules { get; init; }
+
     [JsonPropertyName("final")]
     public required string Final { get; init; }
 
     [JsonPropertyName("strategy")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Strategy { get; init; }
+}
+
+public sealed record SingBoxDnsRuleDocument
+{
+    [JsonPropertyName("process_name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ProcessName { get; init; }
+
+    [JsonPropertyName("domain_suffix")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? DomainSuffix { get; init; }
+
+    [JsonPropertyName("rule_set")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RuleSet { get; init; }
+
+    [JsonPropertyName("action")]
+    public required string Action { get; init; }
+
+    [JsonPropertyName("server")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Server { get; init; }
 }
 
 public sealed record SingBoxHttpsDnsServerDocument
@@ -182,6 +208,10 @@ public sealed record SingBoxRuleSetDocument
 
 public sealed record SingBoxRouteRuleDocument
 {
+    [JsonPropertyName("ip_version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? IpVersion { get; init; }
+
     [JsonPropertyName("protocol")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Protocol { get; init; }

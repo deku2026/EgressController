@@ -23,6 +23,10 @@
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
 
+    <!-- Local eSIM quota accounting. SQLite uses the Windows system provider in the AOT app. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="10.0.11" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
+
     <!-- Tests use xUnit v3 and Microsoft.Testing.Platform via global.json. -->
     <PackageVersion Include="xunit.v3" Version="4.0.0" />
   </ItemGroup>

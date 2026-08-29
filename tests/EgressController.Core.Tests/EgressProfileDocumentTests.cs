@@ -39,7 +39,7 @@ public sealed class EgressProfileDocumentTests
         }.NormalizeAndValidate());
         Assert.Throws<ArgumentException>(() => new EgressProfileDocument
         {
-            Core = new EgressCoreSelection { Mode = EgressProfileSchema.SystemCore, SystemPath = "sing-box.exe" },
+            Core = new EgressCoreSelection { Mode = "system" },
         }.NormalizeAndValidate());
     }
 

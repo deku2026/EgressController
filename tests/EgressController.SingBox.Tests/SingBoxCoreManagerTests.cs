@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using EgressController.Core.Profile;
 using EgressController.SingBox.Cli;
 using EgressController.SingBox.Core;
 using EgressController.State.SingBox;
@@ -80,19 +81,15 @@ public sealed class SingBoxCoreManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task System_core_uses_the_same_version_and_check_gate_without_copying_the_file()
+    public async Task Non_managed_core_mode_is_rejected_before_any_download()
     {
-        string? executable = FindOnPath("sing-box.exe");
-        if (executable is null)
-            Assert.Skip("sing-box.exe is not installed on this test machine.");
-
         var manager = new SingBoxCoreManager(_directory, new FakeReleaseClient([], null), new SingBoxCli());
-        SingBoxCoreCandidate candidate = await manager.PrepareSystemAsync(executable, TestContext.Current.CancellationToken);
+        SingBoxCoreException exception = await Assert.ThrowsAsync<SingBoxCoreException>(
+            () => manager.PrepareAsync(
+                new EgressCoreSelection { Mode = "system" },
+                TestContext.Current.CancellationToken));
 
-        Assert.False(candidate.IsManaged);
-        Assert.Equal(Path.GetFullPath(executable), candidate.ExecutablePath);
-        Assert.True(File.Exists(candidate.ExecutablePath));
-        Assert.False(File.Exists(Path.Combine(_directory, "core", candidate.Version, "sing-box.exe")));
+        Assert.Equal("core.mode", exception.Code);
     }
 
     private static byte[] MakeZip(params (string Path, string Content)[] entries)
@@ -110,12 +107,6 @@ public sealed class SingBoxCoreManagerTests : IDisposable
         }
         return output.ToArray();
     }
-
-    private static string? FindOnPath(string fileName)
-        => Environment.GetEnvironmentVariable("PATH")?
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(directory => Path.Combine(directory, fileName))
-            .FirstOrDefault(File.Exists);
 
     public void Dispose()
     {

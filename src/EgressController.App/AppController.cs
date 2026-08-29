@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -9,7 +8,6 @@ using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Launcher.Discovery;
-using EgressController.Launcher.Sessions;
 using EgressController.Rules.Artifacts;
 using EgressController.Rules.Catalog;
 using EgressController.SingBox.Api;
@@ -19,6 +17,7 @@ using EgressController.SingBox.Configuration;
 using EgressController.SingBox.Core;
 using EgressController.SingBox.Runtime;
 using EgressController.State.Profile;
+using EgressController.State.Quota;
 using EgressController.State.SingBox;
 using EgressController.Transport.Upstream;
 using EgressController.Windows.Network;
@@ -39,35 +38,33 @@ public sealed record ControllerEndpoint(int Port, string Secret)
 
 /// <summary>
 /// Thin composition root for the new data plane. It owns Profile edits, sing-box lifecycle,
-/// diagnostics streams, Windows discovery and ordinary (non-proxy-injected) process launches.
+/// diagnostics streams and Windows discovery. Routing never depends on an application launch
+/// button; sing-box resolves the owning process for each new connection.
 /// </summary>
 public sealed class AppController : IAsyncDisposable
 {
-    private static readonly TimeSpan GraphicalLaunchStartupGrace = TimeSpan.FromSeconds(10);
     private readonly object _gate = new();
     private readonly SemaphoreSlim _configurationGate = new(1, 1);
     private readonly string _dataRoot;
+    private readonly string _rulesetRoot;
     private readonly EgressProfileStore _profileStore;
+    private readonly EgressQuotaStore _quotaStore;
     private readonly SingBoxStateStore _stateStore;
     private readonly INetworkAdapterService _adapterService;
     private readonly NetworkEnvironmentResolver _environmentResolver = new();
     private readonly WindowsLaunchTargetScanner _targetScanner = new();
     private readonly LaunchTargetRegistry _targets = new();
-    private readonly Dictionary<string, LaunchTarget> _manualTargets = new(StringComparer.Ordinal);
-    private readonly LaunchSessionRegistry _sessions = new();
     private readonly TcpListenerOwnerResolver _ownerResolver = new();
     private readonly UpstreamSocksProbe _upstreamProbe = new();
-    private readonly WindowsProcessIdentityResolver _processIdentity =
-        new(new ExecutablePathCanonicalizer());
     private readonly EgressProfileCompiler _compiler = new();
     private readonly DirectSingBoxProcessClient _directSingBox = new();
     private readonly SingBoxService _singBox;
     private readonly ConnectionHistoryStore _connectionHistory = new();
     private readonly BoundedLogStore _logs = new();
+    private readonly LocalLogSink _localLog;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
-    private readonly HashSet<Guid> _sessionsWithObservedWindows = new();
 
     private Socks5RemoteFetcher _remoteFetcher = null!;
     private HttpClient _releaseHttpClient = null!;
@@ -91,13 +88,18 @@ public sealed class AppController : IAsyncDisposable
     private string? _lastTrafficMonitorError;
     private int _diagnosticsGeneration;
 
-    public AppController(string? dataRoot = null)
+    public AppController(string? dataRoot = null, string? rulesetRoot = null)
     {
-        _dataRoot = Path.GetFullPath(dataRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "EgressController"));
+        string applicationDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        _dataRoot = Path.GetFullPath(dataRoot ?? Path.Combine(applicationDirectory, "data"));
+        _rulesetRoot = Path.GetFullPath(rulesetRoot ?? Path.Combine(applicationDirectory, "ruleset"));
         Directory.CreateDirectory(_dataRoot);
+        Directory.CreateDirectory(Path.Combine(_dataRoot, "logs"));
+        Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
+        Directory.CreateDirectory(_rulesetRoot);
+        _localLog = new LocalLogSink(Path.Combine(_dataRoot, "logs"));
         _profileStore = new EgressProfileStore(_dataRoot);
+        _quotaStore = new EgressQuotaStore(_dataRoot);
         _stateStore = new SingBoxStateStore(_dataRoot);
         _adapterService = new WindowsNetworkAdapterService();
         _profile = LoadProfile();
@@ -110,11 +112,13 @@ public sealed class AppController : IAsyncDisposable
     }
 
     public string DataRoot => _dataRoot;
+    public string RulesetRoot => _rulesetRoot;
+    public string LogPath => _localLog.LogPath;
     public EgressProfileDocument Profile => _profile;
+    public EgressQuotaSnapshot Quota => _quotaStore.Load();
     public SingBoxService SingBox => _singBox;
     public ConnectionHistoryStore ConnectionHistory => _connectionHistory;
     public BoundedLogStore Logs => _logs;
-    public LaunchSessionRegistry Sessions => _sessions;
     public IReadOnlyList<NetworkAdapterInfo> Adapters => _adapters;
     public IReadOnlyList<LaunchTarget> Targets => _targets.All();
     public SingBoxRuleCatalog? Catalog => _catalogService.Current;
@@ -182,11 +186,24 @@ public sealed class AppController : IAsyncDisposable
     {
         IReadOnlyList<LaunchTarget> scanned = _targetScanner.Scan();
         var discovered = scanned.ToList();
-        var discoveredKeys = discovered.Select(target => target.DiscoveryKey).ToHashSet(StringComparer.Ordinal);
-        foreach (LaunchTarget manual in _manualTargets.Values)
+
+        var discoveredKeys = discovered
+            .Select(target => target.DiscoveryKey)
+            .ToHashSet(StringComparer.Ordinal);
+        string[] staleSelections = _profile.EsimApplications
+            .Select(selection => selection.DiscoveryKey)
+            .Where(key => !discoveredKeys.Contains(key))
+            .ToArray();
+        if (staleSelections.Length > 0)
         {
-            if (discoveredKeys.Add(manual.DiscoveryKey))
-                discovered.Add(manual);
+            _profile = _profile with
+            {
+                EsimApplications = _profile.EsimApplications
+                    .Where(selection => discoveredKeys.Contains(selection.DiscoveryKey))
+                    .ToArray(),
+            };
+            _profileStore.Save(_profile);
+            SetMessage($"已清理 {staleSelections.Length} 个已不存在的应用选择。");
         }
 
         _targets.Clear();
@@ -198,34 +215,6 @@ public sealed class AppController : IAsyncDisposable
         }
         SetMessage($"已扫描 {discovered.Count} 个 Windows 应用。");
         return discovered;
-    }
-
-    public LaunchTarget AddExecutable(string path, string? displayName = null)
-    {
-        string full = Path.GetFullPath(path.Trim().Trim('"'));
-        if (!File.Exists(full))
-            throw new FileNotFoundException("找不到可执行文件。", full);
-        if (!Path.GetExtension(full).Equals(".exe", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("这里只接受 Windows .exe 的完整路径。", nameof(path));
-
-        string root = Path.GetDirectoryName(full) ?? string.Empty;
-        var target = new LaunchTarget
-        {
-            Id = "manual-exe:" + full.ToLowerInvariant(),
-            Name = string.IsNullOrWhiteSpace(displayName) ? Path.GetFileNameWithoutExtension(full) : displayName.Trim(),
-            Kind = LaunchKind.DirectExe,
-            Command = full,
-            CanonicalExecutable = full,
-            OwnedRoots = new[] { root },
-            OwnedExecutables = ExecutableInventory.Collect(new[] { root }, full),
-            EsimSelected = false,
-            IconPath = full,
-            Source = "手动添加",
-        };
-        _manualTargets[target.DiscoveryKey] = target;
-        if (_targets.Add(target))
-            return target;
-        return _targets.All().First(existing => existing.DiscoveryKey == target.DiscoveryKey);
     }
 
     public async Task<ControllerOperationResult> SetApplicationsEsimAsync(
@@ -247,11 +236,9 @@ public sealed class AppController : IAsyncDisposable
                 {
                     if (enabled)
                     {
-                        LaunchTarget? target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
                         selected[key] = new EgressApplicationSelection
                         {
                             DiscoveryKey = key,
-                            ManualExecutablePath = target?.Source == "手动添加" ? target.CanonicalExecutable : null,
                         };
                     }
                     else
@@ -388,6 +375,29 @@ public sealed class AppController : IAsyncDisposable
         CancellationToken cancellationToken = default)
         => UpdateProfileAsync(current => current with { UpstreamPort = port }, cancellationToken);
 
+    public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
+    {
+        const decimal bytesPerGigabyte = 1024m * 1024m * 1024m;
+        if (totalGigabytes < 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes)
+            throw new ArgumentOutOfRangeException(nameof(remainingGigabytes), "当前剩余量必须在 0 和套餐总量之间。");
+        if (totalGigabytes * bytesPerGigabyte > long.MaxValue
+            || remainingGigabytes * bytesPerGigabyte > long.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "套餐流量过大。");
+        }
+
+        long totalBytes = checked((long)Math.Round(totalGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
+        long remainingBytes = checked((long)Math.Round(remainingGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
+        _quotaStore.Configure(totalBytes, remainingBytes);
+        SetMessage("eSIM 流量套餐已保存，本地统计已重置。");
+    }
+
+    public void ClearQuotaUsage()
+    {
+        _quotaStore.ClearUsage();
+        SetMessage("已清空本地 eSIM 流量统计。");
+    }
+
     public async Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default)
     {
         SingBoxCatalogUpdateResult result = await _catalogService.UpdateAsync(cancellationToken).ConfigureAwait(false);
@@ -506,112 +516,6 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    public string LaunchTarget(string id)
-    {
-        LaunchTarget target = _targets.Get(id)
-            ?? throw new InvalidOperationException("目标已从扫描结果中消失，请重新扫描。");
-        if (!target.CanLaunch)
-            throw new InvalidOperationException("该目标没有可安全启动的已解析 EXE。");
-
-        LaunchSession session = new WindowsLaunchService().StartPlain(target);
-        _sessions.Register(session);
-        SetMessage($"已发送启动请求：{target.Name} (PID {session.RootPid})；网络规则由 sing-box 按 EXE 路径决定。");
-        return LastMessage;
-    }
-
-    public string GetTargetStatus(string targetId)
-    {
-        LaunchSession[] sessions = _sessions.All()
-            .Where(session => string.Equals(session.TargetId, targetId, StringComparison.Ordinal))
-            .OrderByDescending(session => session.StartedAtUtc)
-            .ToArray();
-        if (sessions.Length == 0)
-            return string.Empty;
-
-        LaunchTarget? target = _targets.Get(targetId);
-        LaunchSession? liveRoot = sessions.FirstOrDefault(IsLiveRoot);
-        if (target?.Kind == LaunchKind.CliNative && liveRoot is not null)
-            return $"运行中 · PID {liveRoot.RootPid}";
-
-        uint? windowPid = target is null ? null : FindVisibleTargetProcess(target);
-        if (windowPid is not null)
-        {
-            lock (_gate)
-                _sessionsWithObservedWindows.Add(sessions[0].SessionId);
-            return windowPid == liveRoot?.RootPid
-                ? $"运行中 · PID {windowPid.Value}"
-                : $"运行中 · PID {windowPid.Value}（目标窗口）";
-        }
-
-        bool observedWindow;
-        lock (_gate)
-            observedWindow = _sessionsWithObservedWindows.Contains(sessions[0].SessionId);
-        if (liveRoot is not null
-            && !observedWindow
-            && DateTime.UtcNow - sessions[0].StartedAtUtc < GraphicalLaunchStartupGrace)
-            return $"启动中 · PID {liveRoot.RootPid}";
-
-        foreach (LaunchSession session in sessions)
-            _sessions.MarkRootExited(session.SessionId);
-        return "未运行";
-    }
-
-    private bool IsLiveRoot(LaunchSession session)
-    {
-        if (session.RootExited)
-            return false;
-        ProcessIdentity? identity = _processIdentity.Resolve(session.RootPid);
-        return identity is not null && identity.StartTimeUtc == session.RootStartTimeUtc;
-    }
-
-    private uint? FindVisibleTargetProcess(LaunchTarget target)
-    {
-        IEnumerable<string?> statusExecutables = string.IsNullOrWhiteSpace(target.CanonicalExecutable)
-            ? target.OwnedExecutables
-            : new[] { target.CanonicalExecutable };
-        HashSet<string> executablePaths = statusExecutables
-            .OfType<string>()
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (executablePaths.Count == 0)
-            return null;
-
-        HashSet<string> processNames = executablePaths
-            .Select(Path.GetFileNameWithoutExtension)
-            .OfType<string>()
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (string processName in processNames)
-        {
-            Process[] processes;
-            try { processes = Process.GetProcessesByName(processName); }
-            catch { continue; }
-
-            foreach (Process process in processes)
-            {
-                using (process)
-                {
-                    ProcessIdentity? identity = _processIdentity.Resolve(checked((uint)process.Id));
-                    if (identity?.ExePathFinal is null || !executablePaths.Contains(identity.ExePathFinal))
-                        continue;
-                    try
-                    {
-                        process.Refresh();
-                        nint window = process.MainWindowHandle;
-                        if (window != 0 && WindowsWindowVisibility.IsVisible(window))
-                            return identity.Pid;
-                    }
-                    catch
-                    {
-                        // An exiting or access-restricted process is not reliable UI evidence.
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
     public async ValueTask DisposeAsync()
     {
         _lifetimeCts.Cancel();
@@ -620,6 +524,7 @@ public sealed class AppController : IAsyncDisposable
         try { await _singBox.DisposeAsync().ConfigureAwait(false); } catch { }
         _remoteFetcher.Dispose();
         _releaseHttpClient.Dispose();
+        _localLog.Append("lifecycle", "info", "EgressController stopped.");
         _lifetimeCts.Dispose();
         _configurationGate.Dispose();
     }
@@ -632,6 +537,14 @@ public sealed class AppController : IAsyncDisposable
             throw new ControllerPreparationException("upstream.offline", upstream.Message);
 
         RefreshAdapters();
+        EgressProfileDocument withAdapterDefaults = NetworkEnvironmentResolver.EnsureAutomaticDefaults(profile, _adapters)
+            .NormalizeAndValidate();
+        if (!Equals(withAdapterDefaults, _profile))
+        {
+            _profile = withAdapterDefaults;
+            _profileStore.Save(_profile);
+        }
+        profile = withAdapterDefaults;
         NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
         string[] ownerPaths = ResolveUpstreamOwners(profile.UpstreamPort, cancellationToken);
         string[] applicationPaths = ResolveApplicationPaths(profile);
@@ -800,10 +713,11 @@ public sealed class AppController : IAsyncDisposable
         _releaseHttpClient?.Dispose();
         _releaseHttpClient = Socks5HttpClientFactory.Create(upstreamPort);
         _remoteFetcher = new Socks5RemoteFetcher("127.0.0.1", upstreamPort);
-        _catalogService = new RuleCatalogService(_remoteFetcher, Path.Combine(_dataRoot, "rules"));
-        _artifactStore = new RuleArtifactStore(Path.Combine(_dataRoot, "rules"), _remoteFetcher);
+        string rulesDirectory = Path.Combine(_rulesetRoot, "rules");
+        _catalogService = new RuleCatalogService(_remoteFetcher, rulesDirectory);
+        _artifactStore = new RuleArtifactStore(rulesDirectory, _remoteFetcher);
         _coreManager = new SingBoxCoreManager(
-            _dataRoot,
+            _rulesetRoot,
             new SingBoxReleaseClient(_releaseHttpClient),
             new SingBoxCli(),
             _stateStore);
@@ -1003,6 +917,7 @@ public sealed class AppController : IAsyncDisposable
         DateTimeOffset observedAtUtc = DateTimeOffset.UtcNow;
         var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
+        long esimDelta = 0;
         lock (_diagnosticsStateGate)
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
@@ -1021,11 +936,19 @@ public sealed class AppController : IAsyncDisposable
                 long downloadRate = CalculateRate(connection.Download, previous?.Download, elapsedSeconds);
                 DateTimeOffset startedAtUtc = connection.Start ?? previous?.StartedAtUtc ?? observedAtUtc;
                 observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate));
+                string? outbound = connection.Chains.FirstOrDefault();
+                if (string.Equals(outbound, EgressProfileCompiler.EsimDirectTag, StringComparison.OrdinalIgnoreCase)
+                    && previous is not null)
+                {
+                    esimDelta = SafeAdd(esimDelta, SafeDelta(connection.Upload, previous.Upload));
+                    esimDelta = SafeAdd(esimDelta, SafeDelta(connection.Download, previous.Download));
+                }
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
                     observedAtUtc,
                     connection.Upload,
                     connection.Download,
-                    startedAtUtc);
+                    startedAtUtc,
+                    outbound);
             }
 
             foreach (string id in _connectionRateSamples.Keys.Where(id => !currentIds.Contains(id)).ToArray())
@@ -1036,6 +959,8 @@ public sealed class AppController : IAsyncDisposable
             _connectionHistory.ApplySnapshot(observations, observedAtUtc);
             _connectionsUpdatedAtUtc = observedAtUtc;
         }
+        if (esimDelta > 0)
+            _quotaStore.AddUsage(esimDelta);
     }
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)
@@ -1045,6 +970,12 @@ public sealed class AppController : IAsyncDisposable
         double rate = ((double)current - previous.Value) / elapsedSeconds;
         return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
     }
+
+    private static long SafeDelta(long current, long previous)
+        => current > previous ? current - previous : 0;
+
+    private static long SafeAdd(long left, long right)
+        => left > long.MaxValue - right ? long.MaxValue : left + right;
 
     private static ConnectionObservation ToObservation(
         SingBoxConnection connection,
@@ -1131,7 +1062,10 @@ public sealed class AppController : IAsyncDisposable
     }
 
     private void OnSingBoxOutput(SingBoxOutputEvent output)
-        => _logs.Append(output.Source, CoreLogClassifier.Classify(output.Source, output.Line), output.Line);
+    {
+        _logs.Append(output.Source, CoreLogClassifier.Classify(output.Source, output.Line), output.Line);
+        _localLog.Append(output.Source, CoreLogClassifier.Classify(output.Source, output.Line), output.Line);
+    }
 
     private void SetConnectionMonitorConnected(int generation)
     {
@@ -1240,7 +1174,8 @@ internal sealed record ConnectionRateSample(
     DateTimeOffset ObservedAtUtc,
     long Upload,
     long Download,
-    DateTimeOffset StartedAtUtc);
+    DateTimeOffset StartedAtUtc,
+    string? Outbound);
 
 internal sealed class ControllerPreparationException(string code, string message)
     : InvalidOperationException(message)

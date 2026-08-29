@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using EgressController.Core.Models;
 using EgressController.Diagnostics;
 using EgressController.Rules.Catalog;
+using EgressController.State.Quota;
 
 namespace EgressController.App.ViewModels;
 
@@ -18,9 +19,9 @@ public sealed class MainViewModel : ObservableObject
         Domains = new DomainsViewModel(controller);
         Connections = new ConnectionsViewModel(controller);
         Traffic = new TrafficViewModel(controller);
-        Apps.StartInitialScan();
         Domains.RefreshSearch();
         Overview.Refresh();
+        _ = InitializeAsync();
     }
 
     public AppController Controller { get; }
@@ -29,6 +30,20 @@ public sealed class MainViewModel : ObservableObject
     public DomainsViewModel Domains { get; }
     public ConnectionsViewModel Connections { get; }
     public TrafficViewModel Traffic { get; }
+
+    private async Task InitializeAsync()
+    {
+        try
+        {
+            await Apps.ScanInitialAsync();
+            await Controller.StartTunAsync();
+        }
+        catch (Exception exception)
+        {
+            Status = "初始化失败：" + exception.Message;
+        }
+        Refresh();
+    }
 
     private string _status = "正在初始化…";
     public string Status
@@ -40,7 +55,6 @@ public sealed class MainViewModel : ObservableObject
     public void Refresh()
     {
         Overview.Refresh();
-        Apps.RefreshStatuses();
         Domains.RefreshStatus();
         Connections.Refresh();
         Traffic.Refresh();
@@ -123,9 +137,7 @@ public sealed class OverviewViewModel : ObservableObject
         Esim = SelectedAdapter?.Display ?? "未选择";
         Primary = SelectedPrimaryAdapter?.Display ?? "未选择";
         Upstream = _controller.UpstreamSummary;
-        Core = _controller.Profile.Core.Mode == "system"
-            ? "System core · " + (_controller.Profile.Core.SystemPath ?? "未选择")
-            : "Managed core · sing-box 1.13.x";
+        Core = "Managed core · sing-box 1.13.x · ruleset";
         Tun = _controller.TunStatus;
         TunBadge = "TUN · " + Tun;
         Notice = string.IsNullOrWhiteSpace(_controller.LastMessage)
@@ -241,7 +253,6 @@ public sealed class AppsViewModel : ObservableObject
     private readonly AppController _controller;
     private readonly List<AppEntryViewModel> _all = new();
     private string _query = string.Empty;
-    private string _manualExecutable = string.Empty;
     private string _status = "尚未扫描";
     private bool _isScanning;
 
@@ -251,7 +262,6 @@ public sealed class AppsViewModel : ObservableObject
         ScanCommand = new AsyncRelayCommand(ScanAsync);
         SelectAllCommand = new RelayCommand(() => _ = SetAllAsync(true));
         ClearAllCommand = new RelayCommand(() => _ = SetAllAsync(false));
-        AddExecutableCommand = new RelayCommand(AddExecutable);
     }
 
     public ObservableCollection<AppEntryViewModel> Entries { get; } = new();
@@ -260,7 +270,6 @@ public sealed class AppsViewModel : ObservableObject
         get => _query;
         set { if (SetProperty(ref _query, value ?? string.Empty)) RefreshVisible(); }
     }
-    public string ManualExecutable { get => _manualExecutable; set => SetProperty(ref _manualExecutable, value ?? string.Empty); }
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public bool IsScanning
     {
@@ -278,9 +287,8 @@ public sealed class AppsViewModel : ObservableObject
     public IAsyncRelayCommand ScanCommand { get; }
     public RelayCommand SelectAllCommand { get; }
     public RelayCommand ClearAllCommand { get; }
-    public RelayCommand AddExecutableCommand { get; }
 
-    public void StartInitialScan() => _ = ScanAsync();
+    public Task ScanInitialAsync() => ScanAsync();
 
     private async Task ScanAsync()
     {
@@ -328,30 +336,6 @@ public sealed class AppsViewModel : ObservableObject
         RefreshVisible();
     }
 
-    private void AddExecutable()
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(ManualExecutable))
-                throw new ArgumentException("先填写 .exe 路径。", nameof(ManualExecutable));
-            LaunchTarget target = _controller.AddExecutable(ManualExecutable);
-            if (_all.Any(entry => entry.DiscoveryKey == target.DiscoveryKey))
-            {
-                Status = "该可执行文件已在应用列表中。";
-                ManualExecutable = string.Empty;
-                return;
-            }
-            _all.Add(new AppEntryViewModel(_controller, target, RefreshVisible));
-            ManualExecutable = string.Empty;
-            Status = "已添加可执行文件：" + target.Name;
-            RefreshVisible();
-        }
-        catch (Exception exception)
-        {
-            Status = exception.Message;
-        }
-    }
-
     private void RefreshVisible()
     {
         string query = _query.Trim();
@@ -364,11 +348,7 @@ public sealed class AppsViewModel : ObservableObject
         OnPropertyChanged(nameof(Summary));
     }
 
-    public void RefreshStatuses()
-    {
-        foreach (AppEntryViewModel entry in _all)
-            entry.RefreshStatus();
-    }
+    public void RefreshStatuses() { }
 }
 
 public sealed class AppEntryViewModel : ObservableObject, IDisposable
@@ -386,7 +366,6 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         _changed = changed;
         _isEsim = target.EsimSelected;
         Icon = AppIconLoader.Load(target.IconPath ?? target.CanonicalExecutable ?? target.Command);
-        LaunchCommand = new RelayCommand(Launch);
     }
 
     public LaunchTarget Target { get; }
@@ -400,18 +379,14 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public string KindText => Target.Kind switch
     {
         LaunchKind.PackagedAumid => "APP · MSIX",
-        LaunchKind.CliNative => "CLI · native",
-        LaunchKind.CliWrapperResolved => "CLI · wrapper 未解析",
-        LaunchKind.Shortcut => "快捷方式 · 未解析",
         _ => "APP · Win32",
     };
-    public string Glyph => Target.Kind is LaunchKind.CliNative or LaunchKind.CliWrapperResolved ? ">_" : "▣";
+    public string Glyph => "▣";
     public Bitmap? Icon { get; }
     public bool HasIcon => Icon is not null;
     public bool HasNoIcon => Icon is null;
     public bool CanRoute => Target.CanRoute;
     public bool CanManage => CanRoute;
-    public bool CanLaunch => Target.CanLaunch;
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
 
     public bool IsEsim
@@ -424,8 +399,6 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
             _ = ApplyEsimAsync(value);
         }
     }
-
-    public RelayCommand LaunchCommand { get; }
 
     internal void SetEsimLocal(bool value)
     {
@@ -458,31 +431,6 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         }
         _changing = false;
         _changed();
-    }
-
-    private void Launch()
-    {
-        if (!CanLaunch)
-        {
-            Status = "未解析，不能安全启动";
-            return;
-        }
-        try
-        {
-            Status = _controller.LaunchTarget(Target.Id);
-            RefreshStatus();
-        }
-        catch (Exception exception)
-        {
-            Status = exception.Message;
-        }
-    }
-
-    public void RefreshStatus()
-    {
-        string status = _controller.GetTargetStatus(Target.Id);
-        if (status.Length > 0)
-            Status = status;
     }
 
     public void Dispose() => Icon?.Dispose();
@@ -743,12 +691,10 @@ public sealed class ConnectionsViewModel : ObservableObject
     private string _query = string.Empty;
     private bool _includeClosed = true;
     private long _droppedConnections;
-    private long _droppedLogs;
     private int _activeConnections;
     private string _lastUpdated = "等待 sing-box API";
     private string _actionMessage = string.Empty;
     private ConnectionRowViewModel? _selectedRow;
-    private long _renderedLogVersion = -1;
 
     public ConnectionsViewModel(AppController controller)
     {
@@ -760,7 +706,6 @@ public sealed class ConnectionsViewModel : ObservableObject
     }
 
     public ObservableCollection<ConnectionRowViewModel> Rows { get; } = new();
-    public ObservableCollection<CoreLogRowViewModel> CoreLogs { get; } = new();
 
     public ConnectionRowViewModel? SelectedRow
     {
@@ -776,10 +721,6 @@ public sealed class ConnectionsViewModel : ObservableObject
     public int ActiveConnections { get => _activeConnections; private set => SetProperty(ref _activeConnections, value); }
     public int Count => Rows.Count;
     public long DroppedConnections { get => _droppedConnections; private set => SetProperty(ref _droppedConnections, value); }
-    public long DroppedLogs { get => _droppedLogs; private set => SetProperty(ref _droppedLogs, value); }
-    public string DroppedLogsSummary => DroppedLogs == 0
-        ? "日志缓存：正常"
-        : $"日志缓存已淘汰 {DroppedLogs:N0} 条旧记录";
     public string MonitorStatus => _controller.DiagnosticsStatus;
     public string ActiveSummary => $"活动 {ActiveConnections} · ↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
     public string TotalSummary => $"当前会话 ↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
@@ -861,19 +802,8 @@ public sealed class ConnectionsViewModel : ObservableObject
         if (SelectedRow is not null && !Rows.Contains(SelectedRow))
             SelectedRow = null;
 
-        long logVersion = _controller.Logs.Version;
-        if (_renderedLogVersion != logVersion)
-        {
-            CoreLogs.Clear();
-            foreach (CoreLogEntry entry in _controller.Logs.Snapshot().Reverse().Take(500))
-                CoreLogs.Add(new CoreLogRowViewModel(entry));
-            _renderedLogVersion = logVersion;
-        }
-
         ActiveConnections = active.Count;
         DroppedConnections = _controller.ConnectionHistory.DroppedClosed;
-        DroppedLogs = _controller.Logs.Dropped;
-        OnPropertyChanged(nameof(DroppedLogsSummary));
         OnPropertyChanged(nameof(ActiveSummary));
         OnPropertyChanged(nameof(TotalSummary));
         OnPropertyChanged(nameof(MonitorStatus));
@@ -924,30 +854,83 @@ public sealed class ConnectionsViewModel : ObservableObject
 public sealed class TrafficViewModel : ObservableObject
 {
     private readonly AppController _controller;
-    private string _lastUpdated = "等待 sing-box API";
-    private string _currentRate = "↑ 0 B/s · ↓ 0 B/s";
-    private string _total = "↑ 0 B · ↓ 0 B";
-    private string _active = "0";
+    private string _totalInput = string.Empty;
+    private string _remainingInput = string.Empty;
+    private string _status = string.Empty;
 
     public TrafficViewModel(AppController controller)
     {
         _controller = controller;
+        SaveQuotaCommand = new AsyncRelayCommand(SaveQuotaAsync);
+        ClearUsageCommand = new RelayCommand(ClearUsage);
+        Refresh();
     }
 
-    public string CurrentRate { get => _currentRate; private set => SetProperty(ref _currentRate, value); }
-    public string Total { get => _total; private set => SetProperty(ref _total, value); }
-    public string Active { get => _active; private set => SetProperty(ref _active, value); }
+    public string TotalInput { get => _totalInput; set => SetProperty(ref _totalInput, value ?? string.Empty); }
+    public string RemainingInput { get => _remainingInput; set => SetProperty(ref _remainingInput, value ?? string.Empty); }
+    public string Total => TrafficFormat.Bytes(_controller.Quota.TotalBytes);
+    public string Remaining => TrafficFormat.Bytes(_controller.Quota.RemainingBytes);
+    public string Used => TrafficFormat.Bytes(_controller.Quota.UsedBytes);
+    public string UsedSummary => $"本地已统计：{Used}";
+    public string UsedPercentText => $"已使用 {_controller.Quota.UsedPercent:0.##}%";
+    public double UsedPercent => _controller.Quota.UsedPercent;
+    public string RemainingPercentText => $"剩余 {_controller.Quota.RemainingPercent:0.##}%";
+    public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public string MonitorStatus => _controller.DiagnosticsStatus;
-    public string LastUpdated { get => _lastUpdated; private set => SetProperty(ref _lastUpdated, value); }
-    public string Note => "流量来自 sing-box Clash API：实时速度读取 /traffic，当前会话总量读取连接快照；两者不是同一个统计口径。";
+    public string LastUpdated => TrafficFormat.UpdatedAt(_controller.TrafficUpdatedAtUtc);
+    public string CurrentRate => $"↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
+    public string Active => _controller.ConnectionHistory.ActiveCount.ToString("N0");
+    public string Note => "仅统计走 eSIM 的连接；保存套餐后会把本地累计用量从 0 开始计算。";
+    public IAsyncRelayCommand SaveQuotaCommand { get; }
+    public RelayCommand ClearUsageCommand { get; }
 
     public void Refresh()
     {
-        CurrentRate = $"↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
-        Total = $"↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
-        Active = _controller.ConnectionHistory.ActiveCount.ToString("N0");
+        EgressQuotaSnapshot quota = _controller.Quota;
+        if (string.IsNullOrWhiteSpace(TotalInput) && quota.TotalBytes > 0)
+            TotalInput = QuotaFormat.Gigabytes(quota.TotalBytes);
+        if (string.IsNullOrWhiteSpace(RemainingInput) && quota.TotalBytes > 0)
+            RemainingInput = QuotaFormat.Gigabytes(quota.RemainingBytes);
+        OnPropertyChanged(nameof(Total));
+        OnPropertyChanged(nameof(Remaining));
+        OnPropertyChanged(nameof(Used));
+        OnPropertyChanged(nameof(UsedSummary));
+        OnPropertyChanged(nameof(UsedPercent));
+        OnPropertyChanged(nameof(UsedPercentText));
+        OnPropertyChanged(nameof(RemainingPercentText));
+        OnPropertyChanged(nameof(CurrentRate));
+        OnPropertyChanged(nameof(Active));
         OnPropertyChanged(nameof(MonitorStatus));
-        LastUpdated = TrafficFormat.UpdatedAt(_controller.TrafficUpdatedAtUtc);
+        OnPropertyChanged(nameof(LastUpdated));
+    }
+
+    private async Task SaveQuotaAsync()
+    {
+        try
+        {
+            if (!QuotaFormat.TryParseGigabytes(TotalInput, out decimal total)
+                || !QuotaFormat.TryParseGigabytes(RemainingInput, out decimal remaining))
+            {
+                Status = "请输入有效的套餐总量和剩余量（GB）。";
+                return;
+            }
+
+            _controller.ConfigureQuota(total, remaining);
+            Status = "套餐已保存，本地 eSIM 用量已从 0 开始统计。";
+            Refresh();
+        }
+        catch (Exception exception)
+        {
+            Status = "保存套餐失败：" + exception.Message;
+        }
+        await Task.CompletedTask;
+    }
+
+    private void ClearUsage()
+    {
+        _controller.ClearQuotaUsage();
+        Status = "已清空本地 eSIM 用量统计。";
+        Refresh();
     }
 }
 
@@ -1070,11 +1053,20 @@ internal static class TrafficFormat
             : $"{value.Minutes:00}:{value.Seconds:00}";
     }
 }
-
-public sealed class CoreLogRowViewModel(CoreLogEntry entry)
+internal static class QuotaFormat
 {
-    public string Time => entry.TimestampUtc.ToLocalTime().ToString("HH:mm:ss");
-    public string Source => entry.Source;
-    public string Level => entry.Level;
-    public string Message => entry.Message;
+    private const decimal BytesPerGigabyte = 1024m * 1024m * 1024m;
+
+    public static bool TryParseGigabytes(string? text, out decimal value)
+        => decimal.TryParse(
+            text?.Trim(),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out value)
+            && value >= 0
+            && value <= long.MaxValue / BytesPerGigabyte;
+
+    public static string Gigabytes(long bytes)
+        => (Math.Max(0, bytes) / BytesPerGigabyte).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 }
+
