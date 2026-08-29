@@ -5,54 +5,60 @@ namespace EgressController.SingBox.Tests;
 public sealed class DohConfigurationTests
 {
     [Fact]
-    public void Failed_cloudflare_uses_healthy_dnspod_on_the_same_exit()
+    public void Failed_cloudflare_uses_healthy_dnspod_for_global_dns()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
-                new DohProbeResult(EgressDohConfiguration.EsimCloudflareTag, false, "timeout"),
-                new DohProbeResult(EgressDohConfiguration.EsimDnsPodTag, true),
-                new DohProbeResult(EgressDohConfiguration.ClashCloudflareTag, true),
-                new DohProbeResult(EgressDohConfiguration.ClashDnsPodTag, true),
+                new DohProbeResult(EgressDohConfiguration.CloudflareTag, false, "timeout"),
+                new DohProbeResult(EgressDohConfiguration.DnsPodTag, true),
             ],
             esimReady: true,
             DohRoutingDecision.Default);
 
-        Assert.Equal(EgressDohConfiguration.EsimDnsPodTag, decision.EsimDnsTag);
-        Assert.Equal(EgressDohConfiguration.ClashCloudflareTag, decision.ClashDnsTag);
+        Assert.Equal(EgressDohConfiguration.DnsPodTag, decision.DnsTag);
         Assert.False(decision.FailClosed);
     }
 
     [Fact]
-    public void Both_failed_exit_planes_enter_fail_closed_mode()
+    public void Recovered_cloudflare_becomes_the_default_again()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
-                new DohProbeResult(EgressDohConfiguration.EsimCloudflareTag, false),
-                new DohProbeResult(EgressDohConfiguration.EsimDnsPodTag, false),
-                new DohProbeResult(EgressDohConfiguration.ClashCloudflareTag, false),
-                new DohProbeResult(EgressDohConfiguration.ClashDnsPodTag, false),
+                new DohProbeResult(EgressDohConfiguration.CloudflareTag, true),
+                new DohProbeResult(EgressDohConfiguration.DnsPodTag, true),
+            ],
+            esimReady: true,
+            new DohRoutingDecision { DnsTag = EgressDohConfiguration.DnsPodTag });
+
+        Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
+        Assert.False(decision.FailClosed);
+    }
+
+    [Fact]
+    public void Both_global_doh_endpoints_failed_enters_fail_closed_mode()
+    {
+        DohRoutingDecision decision = EgressDohConfiguration.Decide(
+            [
+                new DohProbeResult(EgressDohConfiguration.CloudflareTag, false),
+                new DohProbeResult(EgressDohConfiguration.DnsPodTag, false),
             ],
             esimReady: true,
             DohRoutingDecision.Default);
 
         Assert.True(decision.FailClosed);
-        Assert.Equal(EgressDohConfiguration.EsimCloudflareTag, decision.EsimDnsTag);
-        Assert.Equal(EgressDohConfiguration.ClashCloudflareTag, decision.ClashDnsTag);
+        Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
     }
 
     [Fact]
-    public void Offline_esim_does_not_turn_a_healthy_clash_doh_into_failure()
+    public void Offline_esim_enters_fail_closed_mode()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
-            [
-                new DohProbeResult(EgressDohConfiguration.ClashCloudflareTag, true),
-                new DohProbeResult(EgressDohConfiguration.ClashDnsPodTag, true),
-            ],
+            Array.Empty<DohProbeResult>(),
             esimReady: false,
             DohRoutingDecision.Default);
 
-        Assert.False(decision.FailClosed);
-        Assert.Equal(EgressDohConfiguration.ClashCloudflareTag, decision.ClashDnsTag);
+        Assert.True(decision.FailClosed);
+        Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
     }
 
     [Fact]

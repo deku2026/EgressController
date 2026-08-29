@@ -1008,12 +1008,12 @@ public sealed class AppController : IAsyncDisposable
             if (succeeded)
             {
                 applied = desired;
-                if (announce || desired.FailClosed || !string.Equals(current.ClashDnsTag, desired.ClashDnsTag, StringComparison.Ordinal)
-                    || !string.Equals(current.EsimDnsTag, desired.EsimDnsTag, StringComparison.Ordinal))
+                if (announce || desired.FailClosed
+                    || !string.Equals(current.DnsTag, desired.DnsTag, StringComparison.Ordinal))
                 {
                     SetMessage(desired.FailClosed
                         ? "DoH 不可用，TUN 已启用拒绝保护。"
-                        : $"DoH 已切换：eSIM={desired.EsimDnsTag}，7890={desired.ClashDnsTag}。");
+                        : $"全局 DoH 已切换：{desired.DnsTag}（经 eSIM）。");
                 }
             }
             else
@@ -1075,7 +1075,7 @@ public sealed class AppController : IAsyncDisposable
                 return DohStatusSnapshot.Create(
                     endpoint,
                     available,
-                    available && string.Equals(endpoint.Tag, ActiveTag(routing, endpoint.RoutePlane), StringComparison.Ordinal),
+                    available && string.Equals(endpoint.Tag, routing.DnsTag, StringComparison.Ordinal),
                     isHealthy: null,
                     available ? "检测中…" : "未启用",
                     available ? "等待 sing-box DNS query 返回。" : "eSIM 网卡当前不可用。");
@@ -1101,7 +1101,7 @@ public sealed class AppController : IAsyncDisposable
                 bool available = EgressDohConfiguration.IsAvailable(endpoint, esimReady);
                 DohProbeResult? probe = probes.FirstOrDefault(item =>
                     string.Equals(item.Tag, endpoint.Tag, StringComparison.Ordinal));
-                bool active = string.Equals(endpoint.Tag, ActiveTag(routing, endpoint.RoutePlane), StringComparison.Ordinal);
+                bool active = string.Equals(endpoint.Tag, routing.DnsTag, StringComparison.Ordinal);
                 if (!available)
                 {
                     return DohStatusSnapshot.Create(
@@ -1165,9 +1165,6 @@ public sealed class AppController : IAsyncDisposable
             return false;
         }
     }
-
-    private static string ActiveTag(DohRoutingDecision routing, DohRoutePlane plane)
-        => plane == DohRoutePlane.Esim ? routing.EsimDnsTag : routing.ClashDnsTag;
 
     private static string DescribeDnsStatus(int status)
         => status switch

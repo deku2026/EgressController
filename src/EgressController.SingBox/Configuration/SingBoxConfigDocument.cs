@@ -56,6 +56,9 @@ public sealed record SingBoxDnsDocument
     [JsonPropertyName("strategy")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Strategy { get; init; }
+
+    [JsonPropertyName("reverse_mapping")]
+    public bool ReverseMapping { get; init; }
 }
 
 public sealed record SingBoxDnsRuleDocument

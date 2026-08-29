@@ -12,7 +12,8 @@ C# 不转发业务流量。
 - 未命中项固定进入用户已有的 `127.0.0.1:7890` SOCKS5。
 - 7890 的监听 owner 由 Windows 表动态解析并优先走主网卡，防止 sing-box 回流到上游自身。
 - 主网卡和 eSIM 网卡分别绑定到对应 direct 出口；TUN 使用 IPv4/IPv6、auto route、strict route。
-- sing-box 管理 DNS hijack、DoH、IPv4-only DNS 策略及 IPv6 reject，避免 C# 与核心重复转发。
+- sing-box 管理 DNS hijack、经 eSIM 的全局 Cloudflare/腾讯 DoH、IPv4-only DNS 策略及 IPv6 reject；
+  DNS 出口不改变业务路由，未命中业务流量仍固定进入 7890。
 - 控制面下载显式通过 7890，不读取 Windows 全局代理，也不向普通应用注入代理参数。
 - 规则来自 MetaCubeX `sing` 分支的 commit-pinned SRS；完整配置先执行目标 core 的 `check`。
 - App manifest 要求管理员权限，直接启动受管理的 sing-box；不再存在 System core、ElevatedHost

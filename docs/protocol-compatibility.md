@@ -9,7 +9,7 @@
 | 应用分流 | `process_name` 规则，递归发现的 EXE 名称与 SRS/手工域名统一进入 eSIM 集合 |
 | eSIM 不可用 | eSIM 命中项由 sing-box `reject`，不回退到 7890 |
 | 未命中流量 | 固定 `upstream-socks`，默认连接本机 7890 SOCKS5 |
-| DNS | sing-box DoH 分别绑定 eSIM/7890；eSIM 不可用时 DNS 命中项 reject，并提供查询和缓存清理 |
+| DNS | sing-box 劫持普通 DNS，统一经 eSIM 使用 Cloudflare/腾讯 DoH；解析后的未命中业务流量仍走 7890 |
 | 规则 | MetaCubeX `sing` 分支的 SRS，commit/blob 校验后原子缓存 |
 | 诊断 | sing-box controller API REST/WebSocket：connections、traffic、logs、DNS |
 | 普通启动 | `WindowsLaunchService.StartPlain`，无环境变量或浏览器代理参数注入 |
