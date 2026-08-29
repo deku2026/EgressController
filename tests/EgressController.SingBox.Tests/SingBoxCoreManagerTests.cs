@@ -92,6 +92,28 @@ public sealed class SingBoxCoreManagerTests : IDisposable
         Assert.Equal("core.mode", exception.Code);
     }
 
+    [Fact]
+    public async Task Verified_cached_core_survives_release_rate_limit()
+    {
+        string executable = Path.Combine(_directory, "core", "1.13.19", "sing-box.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "cached-sing-box");
+        string digest = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(executable))).ToLowerInvariant();
+        new SingBoxStateStore(_directory).SaveCurrent(new SingBoxCorePointer
+        {
+            Version = "1.13.19",
+            ExecutablePath = executable,
+            Sha256 = digest,
+            VerifiedAtUtc = DateTimeOffset.UtcNow,
+        });
+
+        var manager = new SingBoxCoreManager(_directory, new RateLimitedReleaseClient(), new FakeCli());
+        SingBoxCoreCandidate candidate = await manager.PrepareManagedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(executable, candidate.ExecutablePath);
+        Assert.Equal(digest, candidate.Sha256);
+    }
+
     private static byte[] MakeZip(params (string Path, string Content)[] entries)
     {
         using var output = new MemoryStream();
@@ -158,5 +180,14 @@ public sealed class SingBoxCoreManagerTests : IDisposable
                 StandardOutput = string.Empty,
                 StandardError = string.Empty,
             });
+    }
+
+    private sealed class RateLimitedReleaseClient : ISingBoxReleaseClient
+    {
+        public Task<SingBoxRelease> GetLatestStableAsync(CancellationToken cancellationToken = default)
+            => Task.FromException<SingBoxRelease>(new HttpRequestException("403 (rate limit exceeded)"));
+
+        public Task DownloadAsync(SingBoxReleaseAsset asset, Stream destination, CancellationToken cancellationToken = default)
+            => Task.FromException(new HttpRequestException("download must not be attempted"));
     }
 }

@@ -55,7 +55,22 @@ public sealed class SingBoxCoreManager
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            SingBoxRelease release = await _releaseClient.GetLatestStableAsync(cancellationToken).ConfigureAwait(false);
+            SingBoxRelease release;
+            try
+            {
+                release = await _releaseClient.GetLatestStableAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                SingBoxCoreCandidate? cached = await TryUseCachedCurrentAsync(cancellationToken).ConfigureAwait(false);
+                if (cached is not null)
+                    return cached;
+
+                throw new SingBoxCoreException(
+                    "无法获取 sing-box stable release，且没有可验证的本地 core。",
+                    "core.release",
+                    exception);
+            }
             if (!SingBoxReleaseClient.TryParseSupportedVersion(release.TagName, out Version? version))
                 throw new SingBoxCoreException($"当前 stable core {release.TagName} 超出 EgressController 支持范围。", "core.version");
             Version supportedVersion = version
@@ -152,6 +167,28 @@ public sealed class SingBoxCoreManager
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private async Task<SingBoxCoreCandidate?> TryUseCachedCurrentAsync(CancellationToken cancellationToken)
+    {
+        SingBoxCorePointer? current = _stateStore.LoadCurrent();
+        if (current is null || !File.Exists(current.ExecutablePath))
+            return null;
+
+        try
+        {
+            return await ValidateCandidateAsync(
+                EgressProfileSchema.ManagedCore,
+                current.Version,
+                current.ExecutablePath,
+                current.Sha256,
+                isManaged: true,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (SingBoxCoreException)
+        {
+            return null;
         }
     }
 
