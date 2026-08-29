@@ -101,10 +101,10 @@ $env:EGRESS_LIVE_RULES_TEST = $null
 也不向浏览器/WebView 注入代理参数。上游代理负责提供 7890 SOCKS5；本项目只把未命中流量
 交给它，并用 sing-box API 展示实际连接状态。
 
-配置与实施验收记录见
-[Plan/windows-egress-controller-full-traffic-design.md](../Plan/windows-egress-controller-full-traffic-design.md)
-和 [docs/traffic-migration-boundary.md](docs/traffic-migration-boundary.md)。sing-box 配置字段
-以 [官方文档](https://sing-box.sagernet.org/) 为准。
+配置与实施验收记录保存在本机
+`C:\MyFile\ArcForges\Plan\windows-egress-controller-full-traffic-design.md`，边界说明见
+[docs/traffic-migration-boundary.md](docs/traffic-migration-boundary.md)。sing-box 配置字段以
+[官方文档](https://sing-box.sagernet.org/) 为准。
 
 ## License
 
