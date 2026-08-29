@@ -20,9 +20,9 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
   owner table 动态识别，并优先绑定主网卡，避免 sing-box 回流到自身。
 - sing-box 管理 DoH、DNS 劫持、IPv4-only DNS 策略、IPv6 防漏规则以及 Windows 全流量 TUN。
   主网卡和 eSIM 网卡分别绑定到对应 direct 出口。
-- “网络与内核”页展示实际生成的 DoH server、TLS SNI、detour 和连接状态。eSIM 与 7890 是两个
-  不同出口，各自配置 Cloudflare 与 Google 候选；程序每 60 秒通过 sing-box DNS query 检测，
-  当前候选不可用时只在同一出口内切换，两个候选都失败时保持 TUN 并拒绝 TUN 外部流量。
+- “网络与内核”页展示实际生成的全局 DoH server、TLS SNI、detour 和连接状态。所有普通 DNS
+  统一经 eSIM 使用 Cloudflare，失败时切换腾讯 DNSPod，恢复后自动切回；解析后的未命中业务
+  流量仍由 `route.final` 送往 7890。程序每 60 秒检测一次，两项都失败时保持 TUN 并拒绝外部流量。
 - TUN 运行时会定期重新检查网卡和 7890 owner；环境发生变化时重新生成、校验并应用配置。
 - “连接”页展示真实活动/历史连接、进程、目标、协议、出口、规则和流量，支持双击详情、关闭
   单条/全部连接和清空历史；不提供独立的核心日志页面。sing-box 输出只保留有界的本地诊断日志。

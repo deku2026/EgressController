@@ -1,14 +1,7 @@
 namespace EgressController.SingBox.Configuration;
 
-public enum DohRoutePlane
-{
-    Esim,
-    Clash,
-}
-
 public sealed record SingBoxDohEndpointDefinition(
     string Tag,
-    DohRoutePlane RoutePlane,
     string Provider,
     bool IsFallback,
     string Server,
@@ -18,12 +11,7 @@ public sealed record SingBoxDohEndpointDefinition(
     string Detour,
     string ProbeSuffix)
 {
-    public string RoutePlaneLabel => RoutePlane switch
-    {
-        DohRoutePlane.Esim => "eSIM 出口",
-        DohRoutePlane.Clash => "7890 出口",
-        _ => RoutePlane.ToString(),
-    };
+    public string RoutePlaneLabel => "全局 DNS · eSIM 出口";
 
     public string CreateProbeHost(string nonce)
     {
@@ -42,8 +30,7 @@ public sealed record DohProbeResult(
 
 public sealed record DohRoutingDecision
 {
-    public string EsimDnsTag { get; init; } = EgressDohConfiguration.EsimCloudflareTag;
-    public string ClashDnsTag { get; init; } = EgressDohConfiguration.ClashCloudflareTag;
+    public string DnsTag { get; init; } = EgressDohConfiguration.CloudflareTag;
     public bool FailClosed { get; init; }
 
     public static DohRoutingDecision Default { get; } = new();
@@ -51,16 +38,13 @@ public sealed record DohRoutingDecision
 
 public static class EgressDohConfiguration
 {
-    public const string EsimCloudflareTag = "dns-esim";
-    public const string EsimDnsPodTag = "dns-esim-backup";
-    public const string ClashCloudflareTag = "dns-clash";
-    public const string ClashDnsPodTag = "dns-clash-backup";
+    public const string CloudflareTag = "dns-global";
+    public const string DnsPodTag = "dns-global-backup";
 
     public static IReadOnlyList<SingBoxDohEndpointDefinition> Endpoints { get; } =
     [
         new(
-            EsimCloudflareTag,
-            DohRoutePlane.Esim,
+            CloudflareTag,
             "Cloudflare",
             IsFallback: false,
             "cloudflare-dns.com",
@@ -68,10 +52,9 @@ public static class EgressDohConfiguration
             "/dns-query",
             "cloudflare-dns.com",
             EgressProfileCompiler.EsimDirectTag,
-            "doh-esim-cloudflare.egresscontroller.invalid"),
+            "doh-global-cloudflare.egresscontroller.invalid"),
         new(
-            EsimDnsPodTag,
-            DohRoutePlane.Esim,
+            DnsPodTag,
             "腾讯 DNSPod",
             IsFallback: true,
             "doh.pub",
@@ -79,29 +62,7 @@ public static class EgressDohConfiguration
             "/dns-query",
             "doh.pub",
             EgressProfileCompiler.EsimDirectTag,
-            "doh-esim-dnspod.egresscontroller.invalid"),
-        new(
-            ClashCloudflareTag,
-            DohRoutePlane.Clash,
-            "Cloudflare",
-            IsFallback: false,
-            "cloudflare-dns.com",
-            443,
-            "/dns-query",
-            "cloudflare-dns.com",
-            EgressProfileCompiler.UpstreamSocksTag,
-            "doh-clash-cloudflare.egresscontroller.invalid"),
-        new(
-            ClashDnsPodTag,
-            DohRoutePlane.Clash,
-            "腾讯 DNSPod",
-            IsFallback: true,
-            "doh.pub",
-            443,
-            "/dns-query",
-            "doh.pub",
-            EgressProfileCompiler.UpstreamSocksTag,
-            "doh-clash-dnspod.egresscontroller.invalid"),
+            "doh-global-dnspod.egresscontroller.invalid"),
     ];
 
     public static DohRoutingDecision Decide(
@@ -112,54 +73,38 @@ public static class EgressDohConfiguration
         ArgumentNullException.ThrowIfNull(probes);
         ArgumentNullException.ThrowIfNull(current);
 
-        bool esimHasHealthyEndpoint = !esimReady || HasHealthy(probes, DohRoutePlane.Esim);
-        bool clashHasHealthyEndpoint = HasHealthy(probes, DohRoutePlane.Clash);
-        string esimTag = esimReady
-            ? SelectTag(probes, DohRoutePlane.Esim, current.EsimDnsTag)
-            : current.EsimDnsTag;
-        string clashTag = SelectTag(probes, DohRoutePlane.Clash, current.ClashDnsTag);
+        string dnsTag = SelectTag(probes, current.DnsTag);
+        bool hasHealthyEndpoint = esimReady && HasHealthy(probes);
 
         return new DohRoutingDecision
         {
-            EsimDnsTag = esimTag,
-            ClashDnsTag = clashTag,
-            FailClosed = !esimHasHealthyEndpoint || !clashHasHealthyEndpoint,
+            DnsTag = dnsTag,
+            FailClosed = !hasHealthyEndpoint,
         };
     }
 
     public static bool IsAvailable(
         SingBoxDohEndpointDefinition endpoint,
         bool esimReady)
-        => endpoint.RoutePlane != DohRoutePlane.Esim || esimReady;
+        => esimReady;
 
     public static SingBoxDohEndpointDefinition? Find(string tag)
         => Endpoints.FirstOrDefault(endpoint => string.Equals(endpoint.Tag, tag, StringComparison.Ordinal));
 
-    private static bool HasHealthy(
-        IReadOnlyList<DohProbeResult> probes,
-        DohRoutePlane plane)
+    private static bool HasHealthy(IReadOnlyList<DohProbeResult> probes)
         => Endpoints
-            .Where(endpoint => endpoint.RoutePlane == plane)
             .Any(endpoint => probes.Any(probe =>
                 string.Equals(probe.Tag, endpoint.Tag, StringComparison.Ordinal)
                 && probe.IsHealthy));
 
     private static string SelectTag(
         IReadOnlyList<DohProbeResult> probes,
-        DohRoutePlane plane,
         string currentTag)
     {
-        SingBoxDohEndpointDefinition[] candidates = Endpoints
-            .Where(endpoint => endpoint.RoutePlane == plane)
-            .ToArray();
-        SingBoxDohEndpointDefinition? current = candidates.FirstOrDefault(endpoint =>
-            string.Equals(endpoint.Tag, currentTag, StringComparison.Ordinal));
-        if (current is not null && IsHealthy(probes, current.Tag))
-            return current.Tag;
-
-        return candidates.FirstOrDefault(endpoint => IsHealthy(probes, endpoint.Tag))?.Tag
-            ?? current?.Tag
-            ?? candidates[0].Tag;
+        // Endpoint order is priority order: return to Cloudflare automatically after recovery.
+        return Endpoints.FirstOrDefault(endpoint => IsHealthy(probes, endpoint.Tag))?.Tag
+            ?? Find(currentTag)?.Tag
+            ?? CloudflareTag;
     }
 
     private static bool IsHealthy(IReadOnlyList<DohProbeResult> probes, string tag)

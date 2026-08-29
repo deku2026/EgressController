@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Text.Json;
 using EgressController.SingBox.Api;
 using EgressController.SingBox.Api.Models;
 using EgressController.SingBox.Configuration;
@@ -22,9 +24,7 @@ public sealed class DohLiveTests
         Directory.CreateDirectory(root);
         int port = GetFreePort();
         const string secret = "doh-live-test-secret";
-        SingBoxDohEndpointDefinition[] endpoints = EgressDohConfiguration.Endpoints
-            .Where(endpoint => endpoint.RoutePlane == DohRoutePlane.Clash)
-            .ToArray();
+        SingBoxDohEndpointDefinition[] endpoints = EgressDohConfiguration.Endpoints.ToArray();
         string configPath = Path.Combine(root, "config.json");
         File.WriteAllText(configPath, CreateConfig(port, secret, endpoints, useDomainServer: true));
 
@@ -116,14 +116,13 @@ public sealed class DohLiveTests
         string secret = "doh-domain-live-test-" + tag;
         var endpoint = new SingBoxDohEndpointDefinition(
             tag,
-            DohRoutePlane.Clash,
             provider,
             IsFallback: false,
             serverName,
             443,
             "/dns-query",
             serverName,
-            EgressProfileCompiler.UpstreamSocksTag,
+            EgressProfileCompiler.EsimDirectTag,
             probeSuffix);
         string configPath = Path.Combine(root, "config.json");
         File.WriteAllText(configPath, CreateConfig(port, secret, [endpoint], useDomainServer: true));
@@ -214,15 +213,38 @@ public sealed class DohLiveTests
         string bootstrap = useDomainServer
             ? "{\"type\":\"local\",\"tag\":\"bootstrap\"},"
             : string.Empty;
-        string defaultDomainResolver = useDomainServer ? "bootstrap" : EgressDohConfiguration.ClashCloudflareTag;
+        string defaultDomainResolver = useDomainServer ? "bootstrap" : endpoints[0].Tag;
+        string interfaceName = JsonEncodedText.Encode(GetDefaultInterfaceName()).ToString();
+        string directOutbound = $"{{\"type\":\"direct\",\"tag\":\"{EgressProfileCompiler.EsimDirectTag}\",\"bind_interface\":\"{interfaceName}\"}}";
 
         return "{\n"
             + "  \"log\": { \"level\": \"error\" },\n"
             + $"  \"dns\": {{\"servers\": [{bootstrap}{servers}],\"rules\": [{rules}],\"final\": \"{endpoints[0].Tag}\",\"strategy\": \"ipv4_only\"}},\n"
-            + $"  \"outbounds\": [{{\"type\":\"socks\",\"tag\":\"{EgressProfileCompiler.UpstreamSocksTag}\",\"server\":\"127.0.0.1\",\"server_port\":7890,\"version\":\"5\"}}],\n"
-            + $"  \"route\": {{\"final\":\"{EgressProfileCompiler.UpstreamSocksTag}\",\"default_domain_resolver\":\"{defaultDomainResolver}\"}},\n"
+            + $"  \"outbounds\": [{directOutbound}],\n"
+            + $"  \"route\": {{\"final\":\"{EgressProfileCompiler.EsimDirectTag}\",\"default_domain_resolver\":\"{defaultDomainResolver}\"}},\n"
             + $"  \"experimental\": {{\"clash_api\":{{\"external_controller\":\"127.0.0.1:{port}\",\"secret\":\"{secret}\"}}}}\n"
             + "}\n";
+    }
+
+    private static string GetDefaultInterfaceName()
+    {
+        NetworkInterface[] active = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(networkInterface => networkInterface.OperationalStatus == OperationalStatus.Up
+                && networkInterface.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .ToArray();
+        string? requested = Environment.GetEnvironmentVariable("EGRESS_LIVE_DOH_INTERFACE");
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            return active.FirstOrDefault(networkInterface =>
+                    string.Equals(networkInterface.Name, requested, StringComparison.OrdinalIgnoreCase))?.Name
+                ?? throw new InvalidOperationException($"Requested DoH live-test interface '{requested}' is not active.");
+        }
+
+        return active
+            .OrderByDescending(networkInterface => networkInterface.GetIPProperties().GatewayAddresses.Count > 0)
+            .Select(networkInterface => networkInterface.Name)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("No active network interface is available for the DoH live test.");
     }
 
     private static async Task<SingBoxVersionResponse> WaitForVersionAsync(

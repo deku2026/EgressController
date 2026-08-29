@@ -131,14 +131,14 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="检测状态" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.MonitorStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="每 60 秒通过 sing-box Clash API 的 DNS query 检测。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="每 60 秒通过 sing-box DNS query 检测全局 DoH。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="2">
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="最后检测" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.LastChecked}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="每个探测域名只命中对应的 DoH server tag。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="Cloudflare 为默认项，失败时切换腾讯 DNSPod，恢复后自动切回。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Button Grid.Column="3" Classes="primary" Content="立即检测"
@@ -149,7 +149,7 @@
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="14,12">
                                     <TextBlock Classes="section-title" Text="DoH 配置与连接状态" />
-                                    <TextBlock Classes="muted" Text="dns-esim 与 dns-clash 是两个不同出口；Cloudflare/Google 只在各自出口内作为候选。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="所有普通 DNS 统一经 eSIM 使用 DoH；解析后的未命中业务流量仍走 7890。" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding Network.DohStatuses}">
