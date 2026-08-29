@@ -5,19 +5,19 @@ namespace EgressController.SingBox.Tests;
 public sealed class DohConfigurationTests
 {
     [Fact]
-    public void Failed_cloudflare_uses_healthy_google_on_the_same_exit()
+    public void Failed_cloudflare_uses_healthy_dnspod_on_the_same_exit()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
                 new DohProbeResult(EgressDohConfiguration.EsimCloudflareTag, false, "timeout"),
-                new DohProbeResult(EgressDohConfiguration.EsimGoogleTag, true),
+                new DohProbeResult(EgressDohConfiguration.EsimDnsPodTag, true),
                 new DohProbeResult(EgressDohConfiguration.ClashCloudflareTag, true),
-                new DohProbeResult(EgressDohConfiguration.ClashGoogleTag, true),
+                new DohProbeResult(EgressDohConfiguration.ClashDnsPodTag, true),
             ],
             esimReady: true,
             DohRoutingDecision.Default);
 
-        Assert.Equal(EgressDohConfiguration.EsimGoogleTag, decision.EsimDnsTag);
+        Assert.Equal(EgressDohConfiguration.EsimDnsPodTag, decision.EsimDnsTag);
         Assert.Equal(EgressDohConfiguration.ClashCloudflareTag, decision.ClashDnsTag);
         Assert.False(decision.FailClosed);
     }
@@ -28,9 +28,9 @@ public sealed class DohConfigurationTests
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
                 new DohProbeResult(EgressDohConfiguration.EsimCloudflareTag, false),
-                new DohProbeResult(EgressDohConfiguration.EsimGoogleTag, false),
+                new DohProbeResult(EgressDohConfiguration.EsimDnsPodTag, false),
                 new DohProbeResult(EgressDohConfiguration.ClashCloudflareTag, false),
-                new DohProbeResult(EgressDohConfiguration.ClashGoogleTag, false),
+                new DohProbeResult(EgressDohConfiguration.ClashDnsPodTag, false),
             ],
             esimReady: true,
             DohRoutingDecision.Default);
@@ -46,7 +46,7 @@ public sealed class DohConfigurationTests
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
                 new DohProbeResult(EgressDohConfiguration.ClashCloudflareTag, true),
-                new DohProbeResult(EgressDohConfiguration.ClashGoogleTag, true),
+                new DohProbeResult(EgressDohConfiguration.ClashDnsPodTag, true),
             ],
             esimReady: false,
             DohRoutingDecision.Default);

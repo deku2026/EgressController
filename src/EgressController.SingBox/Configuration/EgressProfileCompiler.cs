@@ -41,6 +41,7 @@ public sealed class EgressProfileCompiler
     public const string PrimaryDirectTag = "primary-direct";
     public const string EsimDirectTag = "esim-direct";
     public const string UpstreamSocksTag = "clash-7890";
+    public const string DohBootstrapTag = "doh-bootstrap";
     public const string DnsTag = EgressDohConfiguration.ClashCloudflareTag;
     public const string EsimDnsTag = EgressDohConfiguration.EsimCloudflareTag;
     public const string ControllerHost = "127.0.0.1";
@@ -147,17 +148,26 @@ public sealed class EgressProfileCompiler
             });
         }
 
-        var dnsServers = new List<SingBoxHttpsDnsServerDocument>();
+        var dnsServers = new List<SingBoxDnsServerDocument>
+        {
+            new()
+            {
+                Type = "local",
+                Tag = DohBootstrapTag,
+            },
+        };
         foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsEsimReady))
         {
-            dnsServers.Add(new SingBoxHttpsDnsServerDocument
+            dnsServers.Add(new SingBoxDnsServerDocument
             {
+                Type = "https",
                 Tag = endpoint.Tag,
                 Server = endpoint.Server,
                 ServerPort = endpoint.ServerPort,
                 Path = endpoint.Path,
                 Tls = new SingBoxTlsDocument { ServerName = endpoint.ServerName },
                 Detour = endpoint.Detour,
+                DomainResolver = DohBootstrapTag,
             });
         }
 
@@ -208,7 +218,7 @@ public sealed class EgressProfileCompiler
                     Format = "binary",
                 }).ToArray(),
                 Final = UpstreamSocksTag,
-                DefaultDomainResolver = dohRouting.ClashDnsTag,
+                DefaultDomainResolver = DohBootstrapTag,
                 AutoDetectInterface = true,
                 FindProcess = true,
             },

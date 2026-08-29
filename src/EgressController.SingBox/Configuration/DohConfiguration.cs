@@ -52,9 +52,9 @@ public sealed record DohRoutingDecision
 public static class EgressDohConfiguration
 {
     public const string EsimCloudflareTag = "dns-esim";
-    public const string EsimGoogleTag = "dns-esim-backup";
+    public const string EsimDnsPodTag = "dns-esim-backup";
     public const string ClashCloudflareTag = "dns-clash";
-    public const string ClashGoogleTag = "dns-clash-backup";
+    public const string ClashDnsPodTag = "dns-clash-backup";
 
     public static IReadOnlyList<SingBoxDohEndpointDefinition> Endpoints { get; } =
     [
@@ -63,45 +63,45 @@ public static class EgressDohConfiguration
             DohRoutePlane.Esim,
             "Cloudflare",
             IsFallback: false,
-            "1.1.1.1",
+            "cloudflare-dns.com",
             443,
             "/dns-query",
             "cloudflare-dns.com",
             EgressProfileCompiler.EsimDirectTag,
             "doh-esim-cloudflare.egresscontroller.invalid"),
         new(
-            EsimGoogleTag,
+            EsimDnsPodTag,
             DohRoutePlane.Esim,
-            "Google",
+            "腾讯 DNSPod",
             IsFallback: true,
-            "8.8.8.8",
+            "doh.pub",
             443,
             "/dns-query",
-            "dns.google",
+            "doh.pub",
             EgressProfileCompiler.EsimDirectTag,
-            "doh-esim-google.egresscontroller.invalid"),
+            "doh-esim-dnspod.egresscontroller.invalid"),
         new(
             ClashCloudflareTag,
             DohRoutePlane.Clash,
             "Cloudflare",
             IsFallback: false,
-            "1.1.1.1",
+            "cloudflare-dns.com",
             443,
             "/dns-query",
             "cloudflare-dns.com",
             EgressProfileCompiler.UpstreamSocksTag,
             "doh-clash-cloudflare.egresscontroller.invalid"),
         new(
-            ClashGoogleTag,
+            ClashDnsPodTag,
             DohRoutePlane.Clash,
-            "Google",
+            "腾讯 DNSPod",
             IsFallback: true,
-            "8.8.8.8",
+            "doh.pub",
             443,
             "/dns-query",
-            "dns.google",
+            "doh.pub",
             EgressProfileCompiler.UpstreamSocksTag,
-            "doh-clash-google.egresscontroller.invalid"),
+            "doh-clash-dnspod.egresscontroller.invalid"),
     ];
 
     public static DohRoutingDecision Decide(

@@ -44,7 +44,7 @@ public sealed record SingBoxLogDocument
 public sealed record SingBoxDnsDocument
 {
     [JsonPropertyName("servers")]
-    public required IReadOnlyList<SingBoxHttpsDnsServerDocument> Servers { get; init; }
+    public required IReadOnlyList<SingBoxDnsServerDocument> Servers { get; init; }
 
     [JsonPropertyName("rules")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -84,28 +84,37 @@ public sealed record SingBoxDnsRuleDocument
     public string? Server { get; init; }
 }
 
-public sealed record SingBoxHttpsDnsServerDocument
+public sealed record SingBoxDnsServerDocument
 {
     [JsonPropertyName("type")]
-    public string Type { get; init; } = "https";
+    public required string Type { get; init; }
 
     [JsonPropertyName("tag")]
     public required string Tag { get; init; }
 
     [JsonPropertyName("server")]
-    public required string Server { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Server { get; init; }
 
     [JsonPropertyName("server_port")]
-    public int ServerPort { get; init; } = 443;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ServerPort { get; init; }
 
     [JsonPropertyName("path")]
-    public string Path { get; init; } = "/dns-query";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Path { get; init; }
 
     [JsonPropertyName("tls")]
-    public required SingBoxTlsDocument Tls { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SingBoxTlsDocument? Tls { get; init; }
 
     [JsonPropertyName("detour")]
-    public required string Detour { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detour { get; init; }
+
+    [JsonPropertyName("domain_resolver")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DomainResolver { get; init; }
 }
 
 public sealed record SingBoxTlsDocument
