@@ -92,8 +92,8 @@ public sealed class EgressProfileCompilerTests
             Assert.False(rules[4].TryGetProperty("process_path", out _));
             Assert.Contains("chrome.exe", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
             Assert.Contains("chrome", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
-            Assert.Equal("google", rules[5].GetProperty("rule_set")[0].GetString());
-            Assert.Equal("openai.com", rules[6].GetProperty("domain_suffix")[0].GetString());
+            Assert.Equal("openai.com", rules[5].GetProperty("domain_suffix")[0].GetString());
+            Assert.Equal("google", rules[6].GetProperty("rule_set")[0].GetString());
             Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
             Assert.Equal(EgressProfileCompiler.DohBootstrapTag, json.RootElement.GetProperty("route").GetProperty("default_domain_resolver").GetString());
             Assert.Equal("esim-direct", outbounds[0].GetProperty("tag").GetString());
@@ -327,6 +327,136 @@ public sealed class EgressProfileCompilerTests
         }
     }
 
+    [Fact]
+    public void Multiple_ports_route_processes_domains_and_catalog_sets_to_their_destinations()
+    {
+        string directory = NewRoot();
+        Directory.CreateDirectory(directory);
+        string srs = Path.Combine(directory, "google.srs");
+        File.WriteAllBytes(srs, [1]);
+        try
+        {
+            var profile = new EgressProfileDocument
+            {
+                UpstreamPorts = [7892, 7890, 7891],
+                UpstreamPort = 7891,
+                Domains =
+                [
+                    new() { Name = "google.com", Target = EgressRouteTarget.Default },
+                    new() { Name = "ai.google.com", Target = EgressRouteTarget.ForPort(7892) },
+                    new() { Name = "openai.com" },
+                ],
+                RuleSets = [new() { Name = "google", Target = EgressRouteTarget.ForPort(7890) }],
+            };
+            EgressProfileCompileInput input = Input(profile, ruleSets: [new("google", srs)],
+                ownerPaths: [@"C:\Apps\Proxy\mihomo.exe", @"C:\Apps\Proxy2\xray.exe"]) with
+            {
+                ApplicationRoutes =
+                [
+                    new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.ForPort(7892)),
+                    new([@"C:\Apps\Claude\claude.exe"], EgressRouteTarget.Esim),
+                ],
+            };
+            using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+            JsonElement root = json.RootElement;
+            Assert.Equal("clash-7891", root.GetProperty("route").GetProperty("final").GetString());
+            JsonElement[] socks = root.GetProperty("outbounds").EnumerateArray()
+                .Where(outbound => outbound.GetProperty("type").GetString() == "socks").ToArray();
+            Assert.Equal([7890, 7891, 7892], socks.Select(outbound => outbound.GetProperty("server_port").GetInt32()));
+            foreach (JsonElement outbound in socks)
+                Assert.Equal($"clash-{outbound.GetProperty("server_port").GetInt32()}", outbound.GetProperty("tag").GetString());
+
+            JsonElement[] rules = root.GetProperty("route").GetProperty("rules").EnumerateArray().ToArray();
+            Assert.Equal("primary-direct", rules[3].GetProperty("outbound").GetString());
+            Assert.Contains("xray.exe", rules[3].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+            Assert.Equal("clash-7892", rules.Single(rule => Matches(rule, "process_name", "chrome.exe")).GetProperty("outbound").GetString());
+            Assert.Equal("esim-direct", rules.Single(rule => Matches(rule, "process_name", "claude.exe")).GetProperty("outbound").GetString());
+            Assert.Equal("ai.google.com", rules[6].GetProperty("domain_suffix")[0].GetString());
+            Assert.Equal("clash-7892", rules[6].GetProperty("outbound").GetString());
+            Assert.Equal("clash-7891", rules[7].GetProperty("outbound").GetString());
+            Assert.Equal("esim-direct", rules[8].GetProperty("outbound").GetString());
+            Assert.Equal("google", rules[9].GetProperty("rule_set")[0].GetString());
+            Assert.Equal("clash-7890", rules[9].GetProperty("outbound").GetString());
+        }
+        finally
+        {
+            DeleteRoot(directory);
+        }
+    }
+
+    [Fact]
+    public void Changing_default_updates_only_follow_default_routes()
+    {
+        var profile = new EgressProfileDocument
+        {
+            UpstreamPorts = [7890, 7891],
+            Domains =
+            [
+                new() { Name = "fixed.example", Target = EgressRouteTarget.ForPort(7890) },
+                new() { Name = "follow.example", Target = EgressRouteTarget.Default },
+            ],
+        };
+        foreach (int port in profile.UpstreamPorts)
+        {
+            using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input(profile.SetDefaultPort(port))).JsonBytes);
+            JsonElement route = json.RootElement.GetProperty("route");
+            Assert.Equal($"clash-{port}", route.GetProperty("final").GetString());
+            Assert.Equal("clash-7890", route.GetProperty("rules").EnumerateArray()
+                .Single(rule => Matches(rule, "domain_suffix", "fixed.example")).GetProperty("outbound").GetString());
+            Assert.Equal($"clash-{port}", route.GetProperty("rules").EnumerateArray()
+                .Single(rule => Matches(rule, "domain_suffix", "follow.example")).GetProperty("outbound").GetString());
+        }
+    }
+
+    [Fact]
+    public void Shared_process_names_cannot_silently_choose_between_different_exits()
+    {
+        EgressProfileCompileInput input = Input(new EgressProfileDocument()) with
+        {
+            ApplicationRoutes =
+            [
+                new([@"C:\Apps\One\electron.exe"], EgressRouteTarget.Esim),
+                new([@"C:\Apps\Two\Electron.exe"], EgressRouteTarget.ForPort(7890)),
+            ],
+        };
+        var exception = Assert.Throws<EgressProfileCompilationException>(() => new EgressProfileCompiler().Compile(input));
+        Assert.Equal("application.conflict", exception.Code);
+    }
+
+    [Fact]
+    public void Offline_esim_and_global_doh_protection_do_not_change_selected_port_routes()
+    {
+        EgressProfileCompileInput input = Input(new EgressProfileDocument
+        {
+            UpstreamPorts = [7890, 7891],
+            Domains =
+            [
+                new() { Name = "esim.example" },
+                new() { Name = "port.example", Target = EgressRouteTarget.ForPort(7891) },
+            ],
+        }, environment: EnvironmentSnapshot(esimReady: false));
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        JsonElement[] rules = json.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray().ToArray();
+        Assert.Equal("reject", rules[0].GetProperty("action").GetString());
+        Assert.Equal("tun-in", rules[0].GetProperty("inbound")[0].GetString());
+        JsonElement esim = rules.Single(rule => Matches(rule, "domain_suffix", "esim.example"));
+        Assert.Equal("reject", esim.GetProperty("action").GetString());
+        Assert.False(esim.TryGetProperty("outbound", out _));
+        Assert.Equal("clash-7891", rules.Single(rule => Matches(rule, "domain_suffix", "port.example")).GetProperty("outbound").GetString());
+    }
+
+    private static bool Matches(JsonElement rule, string field, string value)
+        => rule.TryGetProperty(field, out JsonElement values)
+            && values.EnumerateArray().Any(item => item.GetString() == value);
+
+    [Fact]
+    public void Api_port_cannot_become_an_upstream_even_when_that_proxy_is_offline()
+    {
+        EgressProfileCompileInput input = Input(new EgressProfileDocument { UpstreamPorts = [7890, 19090] });
+        var exception = Assert.Throws<EgressProfileCompilationException>(() => new EgressProfileCompiler().Compile(input));
+        Assert.Equal("controller.port.conflict", exception.Code);
+    }
+
     private static EgressProfileCompileInput Input(
         EgressProfileDocument profile,
         IReadOnlyList<string>? applicationPaths = null,
@@ -338,7 +468,7 @@ public sealed class EgressProfileCompilerTests
         {
             Profile = profile,
             Environment = environment ?? EnvironmentSnapshot(),
-            ApplicationExecutablePaths = applicationPaths ?? Array.Empty<string>(),
+            ApplicationRoutes = [new(applicationPaths ?? [], EgressRouteTarget.Esim)],
             UpstreamOwnerPaths = ownerPaths ?? new[] { @"C:\Apps\Mihomo\mihomo.exe" },
             SelfExecutablePaths = selfPaths ?? Array.Empty<string>(),
             RuleSets = ruleSets ?? Array.Empty<SingBoxRuleSetInput>(),

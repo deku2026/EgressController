@@ -19,7 +19,7 @@ public sealed class EgressProfileStoreTests : IDisposable
         store.Save(new EgressProfileDocument { EsimDomains = ["Example.com", "example.com", "openai.com"] });
         EgressProfileDocument loaded = store.Load();
 
-        Assert.Equal(["example.com", "openai.com"], loaded.EsimDomains);
+        Assert.Equal(["example.com", "openai.com"], loaded.Domains.Select(route => route.Name));
         Assert.True(File.Exists(store.ProfilePath));
         Assert.True(File.Exists(store.ProfilePath + ".bak"));
     }
@@ -53,10 +53,53 @@ public sealed class EgressProfileStoreTests : IDisposable
         profile.Save(new EgressProfileDocument { EsimDomains = ["example.com"] });
         ui.Save(new UiStateDocument { ActivePage = "connections", AppsSearch = "chrome" });
 
-        Assert.Equal("example.com", Assert.Single(profile.Load().EsimDomains));
+        Assert.Equal("example.com", Assert.Single(profile.Load().Domains).Name);
         Assert.Equal("connections", ui.Load().ActivePage);
         Assert.Equal("chrome", ui.Load().AppsSearch);
         Assert.NotEqual(profile.ProfilePath, ui.StatePath);
+    }
+
+    [Theory]
+    [InlineData("SchemaVersion", "UpstreamPort", "EsimDomains")]
+    [InlineData("schemaVersion", "upstreamPort", "esimDomains")]
+    public void Legacy_json_migrates_without_losing_the_custom_default(string schema, string port, string domains)
+    {
+        var store = new EgressProfileStore(_directory);
+        Directory.CreateDirectory(_directory);
+        string legacy = $$"""{"{{schema}}":1,"{{port}}":1080,"{{domains}}":["Example.com"]}""";
+        File.WriteAllText(store.ProfilePath, legacy);
+
+        EgressProfileDocument loaded = store.Load();
+        Assert.Equal(legacy, File.ReadAllText(store.ProfilePath));
+        Assert.Equal([1080], loaded.UpstreamPorts);
+        Assert.Equal(EgressRouteTarget.Esim, Assert.Single(loaded.Domains).Target);
+
+        store.Save(loaded);
+        Assert.DoesNotContain("EsimDomains", File.ReadAllText(store.ProfilePath));
+        Assert.Equal(1080, store.Load().UpstreamPort);
+        Assert.Equal("example.com", Assert.Single(store.Load().Domains).Name);
+    }
+
+    [Fact]
+    public void Mixed_destinations_round_trip_through_aot_json_metadata()
+    {
+        var store = new EgressProfileStore(_directory);
+        store.Save(new EgressProfileDocument
+        {
+            UpstreamPorts = [7890, 7891],
+            UpstreamPort = 7891,
+            Applications = [new() { DiscoveryKey = "browser", Target = EgressRouteTarget.ForPort(7890) }],
+            RuleSets = [new() { Name = "google", Target = EgressRouteTarget.Default }],
+            Domains = [new() { Name = "example.com", Target = EgressRouteTarget.Esim }],
+        });
+
+        EgressProfileDocument loaded = store.Load();
+        Assert.Equal(2, loaded.SchemaVersion);
+        Assert.Equal(7891, loaded.UpstreamPort);
+        Assert.Equal([7890, 7891], loaded.UpstreamPorts);
+        Assert.Equal(EgressRouteTarget.ForPort(7890), Assert.Single(loaded.Applications).Target);
+        Assert.Equal(EgressRouteTarget.Default, Assert.Single(loaded.RuleSets).Target);
+        Assert.Equal(EgressRouteTarget.Esim, Assert.Single(loaded.Domains).Target);
     }
 
     public void Dispose()

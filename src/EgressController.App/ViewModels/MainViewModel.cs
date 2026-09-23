@@ -3,6 +3,7 @@ using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EgressController.Core.Models;
+using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Rules.Catalog;
 using EgressController.State.Quota;
@@ -48,6 +49,7 @@ public sealed class MainViewModel : ObservableObject
         Refresh();
     }
 
+    private EgressProfileDocument? _routingProfile;
     private string _status = "正在初始化…";
     public string Status
     {
@@ -58,6 +60,12 @@ public sealed class MainViewModel : ObservableObject
     public void Refresh()
     {
         Overview.Refresh();
+        if (!Controller.IsUpdatingProfile && !ReferenceEquals(_routingProfile, Controller.Profile))
+        {
+            _routingProfile = Controller.Profile;
+            Apps.RefreshStatuses();
+            Domains.RefreshRoutes();
+        }
         Domains.RefreshStatus();
         Connections.Refresh();
         Traffic.Refresh();
@@ -142,7 +150,6 @@ public sealed class OverviewViewModel : ObservableObject
     private string _esim = "未选择";
     private string _primary = "未选择";
     private string _upstream = "127.0.0.1:7890 · SOCKS5";
-    private string _upstreamPortText;
     private string _core = "Managed core · 未准备";
     private string _tun = "已停止";
     private string _tunBadge = "TUN · 已停止";
@@ -154,7 +161,7 @@ public sealed class OverviewViewModel : ObservableObject
     public OverviewViewModel(AppController controller)
     {
         _controller = controller;
-        _upstreamPortText = controller.Profile.UpstreamPort.ToString();
+        Ports = new UpstreamPortsViewModel(controller);
         RefreshCommand = new RelayCommand(RefreshAdapters);
         StartCommand = new AsyncRelayCommand(StartTunAsync);
         ToggleRoutingCommand = new AsyncRelayCommand(ToggleTunAsync);
@@ -164,7 +171,7 @@ public sealed class OverviewViewModel : ObservableObject
     public string Esim { get => _esim; private set => SetProperty(ref _esim, value); }
     public string Primary { get => _primary; private set => SetProperty(ref _primary, value); }
     public string Upstream { get => _upstream; private set => SetProperty(ref _upstream, value); }
-    public string UpstreamPortText { get => _upstreamPortText; set => SetProperty(ref _upstreamPortText, value ?? string.Empty); }
+    public UpstreamPortsViewModel Ports { get; }
     public string Core { get => _core; private set => SetProperty(ref _core, value); }
     public string Tun { get => _tun; private set => SetProperty(ref _tun, value); }
     public string TunBadge { get => _tunBadge; private set => SetProperty(ref _tunBadge, value); }
@@ -207,7 +214,8 @@ public sealed class OverviewViewModel : ObservableObject
     {
         Esim = SelectedAdapter?.Display ?? "未选择";
         Primary = SelectedPrimaryAdapter?.Display ?? "未选择";
-        Upstream = _controller.UpstreamSummary;
+        Upstream = "默认 · " + _controller.UpstreamSummary;
+        Ports.Refresh();
         Core = "Managed core · sing-box 1.13.x · ruleset";
         Tun = _controller.TunStatus;
         TunBadge = "TUN · " + Tun;
@@ -283,34 +291,6 @@ public sealed class OverviewViewModel : ObservableObject
             Notice = result.Error ?? "TUN 操作失败。";
         Refresh();
     }
-
-    public async Task CommitUpstreamPortAsync()
-    {
-        if (!int.TryParse(UpstreamPortText.Trim(), out int port) || port is < 1 or > 65535)
-        {
-            Notice = "SOCKS5 端口必须是 1-65535 的整数。";
-            UpstreamPortText = _controller.Profile.UpstreamPort.ToString();
-            return;
-        }
-
-        if (port == _controller.Profile.UpstreamPort)
-        {
-            UpstreamPortText = port.ToString();
-            return;
-        }
-
-        ControllerOperationResult result = await _controller.SetUpstreamPortAsync(port);
-        if (!result.Succeeded)
-        {
-            Notice = result.Error ?? "SOCKS5 端口保存失败。";
-            UpstreamPortText = _controller.Profile.UpstreamPort.ToString();
-        }
-        else
-        {
-            UpstreamPortText = port.ToString();
-        }
-        Refresh();
-    }
 }
 
 public sealed class AdapterOptionViewModel(NetworkAdapterInfo adapter)
@@ -331,8 +311,8 @@ public sealed class AppsViewModel : ObservableObject
     {
         _controller = controller;
         ScanCommand = new AsyncRelayCommand(ScanAsync);
-        SelectAllCommand = new RelayCommand(() => _ = SetAllAsync(true));
-        ClearAllCommand = new RelayCommand(() => _ = SetAllAsync(false));
+        SelectAllCommand = new AsyncRelayCommand(() => SetAllAsync(true));
+        ClearAllCommand = new AsyncRelayCommand(() => SetAllAsync(false));
     }
 
     public ObservableCollection<AppEntryViewModel> Entries { get; } = new();
@@ -353,11 +333,11 @@ public sealed class AppsViewModel : ObservableObject
         }
     }
     public string ScanText => IsScanning ? "扫描中…" : "扫描应用";
-    public string Summary => $"{_all.Count} 个目标 · {_all.Count(entry => entry.IsEsim)} 个已选 eSIM";
+    public string Summary => $"{_all.Count} 个目标 · {_all.Count(entry => entry.Routing.IsSelected)} 个单独分流";
 
     public IAsyncRelayCommand ScanCommand { get; }
-    public RelayCommand SelectAllCommand { get; }
-    public RelayCommand ClearAllCommand { get; }
+    public IAsyncRelayCommand SelectAllCommand { get; }
+    public IAsyncRelayCommand ClearAllCommand { get; }
 
     public Task ScanInitialAsync() => ScanAsync();
 
@@ -390,10 +370,10 @@ public sealed class AppsViewModel : ObservableObject
 
     private async Task SetAllAsync(bool enabled)
     {
-        AppEntryViewModel[] targets = _all.Where(entry => entry.CanManage).ToArray();
-        ControllerOperationResult result = await _controller.SetApplicationsEsimAsync(
+        AppEntryViewModel[] targets = _all.Where(entry => entry.CanManage && entry.Routing.CanEdit).ToArray();
+        ControllerOperationResult result = await _controller.SetApplicationsRouteAsync(
             targets.Select(entry => entry.Target),
-            enabled);
+            enabled, routes: targets.ToDictionary(entry => entry.DiscoveryKey, entry => entry.Routing.SelectedRoute.Target));
         if (!result.Succeeded)
         {
             Status = result.Error ?? "应用选择失败。";
@@ -401,8 +381,8 @@ public sealed class AppsViewModel : ObservableObject
         else
         {
             foreach (AppEntryViewModel entry in targets)
-                entry.SetEsimLocal(enabled);
-            Status = enabled ? "已将当前可路由应用加入 eSIM。" : "已清空当前应用的 eSIM 选择。";
+                entry.RefreshRoute();
+            Status = enabled ? "已启用应用分流，新选择默认走 eSIM。" : "已清空应用分流选择。";
         }
         RefreshVisible();
     }
@@ -419,23 +399,25 @@ public sealed class AppsViewModel : ObservableObject
         OnPropertyChanged(nameof(Summary));
     }
 
-    public void RefreshStatuses() { }
+    public void RefreshStatuses()
+    {
+        foreach (AppEntryViewModel entry in _all)
+            entry.RefreshRoute();
+        OnPropertyChanged(nameof(Summary));
+    }
 }
 
 public sealed class AppEntryViewModel : ObservableObject, IDisposable
 {
     private readonly AppController _controller;
-    private readonly Action _changed;
-    private bool _isEsim;
-    private bool _changing;
-    private string _status = string.Empty;
 
     public AppEntryViewModel(AppController controller, LaunchTarget target, Action changed)
     {
         _controller = controller;
         Target = target;
-        _changed = changed;
-        _isEsim = target.EsimSelected;
+        Routing = new RouteSelectionViewModel(controller.Profile,
+            controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == target.DiscoveryKey)?.Target,
+            (enabled, route) => controller.SetApplicationsRouteAsync([Target], enabled, route), changed);
         Icon = AppIconLoader.Load(target.IconPath ?? target.CanonicalExecutable ?? target.Command);
     }
 
@@ -458,51 +440,9 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public bool HasNoIcon => Icon is null;
     public bool CanRoute => Target.CanRoute;
     public bool CanManage => CanRoute;
-    public string Status { get => _status; private set => SetProperty(ref _status, value); }
-
-    public bool IsEsim
-    {
-        get => _isEsim;
-        set
-        {
-            if (_changing || value == _isEsim)
-                return;
-            _ = ApplyEsimAsync(value);
-        }
-    }
-
-    internal void SetEsimLocal(bool value)
-    {
-        if (SetProperty(ref _isEsim, value))
-        {
-            Target.EsimSelected = value;
-            _changed();
-        }
-    }
-
-    private async Task ApplyEsimAsync(bool enabled)
-    {
-        _changing = true;
-        Status = enabled ? "正在应用 eSIM 选择…" : "正在移除 eSIM 选择…";
-        ControllerOperationResult result;
-        try
-        {
-            result = await _controller.SetApplicationsEsimAsync([Target], enabled);
-        }
-        catch (Exception exception)
-        {
-            result = ControllerOperationResult.Failure(exception.Message);
-        }
-        if (!result.Succeeded)
-            Status = result.Error ?? "应用选择失败。";
-        else
-        {
-            SetEsimLocal(enabled);
-            Status = enabled ? "已加入 eSIM" : "已移除 eSIM";
-        }
-        _changing = false;
-        _changed();
-    }
+    public RouteSelectionViewModel Routing { get; }
+    public void RefreshRoute() => Routing.Refresh(_controller.Profile,
+        _controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == DiscoveryKey)?.Target);
 
     public void Dispose() => Icon?.Dispose();
 }
@@ -510,18 +450,24 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
 public sealed class DomainsViewModel : ObservableObject
 {
     private readonly AppController _controller;
+    private readonly Dictionary<string, RuleEntryViewModel> _ruleEntries = new(StringComparer.Ordinal);
     private string _query = string.Empty;
     private string _manualDomain = string.Empty;
     private string _status = "尚未获取 sing catalog";
     private bool _isRefreshing;
+    private bool _refreshingRoutes;
+    private IReadOnlyList<RouteOptionViewModel> _routeOptions;
+    private RouteOptionViewModel _manualRoute;
 
     public DomainsViewModel(AppController controller)
     {
         _controller = controller;
         RefreshCatalogCommand = new AsyncRelayCommand(RefreshRemoteAsync);
-        SelectAllCommand = new RelayCommand(() => _ = SetVisibleAsync(true));
-        ClearAllCommand = new RelayCommand(() => _ = SetVisibleAsync(false));
-        AddManualCommand = new RelayCommand(() => _ = AddManualAsync());
+        SelectAllCommand = new AsyncRelayCommand(() => SetVisibleAsync(true));
+        ClearAllCommand = new AsyncRelayCommand(() => SetVisibleAsync(false));
+        AddManualCommand = new AsyncRelayCommand(AddManualAsync);
+        _routeOptions = RouteOptionViewModel.Create(controller.Profile);
+        _manualRoute = _routeOptions[0];
     }
 
     public ObservableCollection<RuleEntryViewModel> Results { get; } = new();
@@ -539,6 +485,12 @@ public sealed class DomainsViewModel : ObservableObject
             }
         }
     }
+    public IReadOnlyList<RouteOptionViewModel> RouteOptions => _routeOptions;
+    public RouteOptionViewModel ManualRoute
+    {
+        get => _manualRoute;
+        set { if (value is not null && !_refreshingRoutes) SetProperty(ref _manualRoute, value); }
+    }
     public string ManualDomain { get => _manualDomain; set => SetProperty(ref _manualDomain, value ?? string.Empty); }
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public bool IsRefreshing
@@ -555,13 +507,13 @@ public sealed class DomainsViewModel : ObservableObject
     public string CatalogDirectory => _controller.CatalogDirectory;
     public string CatalogCommit => _controller.CatalogCommit.Length == 0 ? "未激活" : _controller.CatalogCommit;
     public int CatalogCount => _controller.Catalog?.Count ?? 0;
-    public string SelectedSummary => $"{_controller.SelectedRuleNames.Count} 个 SRS · {ManualDomains.Count} 个自定义域名 → eSIM";
+    public string SelectedSummary => $"{_controller.SelectedRuleNames.Count} 个 SRS · {ManualDomains.Count} 个自定义域名";
     public bool CanSelectVisible => _query.Trim().Length > 0;
 
     public IAsyncRelayCommand RefreshCatalogCommand { get; }
-    public RelayCommand SelectAllCommand { get; }
-    public RelayCommand ClearAllCommand { get; }
-    public RelayCommand AddManualCommand { get; }
+    public IAsyncRelayCommand SelectAllCommand { get; }
+    public IAsyncRelayCommand ClearAllCommand { get; }
+    public IAsyncRelayCommand AddManualCommand { get; }
 
     public void RefreshSearch()
     {
@@ -573,28 +525,59 @@ public sealed class DomainsViewModel : ObservableObject
                 ? PopularEntries(catalog)
                 : catalog.Search(_query, 80);
             foreach (SingBoxRuleCatalogEntry entry in entries)
-                Results.Add(new RuleEntryViewModel(_controller, entry, RefreshSearch));
+                Results.Add(GetRuleEntry(entry.Name, entry.Path));
         }
+        RefreshRoutes();
+    }
 
-        SelectedRules.Clear();
-        if (catalog is not null)
+    private RuleEntryViewModel GetRuleEntry(string name, string path)
+    {
+        if (!_ruleEntries.TryGetValue(name, out RuleEntryViewModel? entry))
         {
-            foreach (string name in _controller.SelectedRuleNames)
+            entry = new RuleEntryViewModel(_controller, name, path, RefreshRoutes);
+            _ruleEntries.Add(name, entry);
+        }
+        return entry;
+    }
+
+    public void RefreshRoutes()
+    {
+        if (_controller.IsUpdatingProfile)
+            return;
+        _refreshingRoutes = true;
+        var target = _manualRoute.Target;
+        _routeOptions = RouteOptionViewModel.Create(_controller.Profile);
+        _manualRoute = _routeOptions.FirstOrDefault(option => option.Target == target) ?? _routeOptions[0];
+        OnPropertyChanged(nameof(RouteOptions));
+        OnPropertyChanged(nameof(ManualRoute));
+        _refreshingRoutes = false;
+        foreach (RuleEntryViewModel entry in _ruleEntries.Values)
+            entry.RefreshRoute();
+
+        string[] selected = _controller.SelectedRuleNames.ToArray();
+        if (!SelectedRules.Select(entry => entry.Name).SequenceEqual(selected))
+        {
+            SelectedRules.Clear();
+            foreach (string name in selected)
             {
-                if (catalog.TryGet(name, out SingBoxRuleCatalogEntry? entry) && entry is not null)
-                    SelectedRules.Add(new RuleEntryViewModel(_controller, entry, RefreshSearch));
+                string path = _controller.Catalog?.TryGet(name, out SingBoxRuleCatalogEntry? entry) == true
+                    ? entry!.Path : "规则集尚未缓存";
+                SelectedRules.Add(GetRuleEntry(name, path));
             }
         }
-
-        ManualDomains.Clear();
-        foreach (string domain in _controller.ManualDomains)
-            ManualDomains.Add(new ManualDomainViewModel(_controller, domain, RefreshSearch));
+        if (!ManualDomains.Select(entry => entry.Domain).SequenceEqual(_controller.ManualDomains))
+        {
+            ManualDomains.Clear();
+            foreach (string domain in _controller.ManualDomains)
+                ManualDomains.Add(new ManualDomainViewModel(_controller, domain, RefreshRoutes));
+        }
+        foreach (ManualDomainViewModel entry in ManualDomains)
+            entry.RefreshRoute();
         RefreshStatus();
     }
 
     public void RefreshStatus()
     {
-        Status = _controller.Catalog is null ? "没有本地 sing catalog，请显式更新。" : "就绪";
         OnPropertyChanged(nameof(CatalogDirectory));
         OnPropertyChanged(nameof(CatalogCommit));
         OnPropertyChanged(nameof(CatalogCount));
@@ -606,7 +589,7 @@ public sealed class DomainsViewModel : ObservableObject
         if (IsRefreshing)
             return;
         IsRefreshing = true;
-        Status = "正在通过显式 SOCKS5 7890 获取 MetaCubeX sing catalog…";
+        Status = $"正在通过默认端口 {_controller.Profile.UpstreamPort} 获取 MetaCubeX sing catalog…";
         try
         {
             SingBoxCatalogUpdateResult result = await _controller.RefreshCatalogAsync();
@@ -625,10 +608,10 @@ public sealed class DomainsViewModel : ObservableObject
 
     private async Task SetVisibleAsync(bool enabled)
     {
-        RuleEntryViewModel[] entries = Results.ToArray();
+        RuleEntryViewModel[] entries = Results.Where(entry => entry.Routing.CanEdit).ToArray();
         ControllerOperationResult result = await _controller.SetRuleSetsAsync(
             entries.Select(entry => entry.Name),
-            enabled);
+            enabled, routes: entries.ToDictionary(entry => entry.Name, entry => entry.Routing.SelectedRoute.Target));
         if (!result.Succeeded)
         {
             Status = result.Error ?? "规则批量操作失败。";
@@ -637,8 +620,7 @@ public sealed class DomainsViewModel : ObservableObject
         {
             foreach (RuleEntryViewModel entry in entries)
             {
-                entry.SetSelectedLocal(enabled);
-                entry.SetStatusLocal(enabled ? "已加载并启用" : "已移除");
+                entry.RefreshRoute();
             }
             Status = enabled ? "已批量加载并启用所选 SRS。" : "已批量移除所选 SRS。";
         }
@@ -649,7 +631,7 @@ public sealed class DomainsViewModel : ObservableObject
     {
         try
         {
-            ControllerOperationResult result = await _controller.AddManualDomainAsync(ManualDomain);
+            ControllerOperationResult result = await _controller.AddManualDomainAsync(ManualDomain, ManualRoute.Target);
             if (!result.Succeeded)
             {
                 Status = result.Error ?? "自定义域名失败。";
@@ -675,83 +657,51 @@ public sealed class DomainsViewModel : ObservableObject
     }
 }
 
-public sealed class RuleEntryViewModel : ObservableObject
+public sealed class RuleEntryViewModel
 {
     private readonly AppController _controller;
-    private readonly SingBoxRuleCatalogEntry _entry;
-    private readonly Action _changed;
-    private bool _selected;
-    private bool _changing;
-    private string _status = string.Empty;
-
-    public RuleEntryViewModel(AppController controller, SingBoxRuleCatalogEntry entry, Action changed)
+    public RuleEntryViewModel(AppController controller, string name, string path, Action changed)
     {
         _controller = controller;
-        _entry = entry;
-        _changed = changed;
-        _selected = controller.SelectedRuleNames.Contains(entry.Name, StringComparer.OrdinalIgnoreCase);
+        Name = name;
+        Path = path;
+        Routing = new RouteSelectionViewModel(controller.Profile,
+            controller.Profile.RuleSets.FirstOrDefault(route => route.Name == Name)?.Target,
+            (enabled, route) => controller.SetRuleSetAsync(Name, enabled, route), changed);
     }
 
-    public string Name => _entry.Name;
-    public string Path => _entry.Path;
-    public string Status { get => _status; private set => SetProperty(ref _status, value); }
-    public bool IsSelected
-    {
-        get => _selected;
-        set
-        {
-            if (_changing || value == _selected)
-                return;
-            _ = ApplySelectionAsync(value);
-        }
-    }
-
-    internal void SetSelectedLocal(bool value) => SetProperty(ref _selected, value);
-
-    internal void SetStatusLocal(string value) => Status = value;
-
-    internal async Task ApplySelectionAsync(bool value)
-    {
-        if (_changing)
-            return;
-        _changing = true;
-        Status = value ? "正在下载并校验 SRS…" : "正在移除 SRS…";
-        ControllerOperationResult result;
-        try
-        {
-            result = await _controller.SetRuleSetAsync(Name, value);
-        }
-        catch (Exception exception)
-        {
-            result = ControllerOperationResult.Failure(exception.Message);
-        }
-        if (!result.Succeeded)
-        {
-            Status = result.Error ?? "规则操作失败。";
-        }
-        else
-        {
-            SetSelectedLocal(value);
-            Status = value ? "已加载并启用" : "已移除";
-        }
-        _changing = false;
-        _changed();
-    }
+    public string Name { get; }
+    public string Path { get; }
+    public RouteSelectionViewModel Routing { get; }
+    public void RefreshRoute() => Routing.Refresh(_controller.Profile,
+        _controller.Profile.RuleSets.FirstOrDefault(route => route.Name == Name)?.Target);
 }
 
-public sealed class ManualDomainViewModel
+public sealed class ManualDomainViewModel : ObservableObject
 {
+    private readonly AppController _controller;
+    private string _status = string.Empty;
     public ManualDomainViewModel(AppController controller, string domain, Action changed)
     {
+        _controller = controller;
         Domain = domain;
+        Routing = new RouteSelectionViewModel(controller.Profile,
+            controller.Profile.Domains.FirstOrDefault(route => route.Name == domain)?.Target,
+            (_, route) => controller.AddManualDomainAsync(domain, route), () => { });
         RemoveCommand = new AsyncRelayCommand(async () =>
         {
-            await controller.RemoveManualDomainAsync(domain);
-            changed();
+            ControllerOperationResult result = await controller.RemoveManualDomainAsync(domain);
+            Status = result.Succeeded ? string.Empty : result.Error ?? "移除失败。";
+            if (result.Succeeded)
+                changed();
         });
     }
 
     public string Domain { get; }
+    public string Status { get => _status; private set => SetProperty(ref _status, value); }
+    public RouteSelectionViewModel Routing { get; }
+    public void RefreshRoute() => Routing.Refresh(_controller.Profile,
+        _controller.Profile.Domains.FirstOrDefault(route => route.Name == Domain)?.Target);
     public IAsyncRelayCommand RemoveCommand { get; }
 }
 
@@ -1140,4 +1090,3 @@ internal static class QuotaFormat
     public static string Gigabytes(long bytes)
         => (Math.Max(0, bytes) / BytesPerGigabyte).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 }
-

@@ -9,6 +9,11 @@
         x:DataType="vm:MainViewModel"
         Title="EgressController" Width="1180" Height="760"
         MinWidth="980" MinHeight="620">
+    <Window.DataTemplates>
+        <DataTemplate DataType="vm:RouteOptionViewModel" x:DataType="vm:RouteOptionViewModel">
+            <TextBlock Text="{Binding Label}" />
+        </DataTemplate>
+    </Window.DataTemplates>
     <DockPanel Background="#F6F7FB">
         <Border DockPanel.Dock="Top" Background="#172033" Padding="24,18,24,16">
             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
@@ -69,18 +74,31 @@
                             </Border>
                             <Border Classes="card" Grid.Row="1" Grid.Column="0">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="上游 SOCKS5" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" />
-                                    <TextBlock Classes="muted" Text="未命中应用或 SRS 的流量统一进入这里；软件控制面和上游 owner 通过主网卡，避免递归。" TextWrapping="Wrap" />
-                                    <Grid ColumnDefinitions="Auto,110" ColumnSpacing="8">
-                                        <TextBlock Text="SOCKS5 端口" VerticalAlignment="Center" />
-                                        <TextBox Grid.Column="1" Text="{Binding Overview.UpstreamPortText, Mode=TwoWay}"
-                                                 PlaceholderText="7890" LostFocus="OnUpstreamPortLostFocus"
-                                                 KeyDown="OnUpstreamPortKeyDown" />
+                                    <TextBlock Classes="eyebrow" Text="本地 SOCKS5 端口" />
+                                    <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="未匹配分流的流量走默认端口。添加端口后，可在应用和域名规则中选择。" TextWrapping="Wrap" />
+                                    <ItemsControl ItemsSource="{Binding Overview.Ports.Entries}" IsEnabled="{Binding Overview.Ports.CanEdit}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:UpstreamPortEntryViewModel">
+                                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,3" ToolTip.Tip="{Binding RemovalHint}">
+                                                    <TextBlock Text="{Binding Endpoint}" VerticalAlignment="Center" />
+                                                    <Button Grid.Column="1" Content="{Binding DefaultLabel}" Command="{Binding SetDefaultCommand}"
+                                                            IsEnabled="{Binding CanSetDefault}" />
+                                                    <Button Grid.Column="2" Content="移除" Command="{Binding RemoveCommand}"
+                                                            IsEnabled="{Binding CanRemove}" ToolTip.Tip="{Binding RemovalHint}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsEnabled="{Binding Overview.Ports.CanEdit}">
+                                        <TextBox Text="{Binding Overview.Ports.PortText}" PlaceholderText="输入端口，如 7891">
+                                            <TextBox.KeyBindings>
+                                                <KeyBinding Gesture="Enter" Command="{Binding Overview.Ports.AddCommand}" />
+                                            </TextBox.KeyBindings>
+                                        </TextBox>
+                                        <Button Grid.Column="1" Content="添加端口" Command="{Binding Overview.Ports.AddCommand}" />
                                     </Grid>
-                                    <Border Classes="metric-pill" HorizontalAlignment="Left">
-                                        <TextBlock Text="显式控制面代理 · 使用上方 SOCKS5 端口" />
-                                    </Border>
+                                    <TextBlock Classes="muted" Text="{Binding Overview.Ports.Status}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Row="1" Grid.Column="1">
@@ -105,7 +123,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="数据面" />
                                      <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                      <TextBlock Classes="muted" Text="仅 sing-box 负责网络数据面；eSIM 不可用时，命中 eSIM 的流量直接拒绝，未命中流量仍走 7890。" TextWrapping="Wrap" />
+                                      <TextBlock Classes="muted" Text="优先级：应用 → 自定义域名 → 规则集 → 默认端口。eSIM 和端口分流均不会回退到其他出口；全局 DoH 故障时仍会拒绝外部流量。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -149,7 +167,7 @@
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="14,12">
                                     <TextBlock Classes="section-title" Text="DoH 配置与连接状态" />
-                                    <TextBlock Classes="muted" Text="所有普通 DNS 统一经 eSIM 使用 DoH；解析后的未命中业务流量仍走 7890。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="所有普通 DNS 统一经 eSIM 使用 DoH；解析后的未匹配业务流量走首页默认端口。" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding Network.DohStatuses}">
@@ -195,10 +213,11 @@
                         <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                             <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用或路径…" />
                             <Button Grid.Column="1" Classes="primary" Content="{Binding Apps.ScanText}" Command="{Binding Apps.ScanCommand}" />
-                            <Button Grid.Column="2" Content="全选 eSIM" Command="{Binding Apps.SelectAllCommand}" />
+                            <Button Grid.Column="2" Content="全选分流" Command="{Binding Apps.SelectAllCommand}" />
                             <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}" />
                             <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
                         </Grid>
+                        <TextBlock Classes="muted" Text="勾选后按所选出口分流，初始为 eSIM。未勾选的应用继续匹配域名规则，其余流量走默认端口。" TextWrapping="Wrap" />
                         <TextBlock Classes="muted" Text="{Binding Apps.Status}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <Border Classes="list-card" Margin="0,14,0,0">
@@ -207,8 +226,8 @@
                                 <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="vm:AppEntryViewModel">
                                         <Border Padding="8" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
-                                            <Grid ColumnDefinitions="Auto,Auto,*,190" ColumnSpacing="12">
-                                                <CheckBox IsChecked="{Binding IsEsim}" IsEnabled="{Binding CanManage}" VerticalAlignment="Center" />
+                                            <Grid ColumnDefinitions="Auto,Auto,*,150" ColumnSpacing="12" IsEnabled="{Binding CanManage}">
+                                                <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center" />
                                                 <Border Grid.Column="1" Classes="app-glyph">
                                                     <Grid>
                                                         <Image Source="{Binding Icon}" Width="24" Height="24"
@@ -219,9 +238,10 @@
                                                 <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
                                                     <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
                                                     <TextBlock Classes="muted" Text="{Binding Details}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Classes="warning" Text="{Binding Status}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
-                                                <TextBlock Grid.Column="3" Classes="tag" Text="{Binding KindText}" VerticalAlignment="Center" />
+                                                <ComboBox Grid.Column="3" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}"
+                                                          IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -249,10 +269,12 @@
                                        TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Column="2" Text="{Binding Domains.CatalogCommit}" VerticalAlignment="Center" Classes="tag" />
                         </Grid>
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Grid ColumnDefinitions="*,150,Auto" ColumnSpacing="8">
                             <TextBox Text="{Binding Domains.ManualDomain}" PlaceholderText="添加自定义域名，默认包含根域和所有子域…" />
-                            <Button Grid.Column="1" Content="添加到 ESIM" Command="{Binding Domains.AddManualCommand}" />
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding Domains.RouteOptions}" SelectedItem="{Binding Domains.ManualRoute}" HorizontalAlignment="Stretch" />
+                            <Button Grid.Column="2" Content="添加域名" Command="{Binding Domains.AddManualCommand}" />
                         </Grid>
+                        <TextBlock Classes="muted" Text="勾选规则后按所选出口分流。自定义域名优先于规则集；子域名优先于父域名。" TextWrapping="Wrap" />
                         <TextBlock Classes="muted" Text="{Binding Domains.Status}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <Grid Margin="0,14,0,0" ColumnDefinitions="1.2*,1*" ColumnSpacing="14">
@@ -263,14 +285,15 @@
                             <ListBox ItemsSource="{Binding Domains.Results}">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate x:DataType="vm:RuleEntryViewModel">
-                                                <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,9" ColumnSpacing="10">
-                                                    <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                                                <Grid ColumnDefinitions="Auto,*,140" Margin="12,9" ColumnSpacing="10">
+                                                    <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center" />
                                                     <StackPanel Grid.Column="1" Spacing="2">
                                                         <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                                                        <TextBlock Classes="muted" Text="{Binding Path}" />
-                                                        <TextBlock Classes="success" Text="{Binding Status}" />
+                                                        <TextBlock Classes="muted" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextWrapping="Wrap" />
                                                     </StackPanel>
-                                                    <TextBlock Grid.Column="2" Classes="tag" Text="ESIM" VerticalAlignment="Center" />
+                                                    <ComboBox Grid.Column="2" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}"
+                                                              IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
@@ -280,16 +303,20 @@
                         </Border>
                         <Border Classes="list-card" Grid.Column="1">
                             <DockPanel>
-                                <TextBlock DockPanel.Dock="Top" Classes="section-title" Text="已选择 → ESIM" Margin="14,12" />
+                                <TextBlock DockPanel.Dock="Top" Classes="section-title" Text="已启用的分流" Margin="14,12" />
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <StackPanel>
                                         <ItemsControl ItemsSource="{Binding Domains.SelectedRules}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:RuleEntryViewModel">
-                                                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,8" ColumnSpacing="8">
-                                                        <CheckBox IsChecked="{Binding IsSelected}" />
-                                                        <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
-                                                        <TextBlock Grid.Column="2" Classes="tag" Text="geosite" />
+                                                    <Grid ColumnDefinitions="Auto,*,140" Margin="12,8" ColumnSpacing="8">
+                                                        <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" />
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <ComboBox Grid.Column="2" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}"
+                                                                  IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
@@ -298,9 +325,15 @@
                                         <ItemsControl ItemsSource="{Binding Domains.ManualDomains}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:ManualDomainViewModel">
-                                                    <Grid ColumnDefinitions="*,Auto" Margin="12,7">
-                                                        <TextBlock Text="{Binding Domain}" />
-                                                        <Button Grid.Column="1" Content="移除" Command="{Binding RemoveCommand}" />
+                                                    <Grid ColumnDefinitions="*,140,Auto" Margin="12,7" ColumnSpacing="8">
+                                                        <StackPanel VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Domain}" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextWrapping="Wrap" />
+                                                            <TextBlock Classes="warning" Text="{Binding Status}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}"
+                                                                  IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                                                        <Button Grid.Column="2" Content="移除" Command="{Binding RemoveCommand}" IsEnabled="{Binding Routing.CanEdit}" />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>

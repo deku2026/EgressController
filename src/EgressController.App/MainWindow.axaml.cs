@@ -54,21 +54,6 @@ public partial class MainWindow : Window
     internal void AllowApplicationExit()
         => _applicationExitAllowed = true;
 
-    private async void OnUpstreamPortLostFocus(object? sender, RoutedEventArgs e)
-    {
-        if (_vm is not null)
-            await _vm.Overview.CommitUpstreamPortAsync();
-    }
-
-    private async void OnUpstreamPortKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        if (_vm is not null)
-            await _vm.Overview.CommitUpstreamPortAsync();
-    }
-
     private async void OnConnectionDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (_vm?.Connections.SelectedRow is not { } row)

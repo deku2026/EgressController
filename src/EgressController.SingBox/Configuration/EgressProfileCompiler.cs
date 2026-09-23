@@ -6,13 +6,14 @@ using EgressController.Core.Profile;
 namespace EgressController.SingBox.Configuration;
 
 public sealed record SingBoxRuleSetInput(string Name, string Path);
+public sealed record SingBoxApplicationRouteInput(IReadOnlyList<string> ExecutablePaths, EgressRouteTarget Target);
 
 /// <summary>Runtime-only inputs assembled by AppController after inventory/network resolution.</summary>
 public sealed record EgressProfileCompileInput
 {
     public required EgressProfileDocument Profile { get; init; }
     public required NetworkEnvironmentSnapshot Environment { get; init; }
-    public required IReadOnlyList<string> ApplicationExecutablePaths { get; init; }
+    public IReadOnlyList<SingBoxApplicationRouteInput> ApplicationRoutes { get; init; } = [];
     public required IReadOnlyList<string> UpstreamOwnerPaths { get; init; }
     public IReadOnlyList<string> SelfExecutablePaths { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<SingBoxRuleSetInput> RuleSets { get; init; }
@@ -56,11 +57,11 @@ public sealed class EgressProfileCompiler
         if (self.Any(path => owners.Contains(path, StringComparer.OrdinalIgnoreCase)))
             throw Failure("upstream.owner.self", "上游 SOCKS5 owner 是 EgressController/sing-box 自身，拒绝生成配置。");
 
-        string[] applicationPaths = NormalizePaths(input.ApplicationExecutablePaths, "application.path");
-        string[] applications = NormalizeProcessNames(applicationPaths);
         var selectedRuleSets = NormalizeRuleSets(profile, input.RuleSets);
         ValidateEnvironment(input.Environment);
         ValidateControllerEndpoint(input.ControllerPort, input.ControllerSecret);
+        if (profile.UpstreamPorts.Contains(input.ControllerPort))
+            throw Failure("controller.port.conflict", "Clash API 端口不能与上游 SOCKS5 端口相同。");
         string tunName = NormalizeTunName(input.TunInterfaceName);
         DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
         ValidateDohRouting(dohRouting, input.Environment.IsEsimReady);
@@ -81,34 +82,41 @@ public sealed class EgressProfileCompiler
                 Action = "reject",
             });
         }
-        string esimAction = input.Environment.IsEsimReady ? "route" : "reject";
-        if (applications.Length > 0)
+        var processTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in input.ApplicationRoutes
+            .GroupBy(route => route.Target.NormalizeAndValidate(profile.UpstreamPorts))
+            .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
         {
-            rules.Add(new SingBoxRouteRuleDocument
+            string[] applications = NormalizeProcessNames(NormalizePaths(
+                group.SelectMany(route => route.ExecutablePaths), "application.path"));
+            foreach (string name in applications)
             {
-                ProcessName = applications,
-                Action = esimAction,
-                Outbound = input.Environment.IsEsimReady ? EsimDirectTag : null,
-            });
+                if (processTargets.TryGetValue(name, out EgressRouteTarget? existing) && existing != group.Key)
+                    throw Failure("application.conflict", $"进程 {name} 被指定到不同出口，请统一所属应用的分流选择。");
+                processTargets[name] = group.Key;
+            }
+            if (applications.Length > 0)
+                rules.Add(RouteTo(group.Key) with { ProcessName = applications });
         }
-        if (selectedRuleSets.Count > 0)
+
+        // Explicit process rules win; custom domains override broad catalog sets. More
+        // specific suffixes precede their parents so a child domain can choose another exit.
+        foreach (EgressNamedRoute domain in profile.Domains
+            .OrderByDescending(route => route.Name.Count(character => character == '.'))
+            .ThenBy(route => route.Name, StringComparer.Ordinal))
         {
-            rules.Add(new SingBoxRouteRuleDocument
-            {
-                RuleSet = selectedRuleSets.Select(item => item.Name).ToArray(),
-                Action = esimAction,
-                Outbound = input.Environment.IsEsimReady ? EsimDirectTag : null,
-            });
+            rules.Add(RouteTo(domain.Target) with { DomainSuffix = [domain.Name] });
         }
-        if (profile.EsimDomains.Count > 0)
+        foreach (EgressNamedRoute ruleSet in profile.RuleSets)
         {
-            rules.Add(new SingBoxRouteRuleDocument
-            {
-                DomainSuffix = profile.EsimDomains,
-                Action = esimAction,
-                Outbound = input.Environment.IsEsimReady ? EsimDirectTag : null,
-            });
+            rules.Add(RouteTo(ruleSet.Target) with { RuleSet = [ruleSet.Name] });
         }
+
+        SingBoxRouteRuleDocument RouteTo(EgressRouteTarget target)
+            => target.Kind == "esim"
+                ? new() { Action = input.Environment.IsEsimReady ? "route" : "reject",
+                    Outbound = input.Environment.IsEsimReady ? EsimDirectTag : null }
+                : new() { Action = "route", Outbound = SocksTag(target.Port ?? profile.UpstreamPort) };
 
         var dnsRules = new List<SingBoxDnsRuleDocument>();
         foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsEsimReady))
@@ -147,14 +155,17 @@ public sealed class EgressProfileCompiler
         if (input.Environment.IsEsimReady)
             outbounds.Add(CreateDirect(EsimDirectTag, input.Environment.Esim));
         outbounds.Add(CreateDirect(PrimaryDirectTag, input.Environment.Primary));
-        outbounds.Add(new SingBoxOutboundDocument
+        foreach (int port in profile.UpstreamPorts)
         {
-            Type = "socks",
-            Tag = UpstreamSocksTag,
-            Server = ControllerHost,
-            ServerPort = profile.UpstreamPort,
-            Version = "5",
-        });
+            outbounds.Add(new SingBoxOutboundDocument
+            {
+                Type = "socks",
+                Tag = SocksTag(port),
+                Server = ControllerHost,
+                ServerPort = port,
+                Version = "5",
+            });
+        }
 
         var document = new SingBoxConfigDocument
         {
@@ -190,7 +201,7 @@ public sealed class EgressProfileCompiler
                     Type = "local",
                     Format = "binary",
                 }).ToArray(),
-                Final = UpstreamSocksTag,
+                Final = SocksTag(profile.UpstreamPort),
                 DefaultDomainResolver = DohBootstrapTag,
                 AutoDetectInterface = true,
                 FindProcess = true,
@@ -212,6 +223,8 @@ public sealed class EgressProfileCompiler
 
     public static string CreateControllerSecret()
         => Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+
+    public static string SocksTag(int port) => $"clash-{port}";
 
     public static void WriteNext(string path, EgressProfileCompilationResult result)
     {
@@ -317,8 +330,8 @@ public sealed class EgressProfileCompiler
                 throw Failure("ruleset.duplicate", $"SRS 规则集重复：{name}。");
         }
 
-        var selected = new List<SingBoxRuleSetInput>(profile.EsimRuleSets.Count);
-        foreach (string name in profile.EsimRuleSets)
+        var selected = new List<SingBoxRuleSetInput>(profile.RuleSets.Count);
+        foreach (string name in profile.RuleSets.Select(route => route.Name))
         {
             if (!byName.TryGetValue(name, out SingBoxRuleSetInput? item))
                 throw Failure("ruleset.missing", $"Profile 选择的 SRS 尚未下载：{name}。");
