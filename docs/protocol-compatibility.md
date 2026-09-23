@@ -6,10 +6,11 @@
 | 能力 | 当前实现 |
 | --- | --- |
 | IPv4/IPv6 TUN | sing-box `tun` inbound，按已解析网卡环境生成 |
-| 应用分流 | `process_name` 规则，递归发现的 EXE 名称与 SRS/手工域名统一进入 eSIM 集合 |
-| eSIM 不可用 | eSIM 命中项由 sing-box `reject`，不回退到 7890 |
-| 未命中流量 | 固定 `upstream-socks`，默认连接本机 7890 SOCKS5 |
-| DNS | sing-box 劫持普通 DNS，统一经 eSIM 使用 Cloudflare/腾讯 DoH；解析后的未命中业务流量仍走 7890 |
+| 应用分流 | `process_name` 规则；应用、SRS、手工域名分别选择 eSIM、默认或具体端口 |
+| eSIM 不可用 | eSIM 命中项由 sing-box `reject`，不回退其他出口 |
+| 未命中流量 | `route.final` 指向首页默认 SOCKS5 端口，初始为 7890 |
+| 多端口 | 每个端口一个 `clash-<port>` 出口，全部监听 owner 优先走主网卡；离线端口不回退 |
+| DNS | sing-box 劫持普通 DNS，统一经 eSIM 使用 Cloudflare/腾讯 DoH；未匹配业务流量走默认端口；全局 DoH 故障时拒绝外部流量 |
 | 规则 | MetaCubeX `sing` 分支的 SRS，commit/blob 校验后原子缓存 |
 | 诊断 | sing-box controller API REST/WebSocket：connections、traffic、logs、DNS |
 | 普通启动 | `WindowsLaunchService.StartPlain`，无环境变量或浏览器代理参数注入 |

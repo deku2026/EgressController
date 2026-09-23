@@ -47,7 +47,7 @@ public sealed class CompiledConfigCheckLiveTests
                     EsimDomains = new[] { "openai.com" },
                 },
                 Environment = MakeEnvironment(),
-                ApplicationExecutablePaths = new[] { @"C:\Apps\Chrome\chrome.exe" },
+                ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.Esim)],
                 UpstreamOwnerPaths = new[] { @"C:\Apps\Mihomo\mihomo.exe" },
                 RuleSets = new[] { new SingBoxRuleSetInput("google", artifact.Path!) },
                 ControllerPort = 19091,

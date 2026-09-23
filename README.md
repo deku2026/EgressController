@@ -14,16 +14,22 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
 - 勾选应用的递归 EXE 会转换为 sing-box `process_name` 规则，同时包含带 `.exe`/不带扩展名和
   Windows 常见大小写形式（例如 `claude.exe`、`Claude.exe`）。sing-box 在每条新连接上实时解析
   进程，不依赖启动按钮、PID 表或 LaunchSession。
-- 勾选的应用、SRS 和手工域名组成一个 eSIM 集合。命中且 eSIM 网卡可用时走 eSIM 直连；
-  eSIM 不存在或离线时直接 `reject`，绝不回退到 7890。
-- 未命中规则的流量固定走用户已有的 `127.0.0.1:7890` SOCKS5。7890 的监听进程由 Windows
-  owner table 动态识别，并优先绑定主网卡，避免 sing-box 回流到自身。
+- 首页可手动添加多个本地 SOCKS5 端口，用“设为默认”选择唯一默认端口；初始为 `7890`。
+  未匹配分流的流量走默认端口，控制面下载也使用该端口。
+- 应用和 SRS 勾选后默认走 eSIM，可在每行下拉框选择“eSIM”“默认”或首页添加的具体端口。
+  自定义域名在添加时选择出口，也可随后修改。全选保留每行已选出口，取消勾选移除该条规则。
+- 业务规则优先级为：应用进程、自定义域名（子域名优先）、SRS（按名称排序）、默认端口。
+  未勾选的应用仍会匹配域名规则；若希望应用始终走默认端口，可勾选并选择“默认”。
+  “默认”随首页设置变化，具体端口保持固定。默认端口和被规则引用的端口不能直接删除。
+- eSIM 命中且网卡可用时走 eSIM 直连；不可用时直接 `reject`。指定端口离线时连接失败，
+  两者均不回退到其他出口。所有已配置端口的监听进程由 Windows owner table 动态识别，
+  并优先绑定主网卡，避免 sing-box 回流到上游自身。进程名相同但出口冲突的应用会报错。
 - sing-box 管理 DoH、DNS 劫持、IPv4-only DNS 策略、IPv6 防漏规则以及 Windows 全流量 TUN。
   主网卡和 eSIM 网卡分别绑定到对应 direct 出口。
 - “网络与内核”页展示实际生成的全局 DoH server、TLS SNI、detour 和连接状态。所有普通 DNS
   统一经 eSIM 使用 Cloudflare，失败时切换腾讯 DNSPod，恢复后自动切回；解析后的未命中业务
-  流量仍由 `route.final` 送往 7890。程序每 60 秒检测一次，两项都失败时保持 TUN 并拒绝外部流量。
-- TUN 运行时会定期重新检查网卡和 7890 owner；环境发生变化时重新生成、校验并应用配置。
+  流量仍由 `route.final` 送往默认端口。程序每 60 秒检测一次，两项都失败时保持 TUN 并拒绝外部流量。
+- TUN 运行时会定期重新检查网卡和所有上游端口的 owner；环境发生变化时重新生成、校验并应用配置。
 - “连接”页展示真实活动/历史连接、进程、目标、协议、出口、规则和流量，支持双击详情、关闭
   单条/全部连接和清空历史；不提供独立的核心日志页面。sing-box 输出只保留有界的本地诊断日志。
 - 流量页使用 SQLite 保存 eSIM 套餐总量、配置时的剩余量和本地统计的已用量，可清空统计并
@@ -37,7 +43,7 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
 ```text
 EgressController.App.exe
 data\
-  profile.json                 # 用户意图：网卡、7890、应用、SRS、域名
+  profile.json                 # 用户意图：网卡、端口列表、默认端口、各规则的出口
   ui-state.json                # 页面状态
   usage.db                     # eSIM 本地流量统计
   current-runtime.json         # 当前运行指针
@@ -55,6 +61,9 @@ ruleset\
 ```
 
 `data` 和 `ruleset` 都由程序自动创建，release ZIP 不携带本机配置、连接记录或规则缓存。
+
+Profile schema 2 会读取 schema 1 的单端口与 eSIM 选择，保留旧默认端口和已有规则；下次保存
+写入新格式，并由现有原子保存逻辑备份旧文件。旧版本程序不能编辑 schema 2 配置。
 
 ## 构建与测试
 
@@ -102,8 +111,8 @@ $env:EGRESS_LIVE_RULES_TEST = $null
 ## 设计边界
 
 本项目不管理节点、订阅、selector、provider、YAML、Windows 全局代理或应用代理环境变量，
-也不向浏览器/WebView 注入代理参数。上游代理负责提供 7890 SOCKS5；本项目只把未命中流量
-交给它，并用 sing-box API 展示实际连接状态。
+也不向浏览器/WebView 注入代理参数。上游代理负责提供配置的本地 SOCKS5 端口；本项目将
+流量交给所选出口，并用 sing-box API 展示实际连接状态。
 
 配置与实施验收记录保存在本机
 `C:\MyFile\ArcForges\Plan\windows-egress-controller-full-traffic-design.md`，边界说明见

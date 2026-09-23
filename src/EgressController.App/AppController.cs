@@ -126,6 +126,7 @@ public sealed class AppController : IAsyncDisposable
     public string RulesetRoot => _rulesetRoot;
     public string LogPath => _localLog.LogPath;
     public EgressProfileDocument Profile => _profile;
+    public bool IsUpdatingProfile => _configurationGate.CurrentCount == 0;
     public EgressQuotaSnapshot Quota => _quotaStore.Load();
     public SingBoxService SingBox => _singBox;
     public ConnectionHistoryStore ConnectionHistory => _connectionHistory;
@@ -135,8 +136,8 @@ public sealed class AppController : IAsyncDisposable
     public SingBoxRuleCatalog? Catalog => _catalogService.Current;
     public string CatalogDirectory => Path.GetDirectoryName(_catalogService.CatalogPath) ?? _dataRoot;
     public string CatalogCommit => Catalog?.Snapshot.CommitSha ?? string.Empty;
-    public IReadOnlyList<string> SelectedRuleNames => _profile.EsimRuleSets;
-    public IReadOnlyList<string> ManualDomains => _profile.EsimDomains;
+    public IReadOnlyList<string> SelectedRuleNames => _profile.RuleSets.Select(route => route.Name).ToArray();
+    public IReadOnlyList<string> ManualDomains => _profile.Domains.Select(route => route.Name).ToArray();
     public string LastMessage => _lastMessage;
     public bool IsTunRunning => _singBox.Status.State == SingBoxServiceState.Running;
     public string TunStatus => _singBox.Status.State switch
@@ -255,7 +256,7 @@ public sealed class AppController : IAsyncDisposable
         var discoveredKeys = discovered
             .Select(target => target.DiscoveryKey)
             .ToHashSet(StringComparer.Ordinal);
-        string[] staleSelections = _profile.EsimApplications
+        string[] staleSelections = _profile.Applications
             .Select(selection => selection.DiscoveryKey)
             .Where(key => !discoveredKeys.Contains(key))
             .ToArray();
@@ -263,7 +264,7 @@ public sealed class AppController : IAsyncDisposable
         {
             _profile = _profile with
             {
-                EsimApplications = _profile.EsimApplications
+                Applications = _profile.Applications
                     .Where(selection => discoveredKeys.Contains(selection.DiscoveryKey))
                     .ToArray(),
             };
@@ -274,17 +275,19 @@ public sealed class AppController : IAsyncDisposable
         _targets.Clear();
         foreach (LaunchTarget target in discovered)
         {
-            target.EsimSelected = _profile.EsimApplications.Any(selection =>
-                string.Equals(selection.DiscoveryKey, target.DiscoveryKey, StringComparison.Ordinal));
+            target.EsimSelected = _profile.Applications.Any(selection =>
+                selection.Target.Kind == "esim" && string.Equals(selection.DiscoveryKey, target.DiscoveryKey, StringComparison.Ordinal));
             _targets.Add(target);
         }
         SetMessage($"已扫描 {discovered.Count} 个 Windows 应用。");
         return discovered;
     }
 
-    public async Task<ControllerOperationResult> SetApplicationsEsimAsync(
+    public async Task<ControllerOperationResult> SetApplicationsRouteAsync(
         IEnumerable<LaunchTarget> targets,
         bool enabled,
+        EgressRouteTarget? route = null,
+        IReadOnlyDictionary<string, EgressRouteTarget>? routes = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(targets);
@@ -296,7 +299,7 @@ public sealed class AppController : IAsyncDisposable
         return await UpdateProfileAsync(
             current =>
             {
-                var selected = current.EsimApplications.ToDictionary(item => item.DiscoveryKey, StringComparer.Ordinal);
+                var selected = current.Applications.ToDictionary(item => item.DiscoveryKey, StringComparer.Ordinal);
                 foreach (string key in keys)
                 {
                     if (enabled)
@@ -304,6 +307,8 @@ public sealed class AppController : IAsyncDisposable
                         selected[key] = new EgressApplicationSelection
                         {
                             DiscoveryKey = key,
+                            Target = route ?? routes?.GetValueOrDefault(key)
+                                ?? selected.GetValueOrDefault(key)?.Target ?? EgressRouteTarget.Esim,
                         };
                     }
                     else
@@ -311,7 +316,7 @@ public sealed class AppController : IAsyncDisposable
                         selected.Remove(key);
                     }
                 }
-                return current with { EsimApplications = selected.Values.ToArray() };
+                return current with { Applications = selected.Values.ToArray() };
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -319,6 +324,7 @@ public sealed class AppController : IAsyncDisposable
     public async Task<ControllerOperationResult> SetRuleSetAsync(
         string name,
         bool enabled,
+        EgressRouteTarget? route = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -340,9 +346,7 @@ public sealed class AppController : IAsyncDisposable
         return await UpdateProfileAsync(
             current => current with
             {
-                EsimRuleSets = enabled
-                    ? current.EsimRuleSets.Append(normalized).ToArray()
-                    : current.EsimRuleSets.Where(item => !string.Equals(item, normalized, StringComparison.OrdinalIgnoreCase)).ToArray(),
+                RuleSets = UpdateNamedRoutes(current.RuleSets, [normalized], enabled, route),
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -350,6 +354,8 @@ public sealed class AppController : IAsyncDisposable
     public async Task<ControllerOperationResult> SetRuleSetsAsync(
         IEnumerable<string> names,
         bool enabled,
+        EgressRouteTarget? route = null,
+        IReadOnlyDictionary<string, EgressRouteTarget>? routes = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(names);
@@ -389,25 +395,19 @@ public sealed class AppController : IAsyncDisposable
         return await UpdateProfileAsync(
             current => current with
             {
-                EsimRuleSets = enabled
-                    ? current.EsimRuleSets
-                        .Concat(normalized)
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToArray()
-                    : current.EsimRuleSets
-                        .Where(item => !normalized.Contains(item, StringComparer.OrdinalIgnoreCase))
-                        .ToArray(),
+                RuleSets = UpdateNamedRoutes(current.RuleSets, normalized, enabled, route, routes),
             },
             cancellationToken).ConfigureAwait(false);
     }
 
     public Task<ControllerOperationResult> AddManualDomainAsync(
         string domain,
+        EgressRouteTarget? route = null,
         CancellationToken cancellationToken = default)
     {
         string normalized = EgressProfileDocument.NormalizeDomain(domain);
         return UpdateProfileAsync(
-            current => current with { EsimDomains = current.EsimDomains.Append(normalized).ToArray() },
+            current => current with { Domains = UpdateNamedRoutes(current.Domains, [normalized], true, route) },
             cancellationToken);
     }
 
@@ -417,8 +417,8 @@ public sealed class AppController : IAsyncDisposable
         => UpdateProfileAsync(
             current => current with
             {
-                EsimDomains = current.EsimDomains
-                    .Where(item => !string.Equals(item, domain, StringComparison.OrdinalIgnoreCase))
+                Domains = current.Domains
+                    .Where(item => !string.Equals(item.Name, domain, StringComparison.OrdinalIgnoreCase))
                     .ToArray(),
             },
             cancellationToken);
@@ -435,10 +435,36 @@ public sealed class AppController : IAsyncDisposable
             },
             cancellationToken);
 
-    public Task<ControllerOperationResult> SetUpstreamPortAsync(
+    public Task<ControllerOperationResult> AddUpstreamPortAsync(
         int port,
         CancellationToken cancellationToken = default)
-        => UpdateProfileAsync(current => current with { UpstreamPort = port }, cancellationToken);
+        => UpdateProfileAsync(current => current.AddPort(port), cancellationToken);
+
+    public Task<ControllerOperationResult> SetDefaultUpstreamPortAsync(int port, CancellationToken cancellationToken = default)
+        => UpdateProfileAsync(current => current.SetDefaultPort(port), cancellationToken);
+
+    public Task<ControllerOperationResult> RemoveUpstreamPortAsync(int port, CancellationToken cancellationToken = default)
+        => UpdateProfileAsync(current => current.RemovePort(port), cancellationToken);
+
+    private static EgressNamedRoute[] UpdateNamedRoutes(
+        IReadOnlyList<EgressNamedRoute> current, IEnumerable<string> names, bool enabled, EgressRouteTarget? target,
+        IReadOnlyDictionary<string, EgressRouteTarget>? targets = null)
+    {
+        var routes = current.ToDictionary(route => route.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (string name in names)
+        {
+            if (enabled)
+                routes[name] = new EgressNamedRoute
+                {
+                    Name = name,
+                    Target = target ?? targets?.GetValueOrDefault(name)
+                        ?? routes.GetValueOrDefault(name)?.Target ?? EgressRouteTarget.Esim,
+                };
+            else
+                routes.Remove(name);
+        }
+        return routes.Values.ToArray();
+    }
 
     public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
     {
@@ -658,11 +684,11 @@ public sealed class AppController : IAsyncDisposable
         }
         profile = withAdapterDefaults;
         NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
-        string[] ownerPaths = ResolveUpstreamOwners(profile.UpstreamPort, cancellationToken);
-        string[] applicationPaths = ResolveApplicationPaths(profile);
+        string[] ownerPaths = ResolveUpstreamOwners(profile, cancellationToken);
+        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile);
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
-        ControllerEndpoint endpoint = CreateControllerEndpoint();
+        ControllerEndpoint endpoint = CreateControllerEndpoint(profile.UpstreamPorts);
 
         string runtimeDirectory = Path.Combine(_dataRoot, "runtime");
         Directory.CreateDirectory(runtimeDirectory);
@@ -670,9 +696,9 @@ public sealed class AppController : IAsyncDisposable
         {
             Profile = profile,
             Environment = environment,
-            ApplicationExecutablePaths = applicationPaths,
+            ApplicationRoutes = applicationRoutes,
             UpstreamOwnerPaths = ownerPaths,
-            SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty],
+            SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty, core.ExecutablePath],
             RuleSets = ruleSets,
             ControllerPort = endpoint.Port,
             ControllerSecret = endpoint.Secret,
@@ -692,51 +718,54 @@ public sealed class AppController : IAsyncDisposable
         EgressProfileDocument profile,
         CancellationToken cancellationToken)
     {
-        if (profile.EsimRuleSets.Count == 0)
+        if (profile.RuleSets.Count == 0)
             return Array.Empty<SingBoxRuleSetInput>();
         SingBoxRuleCatalog catalog = Catalog
             ?? throw new ControllerPreparationException("rules.catalog", "已选择 SRS，但本地没有可用的 sing catalog。");
         RuleArtifactBatchResult result = await _artifactStore.EnsureManyAsync(
             catalog.Snapshot,
-            profile.EsimRuleSets,
+            profile.RuleSets.Select(route => route.Name),
             cancellationToken: cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded)
             throw new ControllerPreparationException("rules.download", string.Join("；", result.Failures.Values));
-        return profile.EsimRuleSets
+        return profile.RuleSets.Select(route => route.Name)
             .Select(name => new SingBoxRuleSetInput(name, result.Paths[name]))
             .ToArray();
     }
 
-    private string[] ResolveUpstreamOwners(int port, CancellationToken cancellationToken)
+    private string[] ResolveUpstreamOwners(EgressProfileDocument profile, CancellationToken cancellationToken)
     {
-        IReadOnlyList<TcpListenerOwner> owners = _ownerResolver.Resolve(port, cancellationToken);
-        if (owners.Count == 0)
-            throw new ControllerPreparationException("upstream.owner", $"没有找到 127.0.0.1:{port} 的 SOCKS5 监听进程。");
-        if (owners.Any(owner => !owner.IsResolved))
-            throw new ControllerPreparationException("upstream.owner.identity", "SOCKS5 监听进程存在，但无法解析其最终 EXE 路径。");
-        return owners.Select(owner => owner.CanonicalExecutablePath!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (int port in profile.UpstreamPorts)
+        {
+            IReadOnlyList<TcpListenerOwner> owners = _ownerResolver.Resolve(port, cancellationToken);
+            if (owners.Count == 0 && port == profile.UpstreamPort)
+                throw new ControllerPreparationException("upstream.owner", $"没有找到 127.0.0.1:{port} 的 SOCKS5 监听进程。");
+            if (owners.Any(owner => !owner.IsResolved))
+                throw new ControllerPreparationException("upstream.owner.identity", $"端口 {port} 的监听进程存在，但无法解析其最终 EXE 路径。");
+            foreach (TcpListenerOwner owner in owners)
+                paths.Add(owner.CanonicalExecutablePath!);
+        }
+        // An offline optional port stays a SOCKS outbound: it fails at that port and never
+        // falls back. The monitor adds its owner exemption when the listener appears.
+        return paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private string[] ResolveApplicationPaths(EgressProfileDocument profile)
+    private IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(EgressProfileDocument profile)
     {
-        var paths = new List<string>();
-        foreach (EgressApplicationSelection selection in profile.EsimApplications)
+        var routes = new List<SingBoxApplicationRouteInput>();
+        foreach (EgressApplicationSelection selection in profile.Applications)
         {
             LaunchTarget? target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == selection.DiscoveryKey);
             if (target is null)
                 throw new ControllerPreparationException("application.missing", $"找不到已选择的应用：{selection.DiscoveryKey}。");
             if (!target.CanRoute)
                 throw new ControllerPreparationException("application.unresolved", $"应用没有可用于进程名匹配的 EXE：{target.Name}。");
-            paths.AddRange(target.OwnedExecutables);
-            if (target.OwnedExecutables.Count == 0 && target.CanonicalExecutable is not null)
-                paths.Add(target.CanonicalExecutable);
+            IReadOnlyList<string> paths = target.OwnedExecutables.Count > 0 ? target.OwnedExecutables
+                : target.CanonicalExecutable is not null ? [target.CanonicalExecutable] : [];
+            routes.Add(new SingBoxApplicationRouteInput(paths, selection.Target));
         }
-        return paths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        return routes;
     }
 
     private async Task<bool> HealthCheckAsync(SingBoxRuntimeCandidate candidate, CancellationToken cancellationToken)
@@ -1287,14 +1316,7 @@ public sealed class AppController : IAsyncDisposable
                 RefreshAdapters();
                 EgressProfileDocument profile = _profile.NormalizeAndValidate();
                 NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
-                IReadOnlyList<TcpListenerOwner> owners = _ownerResolver.Resolve(profile.UpstreamPort, cancellationToken);
-                if (owners.Count == 0 || owners.Any(owner => !owner.IsResolved))
-                    continue;
-
-                string[] ownerPaths = owners
-                    .Select(owner => owner.CanonicalExecutablePath!)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
+                string[] ownerPaths = ResolveUpstreamOwners(profile, cancellationToken);
                 string fingerprint = BuildRuntimeFingerprint(environment, ownerPaths);
                 bool changed;
                 lock (_runtimeStateGate)
@@ -1331,7 +1353,7 @@ public sealed class AppController : IAsyncDisposable
             {
                 StartDiagnostics(LoadControllerEndpoint());
                 StartDohMonitor();
-                SetMessage("检测到网络或 7890 owner 变化，配置已重新校验并应用。");
+                SetMessage("检测到网卡或上游代理进程变化，配置已重新校验并应用。");
             }
             else
             {
@@ -1605,12 +1627,17 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    private static ControllerEndpoint CreateControllerEndpoint()
+    private static ControllerEndpoint CreateControllerEndpoint(IReadOnlyList<int> upstreamPorts)
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        return new ControllerEndpoint(port, EgressProfileCompiler.CreateControllerSecret());
+        for (int attempt = 0; attempt < 32; attempt++)
+        {
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            if (!upstreamPorts.Contains(port))
+                return new ControllerEndpoint(port, EgressProfileCompiler.CreateControllerSecret());
+        }
+        throw new ControllerPreparationException("controller.port", "无法分配与上游端口分离的本地 API 端口。");
     }
 
     private SingBoxApiClient CreateApiClient()

@@ -6,15 +6,18 @@ C# 不转发业务流量。
 
 ## 固定语义
 
-- 应用递归发现的 EXE、SRS 和手工域名组成一个 eSIM 并集；应用路由使用 sing-box
-  `process_name`，在每条新连接上实时匹配，不使用 PID 表或启动按钮决定出口。
-- eSIM 命中且 eSIM 网卡可用时使用 eSIM direct；eSIM 缺失或离线时直接 `reject`，不回退 7890。
-- 未命中项固定进入用户已有的 `127.0.0.1:7890` SOCKS5。
-- 7890 的监听 owner 由 Windows 表动态解析并优先走主网卡，防止 sing-box 回流到上游自身。
+- 首页维护多个本地 SOCKS5 端口和唯一默认端口，初始为 7890。
+- 应用递归发现的 EXE、SRS 和手工域名可分别选择 eSIM、跟随默认或具体端口；新勾选项
+  默认 eSIM。应用路由使用 sing-box `process_name`，不使用 PID 表或启动按钮决定出口。
+- 业务规则按应用、自定义域名（子域名优先）、SRS（名称顺序）依次匹配，未命中项进入
+  `route.final` 对应的默认 SOCKS5 端口；勾选并选择“默认”可显式覆盖后续规则。
+- eSIM 缺失或离线时命中项直接 `reject`；指定端口不可用时连接失败，均不回退其他出口。
+- 所有配置端口的监听 owner 由 Windows 表动态解析并优先走主网卡，防止回流到上游自身。
+  暂未启动的可选端口仍保留独立出口，运行时监视器在发现监听进程后补充防回流规则。
 - 主网卡和 eSIM 网卡分别绑定到对应 direct 出口；TUN 使用 IPv4/IPv6、auto route、strict route。
 - sing-box 管理 DNS hijack、经 eSIM 的全局 Cloudflare/腾讯 DoH、IPv4-only DNS 策略及 IPv6 reject；
-  DNS 出口不改变业务路由，未命中业务流量仍固定进入 7890。
-- 控制面下载显式通过 7890，不读取 Windows 全局代理，也不向普通应用注入代理参数。
+  DNS 出口不改变业务规则；全局 DoH 不可用时仍拒绝所有 TUN 外部流量。
+- 控制面下载显式通过默认 SOCKS5 端口，不读取 Windows 全局代理，也不向普通应用注入代理参数。
 - 规则来自 MetaCubeX `sing` 分支的 commit-pinned SRS；完整配置先执行目标 core 的 `check`。
 - App manifest 要求管理员权限，直接启动受管理的 sing-box；不再存在 System core、ElevatedHost
   或 Named Pipe 第二套控制面。
@@ -22,9 +25,9 @@ C# 不转发业务流量。
 ## 配置顺序
 
 1. 首次启动在 EXE 同级创建 `data` 和 `ruleset`，扫描受支持的 AI 应用与浏览器。
-2. 确认 upstream SOCKS5 端口并探测真实 SOCKS5 greeting。
+2. 在首页添加 SOCKS5 端口并设定默认项；启动时探测默认端口的真实 SOCKS5 greeting。
 3. 选择主网卡和 eSIM 网卡，校验当前 IPv4/IPv6 环境；eSIM 可暂时离线，命中流量仍 reject。
-4. 在应用页勾选 eSIM 应用，在域名页选择 SRS 或手工域名。
+4. 在应用页勾选应用，在域名页选择 SRS 或手工域名，并通过下拉框指定出口。
 5. 生成按摘要命名的运行配置，执行 `sing-box check`，通过后启动或应用 TUN。
 6. 通过 sing-box 1.13 controller API 读取连接、traffic、DNS 诊断，并将核心输出写入有界日志。
 

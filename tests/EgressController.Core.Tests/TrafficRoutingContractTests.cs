@@ -36,7 +36,7 @@ public sealed class TrafficRoutingContractTests
     {
         EgressProfileCompileInput input = Input() with
         {
-            ApplicationExecutablePaths = new[] { @"C:\Apps\Chrome\chrome.exe" },
+            ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.Esim)],
             Profile = new EgressProfileDocument { EsimDomains = new[] { "openai.com" } },
         };
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
@@ -56,7 +56,7 @@ public sealed class TrafficRoutingContractTests
                 Primary = Adapter(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Ethernet", "192.0.2.10"),
                 Esim = Adapter(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cellular", "198.51.100.10"),
             },
-            ApplicationExecutablePaths = Array.Empty<string>(),
+            ApplicationRoutes = [],
             UpstreamOwnerPaths = new[] { @"C:\Apps\Mihomo\mihomo.exe" },
             RuleSets = Array.Empty<SingBoxRuleSetInput>(),
             ControllerPort = 19090,

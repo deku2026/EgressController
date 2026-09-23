@@ -10,10 +10,12 @@ namespace EgressController.State.Json;
 /// JSON source-generation context for the durable state documents (plan §Step 00/12). Keeps
 /// serialization reflection-free and AOT-safe. Add new documents here as they are introduced.
 /// </summary>
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata, PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(EgressProfileDocument))]
 [JsonSerializable(typeof(EgressCoreSelection))]
 [JsonSerializable(typeof(EgressApplicationSelection))]
+[JsonSerializable(typeof(EgressNamedRoute))]
+[JsonSerializable(typeof(EgressRouteTarget))]
 [JsonSerializable(typeof(UiStateDocument))]
 [JsonSerializable(typeof(Dictionary<string, double>))]
 [JsonSerializable(typeof(SingBoxCorePointer))]
