@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.SingBox.Configuration;
@@ -409,18 +410,128 @@ public sealed class EgressProfileCompilerTests
     }
 
     [Fact]
-    public void Shared_process_names_cannot_silently_choose_between_different_exits()
+    public void Same_executable_path_cannot_silently_choose_between_different_exits()
     {
         EgressProfileCompileInput input = Input(new EgressProfileDocument()) with
         {
             ApplicationRoutes =
             [
                 new([@"C:\Apps\One\electron.exe"], EgressRouteTarget.Esim),
-                new([@"C:\Apps\Two\Electron.exe"], EgressRouteTarget.ForPort(7890)),
+                new([@"c:\apps\one\Electron.exe"], EgressRouteTarget.ForPort(7890)),
             ],
         };
         var exception = Assert.Throws<EgressProfileCompilationException>(() => new EgressProfileCompiler().Compile(input));
         Assert.Equal("application.conflict", exception.Code);
+        Assert.Contains(@"C:\Apps\One\electron.exe", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Brave_and_Codex_chrome_proxy_helpers_keep_their_own_exits()
+    {
+        const string brave = @"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe";
+        const string braveHelper = @"C:\Program Files\BraveSoftware\Brave-Browser\Application\chrome_proxy.exe";
+        const string codex = @"C:\Program Files\WindowsApps\OpenAI.Codex_1.0_x64__example\app\Codex.exe";
+        const string codexHelper = @"C:\Program Files\WindowsApps\OpenAI.Codex_1.0_x64__example\app\chrome_proxy.exe";
+        EgressProfileCompileInput input = Input(new EgressProfileDocument
+        {
+            UpstreamPorts = [7890, 7897],
+            UpstreamPort = 7897,
+        }) with
+        {
+            ApplicationRoutes =
+            [
+                new([brave, braveHelper], EgressRouteTarget.Esim),
+                new([codex, codexHelper], EgressRouteTarget.ForPort(7890)),
+            ],
+        };
+        var compiler = new EgressProfileCompiler();
+        EgressProfileCompilationResult compiled = compiler.Compile(input);
+        using JsonDocument json = JsonDocument.Parse(compiled.JsonBytes);
+        JsonElement root = json.RootElement;
+        Assert.Equal("esim-direct", RouteForProcess(root, brave));
+        Assert.Equal("esim-direct", RouteForProcess(root, braveHelper.ToUpperInvariant()));
+        Assert.Equal("clash-7890", RouteForProcess(root, codex));
+        Assert.Equal("clash-7890", RouteForProcess(root, codexHelper.ToUpperInvariant()));
+        Assert.Equal("clash-7897", RouteForProcess(root, @"C:\Unrelated\chrome_proxy.exe"));
+        Assert.DoesNotContain(root.GetProperty("route").GetProperty("rules").EnumerateArray(),
+            rule => Matches(rule, "process_name", "chrome_proxy.exe") || Matches(rule, "process_name", "Chrome_proxy"));
+        Assert.Equal(compiled.JsonBytes, compiler.Compile(input with
+        {
+            ApplicationRoutes = input.ApplicationRoutes.Reverse().ToArray(),
+        }).JsonBytes);
+    }
+
+    [Fact]
+    public void Unchecked_application_with_a_shared_helper_is_not_captured_by_selected_application()
+    {
+        const string selectedHelper = @"C:\Apps\Selected\chrome_proxy.exe";
+        const string uncheckedHelper = @"C:\Apps\Unchecked\chrome_proxy.exe";
+        EgressProfileCompileInput input = Input(new EgressProfileDocument(), applicationPaths: [selectedHelper]) with
+        {
+            KnownApplicationExecutablePaths = [selectedHelper, uncheckedHelper],
+        };
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal("esim-direct", RouteForProcess(json.RootElement, selectedHelper));
+        Assert.Equal("clash-7890", RouteForProcess(json.RootElement, uncheckedHelper));
+    }
+
+    [Fact]
+    public void Shared_helper_paths_are_literal_case_insensitive_and_bounded()
+    {
+        const string first = @"C:\Apps\Vendor (Preview)\App[1]+ #tools\helper.exe";
+        const string second = @"C:\Apps\Other\helper.exe";
+        EgressProfileCompileInput input = Input(new EgressProfileDocument()) with
+        {
+            ApplicationRoutes =
+            [
+                new([first], EgressRouteTarget.Esim),
+                new([second], EgressRouteTarget.Default),
+            ],
+        };
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal("esim-direct", RouteForProcess(json.RootElement, first.ToUpperInvariant()));
+        Assert.Equal("clash-7890", RouteForProcess(json.RootElement, second));
+        Assert.Equal("clash-7890", RouteForProcess(json.RootElement, first + ".other.exe"));
+        Assert.Equal("clash-7890", RouteForProcess(json.RootElement, first.Replace("App[1]+", "App1")));
+        string pattern = json.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray()
+            .First(rule => rule.TryGetProperty("process_path_regex", out _)
+                && rule.GetProperty("outbound").GetString() == "esim-direct")
+            .GetProperty("process_path_regex")[0].GetString()!;
+        Assert.DoesNotContain(@"\ ", pattern);
+        Assert.DoesNotContain(@"\#", pattern);
+    }
+
+    [Fact]
+    public void Proxy_owner_exemption_does_not_capture_another_application_with_the_same_name()
+    {
+        const string proxy = @"C:\Proxy\worker.exe";
+        const string application = @"C:\Apps\AI\worker.exe";
+        EgressProfileCompileInput input = Input(new EgressProfileDocument(),
+            applicationPaths: [application, proxy], ownerPaths: [proxy]);
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal("primary-direct", RouteForProcess(json.RootElement, proxy));
+        Assert.Equal("esim-direct", RouteForProcess(json.RootElement, application));
+    }
+
+    [Fact]
+    public void Shared_helper_keeps_esim_rejection_without_blocking_other_application_rule_generation()
+    {
+        const string esimHelper = @"C:\Apps\AI\helper.exe";
+        const string portHelper = @"C:\Apps\Browser\helper.exe";
+        EgressProfileCompileInput input = Input(new EgressProfileDocument(),
+            environment: EnvironmentSnapshot(esimReady: false)) with
+        {
+            ApplicationRoutes =
+            [
+                new([esimHelper], EgressRouteTarget.Esim),
+                new([portHelper], EgressRouteTarget.ForPort(7890)),
+            ],
+        };
+        using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal("reject", RouteForProcess(json.RootElement, esimHelper));
+        Assert.Equal("clash-7890", RouteForProcess(json.RootElement, portHelper));
+        // Global DNS failure still rejects TUN traffic before any process-specific rule.
+        Assert.Equal("reject", json.RootElement.GetProperty("route").GetProperty("rules")[0].GetProperty("action").GetString());
     }
 
     [Fact]
@@ -448,6 +559,23 @@ public sealed class EgressProfileCompilerTests
     private static bool Matches(JsonElement rule, string field, string value)
         => rule.TryGetProperty(field, out JsonElement values)
             && values.EnumerateArray().Any(item => item.GetString() == value);
+
+    private static string RouteForProcess(JsonElement root, string path)
+    {
+        foreach (JsonElement rule in root.GetProperty("route").GetProperty("rules").EnumerateArray())
+        {
+            bool matchesName = Matches(rule, "process_name", Path.GetFileName(path));
+            bool matchesPath = rule.TryGetProperty("process_path_regex", out JsonElement patterns)
+                && patterns.EnumerateArray().Any(pattern => Regex.IsMatch(path, pattern.GetString()!,
+                    RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)));
+            if (matchesName || matchesPath)
+            {
+                Assert.False(rule.TryGetProperty("process_name", out _) && rule.TryGetProperty("process_path_regex", out _));
+                return rule.GetProperty("action").GetString() == "reject" ? "reject" : rule.GetProperty("outbound").GetString()!;
+            }
+        }
+        return root.GetProperty("route").GetProperty("final").GetString()!;
+    }
 
     [Fact]
     public void Api_port_cannot_become_an_upstream_even_when_that_proxy_is_offline()

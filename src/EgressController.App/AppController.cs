@@ -685,7 +685,8 @@ public sealed class AppController : IAsyncDisposable
         profile = withAdapterDefaults;
         NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
         string[] ownerPaths = ResolveUpstreamOwners(profile, cancellationToken);
-        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile);
+        ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(_targets.All());
+        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory);
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
         ControllerEndpoint endpoint = CreateControllerEndpoint(profile.UpstreamPorts);
@@ -697,6 +698,7 @@ public sealed class AppController : IAsyncDisposable
             Profile = profile,
             Environment = environment,
             ApplicationRoutes = applicationRoutes,
+            KnownApplicationExecutablePaths = inventory.Entries.SelectMany(entry => entry.ExecutablePaths).ToArray(),
             UpstreamOwnerPaths = ownerPaths,
             SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty, core.ExecutablePath],
             RuleSets = ruleSets,
@@ -751,19 +753,17 @@ public sealed class AppController : IAsyncDisposable
         return paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(EgressProfileDocument profile)
+    private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
+        EgressProfileDocument profile, ApplicationInventorySnapshot inventory)
     {
         var routes = new List<SingBoxApplicationRouteInput>();
         foreach (EgressApplicationSelection selection in profile.Applications)
         {
-            LaunchTarget? target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == selection.DiscoveryKey);
-            if (target is null)
+            if (!inventory.TryGet(selection.DiscoveryKey, out ApplicationInventoryEntry? target) || target is null)
                 throw new ControllerPreparationException("application.missing", $"找不到已选择的应用：{selection.DiscoveryKey}。");
             if (!target.CanRoute)
-                throw new ControllerPreparationException("application.unresolved", $"应用没有可用于进程名匹配的 EXE：{target.Name}。");
-            IReadOnlyList<string> paths = target.OwnedExecutables.Count > 0 ? target.OwnedExecutables
-                : target.CanonicalExecutable is not null ? [target.CanonicalExecutable] : [];
-            routes.Add(new SingBoxApplicationRouteInput(paths, selection.Target));
+                throw new ControllerPreparationException("application.unresolved", $"应用没有可用于分流匹配的 EXE：{target.DisplayName}。");
+            routes.Add(new SingBoxApplicationRouteInput(target.ExecutablePaths, selection.Target));
         }
         return routes;
     }

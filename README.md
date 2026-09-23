@@ -13,7 +13,8 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
   PATH、CLI、快捷方式和手工选择 EXE 不参与发现。已发现应用的目录会递归收集全部 EXE。
 - 勾选应用的递归 EXE 会转换为 sing-box `process_name` 规则，同时包含带 `.exe`/不带扩展名和
   Windows 常见大小写形式（例如 `claude.exe`、`Claude.exe`）。sing-box 在每条新连接上实时解析
-  进程，不依赖启动按钮、PID 表或 LaunchSession。
+  进程，不依赖启动按钮、PID 表或 LaunchSession。同名 EXE 出现在不同目录时，改用不区分
+  大小写的完整 `process_path_regex` 匹配，分别保留各应用的出口；未勾选应用也参与同名检测。
 - 首页可手动添加多个本地 SOCKS5 端口，用“设为默认”选择唯一默认端口；初始为 `7890`。
   未匹配分流的流量走默认端口，控制面下载也使用该端口。
 - 应用和 SRS 勾选后默认走 eSIM，可在每行下拉框选择“eSIM”“默认”或首页添加的具体端口。
@@ -23,7 +24,8 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
   “默认”随首页设置变化，具体端口保持固定。默认端口和被规则引用的端口不能直接删除。
 - eSIM 命中且网卡可用时走 eSIM 直连；不可用时直接 `reject`。指定端口离线时连接失败，
   两者均不回退到其他出口。所有已配置端口的监听进程由 Windows owner table 动态识别，
-  并优先绑定主网卡，避免 sing-box 回流到上游自身。进程名相同但出口冲突的应用会报错。
+  并优先绑定主网卡，避免 sing-box 回流到上游自身。只有同一个完整 EXE 路径被重复指定到
+  不同出口时才会报错，不同目录下的同名程序可以独立分流。
 - sing-box 管理 DoH、DNS 劫持、IPv4-only DNS 策略、IPv6 防漏规则以及 Windows 全流量 TUN。
   主网卡和 eSIM 网卡分别绑定到对应 direct 出口。
 - “网络与内核”页展示实际生成的全局 DoH server、TLS SNI、detour 和连接状态。所有普通 DNS
