@@ -6,7 +6,7 @@
 | 能力 | 当前实现 |
 | --- | --- |
 | IPv4/IPv6 TUN | sing-box `tun` inbound，按已解析网卡环境生成 |
-| 应用分流 | `process_name` 规则；应用、SRS、手工域名分别选择 eSIM、默认或具体端口 |
+| 应用分流 | 独有进程名使用 `process_name`，不同目录的同名 EXE 用完整 `process_path_regex` 区分；各规则独立选择出口 |
 | eSIM 不可用 | eSIM 命中项由 sing-box `reject`，不回退其他出口 |
 | 未命中流量 | `route.final` 指向首页默认 SOCKS5 端口，初始为 7890 |
 | 多端口 | 每个端口一个 `clash-<port>` 出口，全部监听 owner 优先走主网卡；离线端口不回退 |

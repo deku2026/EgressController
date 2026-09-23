@@ -14,6 +14,8 @@ public sealed record EgressProfileCompileInput
     public required EgressProfileDocument Profile { get; init; }
     public required NetworkEnvironmentSnapshot Environment { get; init; }
     public IReadOnlyList<SingBoxApplicationRouteInput> ApplicationRoutes { get; init; } = [];
+    // Includes unchecked applications so a selected app's helper cannot capture another app.
+    public IReadOnlyList<string> KnownApplicationExecutablePaths { get; init; } = [];
     public required IReadOnlyList<string> UpstreamOwnerPaths { get; init; }
     public IReadOnlyList<string> SelfExecutablePaths { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<SingBoxRuleSetInput> RuleSets { get; init; }
@@ -57,6 +59,24 @@ public sealed class EgressProfileCompiler
         if (self.Any(path => owners.Contains(path, StringComparer.OrdinalIgnoreCase)))
             throw Failure("upstream.owner.self", "上游 SOCKS5 owner 是 EgressController/sing-box 自身，拒绝生成配置。");
 
+        var applicationTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
+        foreach (SingBoxApplicationRouteInput application in input.ApplicationRoutes)
+        {
+            EgressRouteTarget target = application.Target.NormalizeAndValidate(profile.UpstreamPorts);
+            foreach (string path in NormalizePaths(application.ExecutablePaths, "application.path"))
+            {
+                if (applicationTargets.TryGetValue(path, out EgressRouteTarget? existing) && existing != target)
+                    throw Failure("application.conflict", $"同一个 EXE 路径被指定到不同出口：{path}。请统一该程序的分流选择。");
+                applicationTargets[path] = target;
+            }
+        }
+        HashSet<string> sharedNames = NormalizePaths(input.KnownApplicationExecutablePaths
+                .Concat(applicationTargets.Keys).Concat(owners), "application.path")
+            .GroupBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Skip(1).Any())
+            .Select(group => group.Key!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var selectedRuleSets = NormalizeRuleSets(profile, input.RuleSets);
         ValidateEnvironment(input.Environment);
         ValidateControllerEndpoint(input.ControllerPort, input.ControllerSecret);
@@ -72,8 +92,8 @@ public sealed class EgressProfileCompiler
             new() { Action = "sniff" },
             new() { Protocol = "dns", Action = "hijack-dns" },
             new() { IpVersion = 6, Action = "reject" },
-            new() { ProcessName = NormalizeProcessNames(owners), Action = "route", Outbound = PrimaryDirectTag },
         };
+        AddProcessRules(owners, new() { Action = "route", Outbound = PrimaryDirectTag });
         if (failClosed)
         {
             rules.Insert(0, new SingBoxRouteRuleDocument
@@ -82,21 +102,24 @@ public sealed class EgressProfileCompiler
                 Action = "reject",
             });
         }
-        var processTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in input.ApplicationRoutes
-            .GroupBy(route => route.Target.NormalizeAndValidate(profile.UpstreamPorts))
+        foreach (var group in applicationTargets
+            .GroupBy(route => route.Value)
             .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
         {
-            string[] applications = NormalizeProcessNames(NormalizePaths(
-                group.SelectMany(route => route.ExecutablePaths), "application.path"));
-            foreach (string name in applications)
-            {
-                if (processTargets.TryGetValue(name, out EgressRouteTarget? existing) && existing != group.Key)
-                    throw Failure("application.conflict", $"进程 {name} 被指定到不同出口，请统一所属应用的分流选择。");
-                processTargets[name] = group.Key;
-            }
-            if (applications.Length > 0)
-                rules.Add(RouteTo(group.Key) with { ProcessName = applications });
+            AddProcessRules(group.Select(route => route.Key), RouteTo(group.Key));
+        }
+
+        void AddProcessRules(IEnumerable<string> executablePaths, SingBoxRouteRuleDocument action)
+        {
+            string[] paths = executablePaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+            bool NeedsPath(string path) => sharedNames.Contains(Path.GetFileNameWithoutExtension(path));
+            string[] names = NormalizeProcessNames(paths.Where(path => !NeedsPath(path)));
+            if (names.Length > 0)
+                rules.Add(action with { ProcessName = names });
+            string[] patterns = paths.Where(NeedsPath).Select(ProcessPathPattern).ToArray();
+            if (patterns.Length > 0)
+                rules.Add(action with { ProcessPathRegex = patterns });
+            // Separate rules are intentional: sing-box ANDs process_name and process_path_regex.
         }
 
         // Explicit process rules win; custom domains override broad catalog sets. More
@@ -295,6 +318,20 @@ public sealed class EgressProfileCompiler
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(name => name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static string ProcessPathPattern(string path)
+    {
+        // Match Go's regexp.QuoteMeta metacharacter set, leaving spaces and '#' literal.
+        // Anchor the whole path and honor Windows casing.
+        var pattern = new StringBuilder("(?i)^");
+        foreach (char character in path)
+        {
+            if ("\\.+*?()|[]{}^$".Contains(character))
+                pattern.Append('\\');
+            pattern.Append(character);
+        }
+        return pattern.Append('$').ToString();
     }
 
     private static void AddProcessNameVariants(HashSet<string> names, string value)
