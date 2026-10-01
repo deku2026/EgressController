@@ -6,36 +6,34 @@ sing-box 是唯一的网络数据面；C# / Avalonia 只负责扫描、生成配
 
 ## 当前行为
 
-- 应用启动后自动扫描受支持的 AI 客户端和浏览器，并自动尝试启动 TUN。
-- 应用自身要求管理员权限；它直接启动受管理的 sing-box 子进程，不再有 System core、
-  ElevatedHost、Named Pipe 或其他第二套提权控制面。
-- 应用发现只使用 Windows Store/MSIX、卸载注册表、App Paths 和 Program Files 目录；
-  PATH、CLI、快捷方式和手工选择 EXE 不参与发现。已发现应用的目录会递归收集全部 EXE。
-- 勾选应用的递归 EXE 会转换为 sing-box `process_name` 规则，同时包含带 `.exe`/不带扩展名和
-  Windows 常见大小写形式（例如 `claude.exe`、`Claude.exe`）。sing-box 在每条新连接上实时解析
-  进程，不依赖启动按钮、PID 表或 LaunchSession。同名 EXE 出现在不同目录时，改用不区分
-  大小写的完整 `process_path_regex` 匹配，分别保留各应用的出口；未勾选应用也参与同名检测。
-- 首页可手动添加多个本地 SOCKS5 端口，用“设为默认”选择唯一默认端口；初始为 `7890`。
-  未匹配分流的流量走默认端口，控制面下载也使用该端口。
-- 应用和 SRS 勾选后默认走 eSIM，可在每行下拉框选择“eSIM”“默认”或首页添加的具体端口。
-  自定义域名在添加时选择出口，也可随后修改。全选保留每行已选出口，取消勾选移除该条规则。
-- 业务规则优先级为：应用进程、自定义域名（子域名优先）、SRS（按名称排序）、默认端口。
-  未勾选的应用仍会匹配域名规则；若希望应用始终走默认端口，可勾选并选择“默认”。
-  “默认”随首页设置变化，具体端口保持固定。默认端口和被规则引用的端口不能直接删除。
-- eSIM 命中且网卡可用时走 eSIM 直连；不可用时直接 `reject`。指定端口离线时连接失败，
-  两者均不回退到其他出口。所有已配置端口的监听进程由 Windows owner table 动态识别，
-  并优先绑定主网卡，避免 sing-box 回流到上游自身。只有同一个完整 EXE 路径被重复指定到
-  不同出口时才会报错，不同目录下的同名程序可以独立分流。
-- sing-box 管理 DoH、DNS 劫持、IPv4-only DNS 策略、IPv6 防漏规则以及 Windows 全流量 TUN。
-  主网卡和 eSIM 网卡分别绑定到对应 direct 出口。
-- “网络与内核”页展示实际生成的全局 DoH server、TLS SNI、detour 和连接状态。所有普通 DNS
-  统一经 eSIM 使用 Cloudflare，失败时切换腾讯 DNSPod，恢复后自动切回；解析后的未命中业务
-  流量仍由 `route.final` 送往默认端口。程序每 60 秒检测一次，两项都失败时保持 TUN 并拒绝外部流量。
-- TUN 运行时会定期重新检查网卡和所有上游端口的 owner；环境发生变化时重新生成、校验并应用配置。
-- “连接”页展示真实活动/历史连接、进程、目标、协议、出口、规则和流量，支持双击详情、关闭
-  单条/全部连接和清空历史；不提供独立的核心日志页面。sing-box 输出只保留有界的本地诊断日志。
-- 流量页使用 SQLite 保存 eSIM 套餐总量、配置时的剩余量和本地统计的已用量，可清空统计并
-  重新显示圆形占比。它不是运营商计费接口。
+- 启动后立即进入进程保护，再扫描应用、准备内核和规则、自动启动 TUN。每秒检查进程与启动状态，
+  同一次启动未完成时不重复启动。界面和托盘不再提供停止 TUN 的入口。
+- 应用需要管理员权限。sing-box 负责全流量 TUN 与分流，C# 负责配置、发现、健康检测和进程保护。
+- 网卡和本地 SOCKS5 端口分别管理：可添加多张实际网卡、修改显示名称并设置默认网卡；
+  端口列表保留独立的默认端口。支持可作为出口的有线、Wi-Fi、USB 共享、蜂窝和虚拟接口，
+  排除回环及隧道接口。保存稳定 GUID，不依赖名称、扫描顺序或临时 ifIndex。
+- 勾选应用默认使用“默认网卡”。每行先选择“网卡”或“端口”，再选择该类别的默认项或具体出口。
+  两类默认项分别排在各自列表第一位；改变默认值不会改变明确指定的出口。指定接口消失后保持
+  原绑定并报告断开，不自动换网卡。没有 SOCKS5 端口的纯网卡配置也可以准备 TUN。
+- DNS 网卡默认跟随默认网卡，也可明确指定；默认解析服务是 Cloudflare。
+  Cloudflare、DNSPod 两个 DoH 都必须成功，并且规则实际使用的出口须通过 HTTPS 联网检测。
+  DoH 通过 sing-box DNS query 检测，联网通过指定 outbound 的 delay API 检测；完成一轮后间隔 5 秒。
+  网卡断开、TUN 未运行、配置正在变更、健康结果过期或探测失败时，都保持进程保护。
+- 保护按勾选目录递归扫描得到的完整 EXE 路径匹配所有运行实例，并追踪子孙进程；不区分网卡或端口。
+  终止前验证 PID 与创建时间，避免 PID 复用误判。全部就绪后停止终止，应用由用户重新打开。
+  这是进程保护，不是系统防火墙：终止前可能已有请求，未勾选应用不属于终止范围。
+- “进程保护”页显示原因，以及最近 200 条终止结果、应用名、路径、PID 和时间。
+  权限不足、身份无法确认、终止尚未完成都明确报告；同一失败会重试但不每秒刷屏。
+- 控制器自己的下载使用独立的直接 HTTP 客户端，不依赖本地 SOCKS5 启动成功；TUN 配置优先放行
+  控制器和核心的恢复通信。保护期间拒绝所选应用的 TUN 路由，不再插入整台机器的无条件拒绝规则。
+  勾选范围包含控制器、核心或上游代理时报告冲突，不终止这些恢复依赖。
+- 应用发现仍使用 Windows Store/MSIX、卸载注册表、App Paths 和 Program Files。已选择但暂未发现
+  的项目保留在列表，仍可取消选择；缓存已扫描的 EXE 路径，供下次启动扫描完成前进行保护。
+- 业务规则优先级仍为应用、自定义域名、SRS、默认端口；没有端口时，未匹配流量使用默认网卡出口。
+  指定网卡离线时对应规则拒绝，指定端口离线时连接失败，不回退到其他业务出口。
+- 关闭窗口继续在托盘运行；“退出并结束进程保护”才停止守护并清理 TUN。
+  本方案不安装系统封网服务，不承诺应用退出、崩溃后继续保护。
+- 连接页继续展示活动/历史连接；流量页统计默认网卡 direct 出口的累计用量，属于本地估算。
 
 ## 本地文件布局
 
@@ -47,7 +45,7 @@ EgressController.App.exe
 data\
   profile.json                 # 用户意图：网卡、端口列表、默认端口、各规则的出口
   ui-state.json                # 页面状态
-  usage.db                     # eSIM 本地流量统计
+  usage.db                     # 默认网卡本地流量统计
   current-runtime.json         # 当前运行指针
   last-good-runtime.json       # 可回滚运行指针
   apply.pending.json           # 应用中的崩溃恢复标记
@@ -64,33 +62,24 @@ ruleset\
 
 `data` 和 `ruleset` 都由程序自动创建，release ZIP 不携带本机配置、连接记录或规则缓存。
 
-Profile schema 2 会读取 schema 1 的单端口与 eSIM 选择，保留旧默认端口和已有规则；下次保存
-写入新格式，并由现有原子保存逻辑备份旧文件。旧版本程序不能编辑 schema 2 配置。
+Profile schema 3 读取 schema 1/2，将旧主网卡与 eSIM 选择迁移为网卡列表，保留端口与规则。
+旧 eSIM 规则绑定迁移后的原网卡，DNS 默认跟随默认网卡。后续保存清除旧字段；旧版程序不能编辑 schema 3。
 
-## 构建与测试
+## 构建与 mock 测试
 
 需要 `global.json` 指定的 .NET SDK、Windows 10/11 x64，以及 NativeAOT 所需的 Visual Studio
 Build Tools Desktop development with C++ 工作负载。
 
 ```powershell
 dotnet restore EgressController.slnx
-dotnet build EgressController.slnx --configuration Release --no-restore
-dotnet test EgressController.slnx --configuration Release --no-restore -- --minimum-expected-tests 1 --progress off
+dotnet build EgressController.slnx --configuration Release --no-restore -p:EgressMockOnly=true
+./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
 ```
 
-默认测试不依赖公网。需要验证真实本机 sing-box 1.13.x、7890、catalog/SRS 和 REST/WebSocket
-API 时显式打开实时测试；下载失败时可只对当前 PowerShell 会话设置临时代理：
-
-```powershell
-$env:HTTP_PROXY = 'http://127.0.0.1:7890'
-$env:HTTPS_PROXY = 'http://127.0.0.1:7890'
-$env:EGRESS_LIVE_RULES_TEST = '1'
-dotnet test ./tests/EgressController.Rules.Tests/EgressController.Rules.Tests.csproj --configuration Release --no-restore --no-build -- --minimum-expected-tests 1 --progress off
-dotnet test ./tests/EgressController.SingBox.Tests/EgressController.SingBox.Tests.csproj --configuration Release --no-restore --no-build -- --minimum-expected-tests 1 --progress off
-$env:HTTP_PROXY = $null
-$env:HTTPS_PROXY = $null
-$env:EGRESS_LIVE_RULES_TEST = $null
-```
+`EgressMockOnly` 默认开启：真实内核、Windows 进程启动/终止、机器扫描等 live 测试不编译进测试程序集。
+测试脚本及 CI 还设置 `EGRESS_MOCK_ONLY=1`，使生产进程/TUN 操作边界拒绝执行。新增保护测试使用
+假进程快照、假终止结果和假 HTTP 返回；已有 SOCKS 测试只使用本地模拟服务器，不修改系统网络。
+不要在日常机器上运行产品 EXE 来验证本 PR。详细状态与测试边界见 [保护设计](docs/process-protection.md)。
 
 ## NativeAOT 与发布
 

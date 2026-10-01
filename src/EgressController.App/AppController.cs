@@ -6,6 +6,7 @@ using EgressController.App.Services;
 using EgressController.Core.Contracts;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
+using EgressController.Core.Protection;
 using EgressController.Diagnostics;
 using EgressController.Launcher.Discovery;
 using EgressController.Rules.Artifacts;
@@ -41,7 +42,7 @@ public sealed record ControllerEndpoint(int Port, string Secret)
 /// diagnostics streams and Windows discovery. Routing never depends on an application launch
 /// button; sing-box resolves the owning process for each new connection.
 /// </summary>
-public sealed class AppController : IAsyncDisposable
+public sealed partial class AppController : IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly SemaphoreSlim _configurationGate = new(1, 1);
@@ -55,7 +56,6 @@ public sealed class AppController : IAsyncDisposable
     private readonly WindowsLaunchTargetScanner _targetScanner = new();
     private readonly LaunchTargetRegistry _targets = new();
     private readonly TcpListenerOwnerResolver _ownerResolver = new();
-    private readonly UpstreamSocksProbe _upstreamProbe = new();
     private readonly EgressProfileCompiler _compiler = new();
     private readonly DirectSingBoxProcessClient _directSingBox = new();
     private readonly SingBoxService _singBox;
@@ -69,7 +69,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly SemaphoreSlim _dohProbeGate = new(1, 1);
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
 
-    private Socks5RemoteFetcher _remoteFetcher = null!;
+    private HttpRemoteFetcher _remoteFetcher = null!;
     private HttpClient _releaseHttpClient = null!;
     private RuleCatalogService _catalogService = null!;
     private RuleArtifactStore _artifactStore = null!;
@@ -102,6 +102,7 @@ public sealed class AppController : IAsyncDisposable
 
     public AppController(string? dataRoot = null, string? rulesetRoot = null)
     {
+        EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
         string applicationDirectory = Path.GetFullPath(AppContext.BaseDirectory);
         _dataRoot = Path.GetFullPath(dataRoot ?? Path.Combine(applicationDirectory, "data"));
         _rulesetRoot = Path.GetFullPath(rulesetRoot ?? Path.Combine(applicationDirectory, "ruleset"));
@@ -115,11 +116,14 @@ public sealed class AppController : IAsyncDisposable
         _stateStore = new SingBoxStateStore(_dataRoot);
         _adapterService = new WindowsNetworkAdapterService();
         _profile = LoadProfile();
-        ConfigureControlPlane(_profile.UpstreamPort);
+        ConfigureControlPlane();
         RefreshAdapters();
+        _profile = NetworkEnvironmentResolver.EnsureAutomaticDefaults(_profile, _adapters);
+        _profileStore.Save(_profile);
 
         _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync);
         _singBox.Output += OnSingBoxOutput;
+        InitializeProtection();
     }
 
     public string DataRoot => _dataRoot;
@@ -217,7 +221,7 @@ public sealed class AppController : IAsyncDisposable
             }
 
             if (routing.FailClosed)
-                return "故障保护：TUN 已拒绝外部流量";
+                return "保护中：网络未就绪，终止所选应用";
             return IsTunRunning ? monitorStatus : "TUN 未运行";
         }
     }
@@ -253,32 +257,41 @@ public sealed class AppController : IAsyncDisposable
         IReadOnlyList<LaunchTarget> scanned = _targetScanner.Scan();
         var discovered = scanned.ToList();
 
-        var discoveredKeys = discovered
-            .Select(target => target.DiscoveryKey)
-            .ToHashSet(StringComparer.Ordinal);
-        string[] staleSelections = _profile.Applications
-            .Select(selection => selection.DiscoveryKey)
-            .Where(key => !discoveredKeys.Contains(key))
-            .ToArray();
-        if (staleSelections.Length > 0)
+        _configurationGate.Wait(_lifetimeCts.Token);
+        try
         {
+            foreach (EgressApplicationSelection selected in _profile.Applications
+                .Where(selected => discovered.All(target => target.DiscoveryKey != selected.DiscoveryKey)))
+            {
+                discovered.Add(new LaunchTarget
+                {
+                    Id = selected.DiscoveryKey, SavedDiscoveryKey = selected.DiscoveryKey,
+                    Name = selected.DisplayName ?? selected.DiscoveryKey,
+                    Source = "缓存记录（当前未发现）",
+                    OwnedExecutables = selected.ExecutablePaths,
+                    ResolutionUnsupported = true,
+                });
+            }
+            _targets.Clear();
+            foreach (LaunchTarget target in discovered)
+            {
+                target.RouteSelected = _profile.Applications.Any(selection => selection.DiscoveryKey == target.DiscoveryKey);
+                _targets.Add(target);
+            }
+            ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(discovered);
             _profile = _profile with
             {
-                Applications = _profile.Applications
-                    .Where(selection => discoveredKeys.Contains(selection.DiscoveryKey))
-                    .ToArray(),
+                Applications = _profile.Applications.Select(selection => inventory.TryGet(selection.DiscoveryKey, out var entry) && entry is not null
+                    ? selection with { DisplayName = entry.DisplayName, ExecutablePaths = entry.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() }
+                    : selection).ToArray(),
             };
             _profileStore.Save(_profile);
-            SetMessage($"已清理 {staleSelections.Length} 个已不存在的应用选择。");
+            RefreshProtectedInventory();
+            InvalidateReadiness("应用扫描已更新，正在应用规则");
+            _profileApplied = false;
+            _inventoryReady = true;
         }
-
-        _targets.Clear();
-        foreach (LaunchTarget target in discovered)
-        {
-            target.EsimSelected = _profile.Applications.Any(selection =>
-                selection.Target.Kind == "esim" && string.Equals(selection.DiscoveryKey, target.DiscoveryKey, StringComparison.Ordinal));
-            _targets.Add(target);
-        }
+        finally { _configurationGate.Release(); }
         SetMessage($"已扫描 {discovered.Count} 个 Windows 应用。");
         return discovered;
     }
@@ -292,7 +305,7 @@ public sealed class AppController : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(targets);
         string[] keys = targets
-            .Where(target => target.CanRoute)
+            .Where(target => !enabled || target.CanRoute)
             .Select(target => target.DiscoveryKey)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -307,8 +320,10 @@ public sealed class AppController : IAsyncDisposable
                         selected[key] = new EgressApplicationSelection
                         {
                             DiscoveryKey = key,
+                            DisplayName = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.Name,
+                            ExecutablePaths = ApplicationInventorySnapshot.Create(_targets.All()).ExpandSelected([key]),
                             Target = route ?? routes?.GetValueOrDefault(key)
-                                ?? selected.GetValueOrDefault(key)?.Target ?? EgressRouteTarget.Esim,
+                                ?? selected.GetValueOrDefault(key)?.Target ?? EgressRouteTarget.DefaultAdapter,
                         };
                     }
                     else
@@ -423,18 +438,6 @@ public sealed class AppController : IAsyncDisposable
             },
             cancellationToken);
 
-    public Task<ControllerOperationResult> SetAdaptersAsync(
-        Guid? primary,
-        Guid? esim,
-        CancellationToken cancellationToken = default)
-        => UpdateProfileAsync(
-            current => current with
-            {
-                PrimaryAdapterId = primary?.ToString("D"),
-                EsimAdapterId = esim?.ToString("D"),
-            },
-            cancellationToken);
-
     public Task<ControllerOperationResult> AddUpstreamPortAsync(
         int port,
         CancellationToken cancellationToken = default)
@@ -458,7 +461,7 @@ public sealed class AppController : IAsyncDisposable
                 {
                     Name = name,
                     Target = target ?? targets?.GetValueOrDefault(name)
-                        ?? routes.GetValueOrDefault(name)?.Target ?? EgressRouteTarget.Esim,
+                        ?? routes.GetValueOrDefault(name)?.Target ?? EgressRouteTarget.DefaultAdapter,
                 };
             else
                 routes.Remove(name);
@@ -480,13 +483,13 @@ public sealed class AppController : IAsyncDisposable
         long totalBytes = checked((long)Math.Round(totalGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
         long remainingBytes = checked((long)Math.Round(remainingGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
         _quotaStore.Configure(totalBytes, remainingBytes);
-        SetMessage("eSIM 流量套餐已保存，本地统计已重置。");
+        SetMessage("默认网卡流量套餐已保存，本地统计已重置。");
     }
 
     public void ClearQuotaUsage()
     {
         _quotaStore.ClearUsage();
-        SetMessage("已清空本地 eSIM 流量统计。");
+        SetMessage("已清空本地 默认网卡流量统计。");
     }
 
     public async Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default)
@@ -498,16 +501,15 @@ public sealed class AppController : IAsyncDisposable
         return result;
     }
 
-    public async Task<ControllerOperationResult> ToggleTunAsync(CancellationToken cancellationToken = default)
-        => IsTunRunning ? await StopTunAsync(cancellationToken).ConfigureAwait(false) : await StartTunAsync(cancellationToken).ConfigureAwait(false);
-
     public async Task<ControllerOperationResult> StartTunAsync(CancellationToken cancellationToken = default)
     {
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (IsTunRunning)
+            if (IsTunRunning || _shuttingDown)
                 return ControllerOperationResult.Success();
+            InvalidateReadiness("正在启动 TUN");
+            _profileApplied = false;
 
             // Start in a fail-closed state until the first sing-box DNS probes have completed.
             // The probe rules are not TUN-bound, so the monitor can still verify and unlock the
@@ -517,6 +519,12 @@ public sealed class AppController : IAsyncDisposable
             SingBoxApplyResult result = await _singBox.StartAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
+                if (IsTunRunning)
+                {
+                    StartDiagnostics(LoadControllerEndpoint());
+                    StartRuntimeMonitor();
+                    StartDohMonitor();
+                }
                 SetMessage("TUN 启动失败：" + result.ErrorMessage);
                 return ControllerOperationResult.Failure(result.ErrorMessage ?? "TUN 启动失败。");
             }
@@ -524,6 +532,7 @@ public sealed class AppController : IAsyncDisposable
             StartDiagnostics(LoadControllerEndpoint());
             StartRuntimeMonitor();
             StartDohMonitor();
+            _profileApplied = true;
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -533,7 +542,7 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    public async Task<ControllerOperationResult> StopTunAsync(CancellationToken cancellationToken = default)
+    private async Task<ControllerOperationResult> StopTunAsync(CancellationToken cancellationToken = default)
     {
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -615,7 +624,7 @@ public sealed class AppController : IAsyncDisposable
         {
             await RunDohHealthCheckAsync(cancellationToken, announce: true).ConfigureAwait(false);
             return IsDohFailClosed
-                ? ControllerOperationResult.Failure("DoH 不可用，TUN 已启用拒绝保护。")
+                ? ControllerOperationResult.Failure("网络未就绪，正在终止所选应用。")
                 : ControllerOperationResult.Success();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -649,10 +658,15 @@ public sealed class AppController : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _shuttingDown = true;
         _lifetimeCts.Cancel();
+        Task[] background = new[] { _dohMonitorTask, _runtimeMonitorTask, _diagnosticsTask }.OfType<Task>().ToArray();
+        if (_protectionTask is not null) { try { await _protectionTask.ConfigureAwait(false); } catch (OperationCanceledException) { } }
+        if (_tunSupervisor is not null) { try { await _tunSupervisor.Pending.ConfigureAwait(false); } catch (OperationCanceledException) { } }
         StopDohMonitor();
         StopRuntimeMonitor();
         StopDiagnostics();
+        try { await Task.WhenAll(background).ConfigureAwait(false); } catch (OperationCanceledException) { }
         _singBox.Output -= OnSingBoxOutput;
         try { await _singBox.DisposeAsync().ConfigureAwait(false); } catch { }
         _remoteFetcher.Dispose();
@@ -670,9 +684,6 @@ public sealed class AppController : IAsyncDisposable
         DohRoutingDecision dohRouting)
     {
         EgressProfileDocument profile = _profile.NormalizeAndValidate();
-        Socks5ProbeResult upstream = await _upstreamProbe.ProbeAsync(profile.UpstreamPort, cancellationToken).ConfigureAwait(false);
-        if (!upstream.IsReady)
-            throw new ControllerPreparationException("upstream.offline", upstream.Message);
 
         RefreshAdapters();
         EgressProfileDocument withAdapterDefaults = NetworkEnvironmentResolver.EnsureAutomaticDefaults(profile, _adapters)
@@ -685,10 +696,13 @@ public sealed class AppController : IAsyncDisposable
         profile = withAdapterDefaults;
         NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
         string[] ownerPaths = ResolveUpstreamOwners(profile, cancellationToken);
+        ValidateProtectionConflicts(profile, ownerPaths);
         ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(_targets.All());
         IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory);
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
-        SingBoxCoreCandidate core = await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
+        SingBoxCoreCandidate core = _preparedCore ??= await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
+        _coreExecutable = core.ExecutablePath;
+        ValidateProtectionConflicts(profile, ownerPaths);
         ControllerEndpoint endpoint = CreateControllerEndpoint(profile.UpstreamPorts);
 
         string runtimeDirectory = Path.Combine(_dataRoot, "runtime");
@@ -741,8 +755,6 @@ public sealed class AppController : IAsyncDisposable
         foreach (int port in profile.UpstreamPorts)
         {
             IReadOnlyList<TcpListenerOwner> owners = _ownerResolver.Resolve(port, cancellationToken);
-            if (owners.Count == 0 && port == profile.UpstreamPort)
-                throw new ControllerPreparationException("upstream.owner", $"没有找到 127.0.0.1:{port} 的 SOCKS5 监听进程。");
             if (owners.Any(owner => !owner.IsResolved))
                 throw new ControllerPreparationException("upstream.owner.identity", $"端口 {port} 的监听进程存在，但无法解析其最终 EXE 路径。");
             foreach (TcpListenerOwner owner in owners)
@@ -808,25 +820,25 @@ public sealed class AppController : IAsyncDisposable
                 return ControllerOperationResult.Failure(exception.Message);
             }
 
-            bool portChanged = next.UpstreamPort != previous.UpstreamPort;
+            try { ValidateProtectionConflicts(next, ResolveUpstreamOwners(next, cancellationToken)); }
+            catch (Exception exception) { return ControllerOperationResult.Failure(exception.Message); }
+            InvalidateReadiness("配置已变更，等待重新检测");
+            _profileApplied = false;
             try
             {
                 _profile = next;
-                if (portChanged)
-                    ConfigureControlPlane(next.UpstreamPort);
                 _profileStore.Save(next);
+                RefreshProtectedInventory();
             }
             catch (Exception exception)
             {
                 _profile = previous;
-                if (portChanged)
-                    ConfigureControlPlane(previous.UpstreamPort);
                 return ControllerOperationResult.Failure("保存 Profile 失败：" + exception.Message);
             }
 
             if (!IsTunRunning)
             {
-                SetMessage("配置已保存；启动 TUN 后生效。");
+                SetMessage("配置已保存，正在等待 TUN 自动启动。");
                 return ControllerOperationResult.Success();
             }
 
@@ -834,6 +846,7 @@ public sealed class AppController : IAsyncDisposable
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
+                _profileApplied = true;
                 StartDiagnostics(LoadControllerEndpoint());
                 StartDohMonitor();
                 SetMessage("配置已校验并应用，sing-box 已重启。");
@@ -842,10 +855,9 @@ public sealed class AppController : IAsyncDisposable
 
             SetRuntimeFingerprint(previousRuntimeFingerprint);
             _profile = previous;
+            RefreshProtectedInventory();
             try
             {
-                if (portChanged)
-                    ConfigureControlPlane(previous.UpstreamPort);
                 _profileStore.Save(previous);
             }
             catch { }
@@ -857,12 +869,14 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    private void ConfigureControlPlane(int upstreamPort)
+    private void ConfigureControlPlane()
     {
         _remoteFetcher?.Dispose();
         _releaseHttpClient?.Dispose();
-        _releaseHttpClient = Socks5HttpClientFactory.Create(upstreamPort);
-        _remoteFetcher = new Socks5RemoteFetcher("127.0.0.1", upstreamPort);
+        _releaseHttpClient = new HttpClient(new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(8) })
+            { Timeout = TimeSpan.FromSeconds(30) };
+        _releaseHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("EgressController/1.0");
+        _remoteFetcher = new HttpRemoteFetcher(_releaseHttpClient);
         string rulesDirectory = Path.Combine(_rulesetRoot, "rules");
         _catalogService = new RuleCatalogService(_remoteFetcher, rulesDirectory);
         _artifactStore = new RuleArtifactStore(rulesDirectory, _remoteFetcher);
@@ -896,6 +910,7 @@ public sealed class AppController : IAsyncDisposable
 
     private void StartDohMonitor()
     {
+        InvalidateReadiness("正在检测两个 DoH 和出口联网状态");
         StopDohMonitor(resetRouting: false);
         _dohMonitorCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         CancellationToken token = _dohMonitorCts.Token;
@@ -951,7 +966,7 @@ public sealed class AppController : IAsyncDisposable
                     }
                 }
 
-                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -987,16 +1002,17 @@ public sealed class AppController : IAsyncDisposable
             return;
         }
 
-        bool esimReady = ResolveCurrentEsimReady();
+        int generation = Volatile.Read(ref _healthGeneration);
+        bool dnsReady = ResolveCurrentDnsReady();
         SingBoxDohEndpointDefinition[] endpoints = EgressDohConfiguration.Endpoints.ToArray();
-        SetDohChecking(endpoints, esimReady);
+        SetDohChecking(endpoints, dnsReady);
 
         using SingBoxApiClient api = CreateApiClient();
         string nonce = Guid.NewGuid().ToString("N");
         var probes = new List<DohProbeResult>(endpoints.Length);
         foreach (SingBoxDohEndpointDefinition endpoint in endpoints)
         {
-            if (!EgressDohConfiguration.IsAvailable(endpoint, esimReady))
+            if (!EgressDohConfiguration.IsAvailable(endpoint, dnsReady))
                 continue;
 
             DateTimeOffset startedAt = DateTimeOffset.UtcNow;
@@ -1010,6 +1026,7 @@ public sealed class AppController : IAsyncDisposable
                     timeout.Token).ConfigureAwait(false);
                 long latency = Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
                 bool healthy = response.Status is 0 or 3;
+                if (!healthy) MarkProbeFailure($"{endpoint.Provider}：DNS 返回状态 {response.Status}");
                 probes.Add(new DohProbeResult(
                     endpoint.Tag,
                     healthy,
@@ -1019,6 +1036,7 @@ public sealed class AppController : IAsyncDisposable
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                MarkProbeFailure($"{endpoint.Provider}：{DescribeDiagnosticsFailure(exception)}");
                 probes.Add(new DohProbeResult(
                     endpoint.Tag,
                     false,
@@ -1027,13 +1045,18 @@ public sealed class AppController : IAsyncDisposable
             }
         }
 
+        string? outboundError = await ProbeRequiredOutboundsAsync(api, cancellationToken).ConfigureAwait(false);
+        if (generation != Volatile.Read(ref _healthGeneration)) return;
         DohRoutingDecision current = GetDohRouting();
-        DohRoutingDecision desired = EgressDohConfiguration.Decide(probes, esimReady, current);
+        DohRoutingDecision desired = EgressDohConfiguration.Decide(probes, dnsReady, current);
+        if (outboundError is not null) desired = desired with { FailClosed = true };
+        DohProbeResult? failed = probes.FirstOrDefault(probe => !probe.IsHealthy);
+        _probeError = outboundError ?? (failed is null ? null : $"{EgressDohConfiguration.Find(failed.Tag)?.Provider}：{failed.Detail}");
         DohRoutingDecision applied = current;
         string? applyError = null;
         if (!Equals(current, desired))
         {
-            (bool succeeded, string? error) = await ApplyDohRoutingAsync(desired, cancellationToken).ConfigureAwait(false);
+            (bool succeeded, string? error) = await ApplyDohRoutingAsync(desired, generation, cancellationToken).ConfigureAwait(false);
             if (succeeded)
             {
                 applied = desired;
@@ -1041,8 +1064,8 @@ public sealed class AppController : IAsyncDisposable
                     || !string.Equals(current.DnsTag, desired.DnsTag, StringComparison.Ordinal))
                 {
                     SetMessage(desired.FailClosed
-                        ? "DoH 不可用，TUN 已启用拒绝保护。"
-                        : $"全局 DoH 已切换：{desired.DnsTag}（经 eSIM）。");
+                        ? "网络未就绪，正在终止所选应用。"
+                        : $"全局 DoH 已切换：{desired.DnsTag}（经 DNS 网卡）。");
                 }
             }
             else
@@ -1052,18 +1075,27 @@ public sealed class AppController : IAsyncDisposable
         }
 
         DateTimeOffset observedAt = DateTimeOffset.UtcNow;
-        UpdateDohStatuses(endpoints, esimReady, probes, applied, observedAt, applyError);
+        if (generation != Volatile.Read(ref _healthGeneration)) return;
+        lock (_dohStateGate)
+        {
+            if (generation != Volatile.Read(ref _healthGeneration)) return;
+            _allHealthy = !desired.FailClosed && !applied.FailClosed && applyError is null;
+            _lastHealthyAt = _allHealthy ? observedAt : null;
+            if (applyError is not null) _probeError = applyError;
+        }
+        UpdateDohStatuses(endpoints, dnsReady, probes, applied, observedAt, applyError);
     }
 
     private async Task<(bool Succeeded, string? Error)> ApplyDohRoutingAsync(
         DohRoutingDecision desired,
+        int generation,
         CancellationToken cancellationToken)
     {
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!IsTunRunning)
-                return (false, "TUN 已停止。");
+            if (!IsTunRunning || generation != Volatile.Read(ref _healthGeneration))
+                return (false, "TUN 或配置已变化，等待重新检测。");
 
             SingBoxApplyResult applied = await _singBox.ApplyAsync(
                 token => PrepareRuntimeAsync(token, desired),
@@ -1092,7 +1124,7 @@ public sealed class AppController : IAsyncDisposable
 
     private void SetDohChecking(
         IReadOnlyList<SingBoxDohEndpointDefinition> endpoints,
-        bool esimReady)
+        bool dnsReady)
     {
         DohRoutingDecision routing = GetDohRouting();
         lock (_dohStateGate)
@@ -1100,14 +1132,14 @@ public sealed class AppController : IAsyncDisposable
             _dohMonitorStatus = "检测中…";
             _dohStatuses = endpoints.Select(endpoint =>
             {
-                bool available = EgressDohConfiguration.IsAvailable(endpoint, esimReady);
+                bool available = EgressDohConfiguration.IsAvailable(endpoint, dnsReady);
                 return DohStatusSnapshot.Create(
                     endpoint,
                     available,
                     available && string.Equals(endpoint.Tag, routing.DnsTag, StringComparison.Ordinal),
                     isHealthy: null,
                     available ? "检测中…" : "未启用",
-                    available ? "等待 sing-box DNS query 返回。" : "eSIM 网卡当前不可用。");
+                    available ? "等待 sing-box DNS query 返回。" : "DNS 网卡当前不可用。");
             })
                 .ToArray();
         }
@@ -1115,7 +1147,7 @@ public sealed class AppController : IAsyncDisposable
 
     private void UpdateDohStatuses(
         IReadOnlyList<SingBoxDohEndpointDefinition> endpoints,
-        bool esimReady,
+        bool dnsReady,
         IReadOnlyList<DohProbeResult> probes,
         DohRoutingDecision routing,
         DateTimeOffset observedAt,
@@ -1127,7 +1159,7 @@ public sealed class AppController : IAsyncDisposable
         {
             _dohStatuses = endpoints.Select(endpoint =>
             {
-                bool available = EgressDohConfiguration.IsAvailable(endpoint, esimReady);
+                bool available = EgressDohConfiguration.IsAvailable(endpoint, dnsReady);
                 DohProbeResult? probe = probes.FirstOrDefault(item =>
                     string.Equals(item.Tag, endpoint.Tag, StringComparison.Ordinal));
                 bool active = string.Equals(endpoint.Tag, routing.DnsTag, StringComparison.Ordinal);
@@ -1139,7 +1171,7 @@ public sealed class AppController : IAsyncDisposable
                         isActive: false,
                         isHealthy: null,
                         "未启用",
-                        "eSIM 网卡当前不可用。",
+                        "DNS 网卡当前不可用。",
                         observedAt);
                 }
 
@@ -1166,7 +1198,7 @@ public sealed class AppController : IAsyncDisposable
             }).ToArray();
             _dohLastCheckedAtUtc = observedAt;
             _dohMonitorStatus = routing.FailClosed
-                ? "故障保护：TUN 已拒绝外部流量"
+                ? "保护中：网络未就绪，终止所选应用"
                 : $"检测完成：{healthyCount}/{availableCount} 个 DoH 可用";
         }
     }
@@ -1174,7 +1206,12 @@ public sealed class AppController : IAsyncDisposable
     private void SetDohMonitorFailure(string detail)
     {
         lock (_dohStateGate)
+        {
             _dohMonitorStatus = "检测失败：" + detail;
+            _allHealthy = false;
+            _lastHealthyAt = null;
+            _probeError = _dohMonitorStatus;
+        }
     }
 
     private DohRoutingDecision GetDohRouting()
@@ -1183,11 +1220,11 @@ public sealed class AppController : IAsyncDisposable
             return _dohRouting;
     }
 
-    private bool ResolveCurrentEsimReady()
+    private bool ResolveCurrentDnsReady()
     {
         try
         {
-            return _environmentResolver.Resolve(_profile.NormalizeAndValidate(), _adapters).IsEsimReady;
+            return _environmentResolver.Resolve(_profile.NormalizeAndValidate(), _adapters).IsDnsReady;
         }
         catch
         {
@@ -1309,7 +1346,7 @@ public sealed class AppController : IAsyncDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
                 if (!IsTunRunning)
                     continue;
 
@@ -1321,9 +1358,10 @@ public sealed class AppController : IAsyncDisposable
                 bool changed;
                 lock (_runtimeStateGate)
                     changed = _runtimeFingerprint.Length > 0 && !string.Equals(_runtimeFingerprint, fingerprint, StringComparison.Ordinal);
-                if (!changed)
+                if (!changed && _profileApplied)
                     continue;
 
+                InvalidateReadiness("网卡或代理状态改变，正在重新配置");
                 await ApplyRuntimeChangeAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1333,8 +1371,8 @@ public sealed class AppController : IAsyncDisposable
             catch (Exception exception)
             {
                 string detail = DescribeDiagnosticsFailure(exception);
-                if (IsTunRunning)
-                    SetMessage("网络状态检测失败，保留当前配置：" + detail);
+                InvalidateReadiness("网络状态检测失败：" + detail);
+                SetMessage("网络状态检测失败：" + detail);
             }
         }
     }
@@ -1347,10 +1385,12 @@ public sealed class AppController : IAsyncDisposable
             if (!IsTunRunning)
                 return;
 
+            _profileApplied = false;
             string previousRuntimeFingerprint = GetRuntimeFingerprint();
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
+                _profileApplied = true;
                 StartDiagnostics(LoadControllerEndpoint());
                 StartDohMonitor();
                 SetMessage("检测到网卡或上游代理进程变化，配置已重新校验并应用。");
@@ -1384,7 +1424,7 @@ public sealed class AppController : IAsyncDisposable
             _runtimeFingerprint = fingerprint;
     }
 
-    private static string BuildRuntimeFingerprint(
+    private string BuildRuntimeFingerprint(
         NetworkEnvironmentSnapshot environment,
         IEnumerable<string> ownerPaths)
     {
@@ -1400,11 +1440,9 @@ public sealed class AppController : IAsyncDisposable
 
         return string.Join(
             "|",
-            new[]
-            {
-                AdapterFingerprint(environment.Primary),
-                AdapterFingerprint(environment.Esim),
-            }.Concat(ownerPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)));
+            environment.AllAdapters.Where(adapter => RequiredAdapterIds(_profile).Contains(adapter.AdapterId.ToString("D")))
+                .OrderBy(adapter => adapter.AdapterId).Select(AdapterFingerprint)
+                .Concat(ownerPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)));
     }
 
     private async Task DiagnosticsLoopAsync(
@@ -1521,7 +1559,7 @@ public sealed class AppController : IAsyncDisposable
         DateTimeOffset observedAtUtc = DateTimeOffset.UtcNow;
         var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
-        long esimDelta = 0;
+        long adapterDelta = 0;
         lock (_diagnosticsStateGate)
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
@@ -1541,9 +1579,10 @@ public sealed class AppController : IAsyncDisposable
                 DateTimeOffset startedAtUtc = connection.Start ?? previous?.StartedAtUtc ?? observedAtUtc;
                 observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate));
                 string? outbound = connection.Chains.FirstOrDefault();
-                if (string.Equals(outbound, EgressProfileCompiler.EsimDirectTag, StringComparison.OrdinalIgnoreCase))
+                if (Guid.TryParse(_profile.DefaultAdapterId, out Guid quotaAdapter)
+                    && string.Equals(outbound, EgressProfileCompiler.AdapterTag(quotaAdapter), StringComparison.OrdinalIgnoreCase))
                 {
-                    esimDelta = SafeAdd(esimDelta, previous is null
+                    adapterDelta = SafeAdd(adapterDelta, previous is null
                         ? SafeAdd(Math.Max(0, connection.Upload), Math.Max(0, connection.Download))
                         : SafeAdd(SafeDelta(connection.Upload, previous.Upload), SafeDelta(connection.Download, previous.Download)));
                 }
@@ -1563,8 +1602,8 @@ public sealed class AppController : IAsyncDisposable
             _connectionHistory.ApplySnapshot(observations, observedAtUtc);
             _connectionsUpdatedAtUtc = observedAtUtc;
         }
-        if (esimDelta > 0)
-            _quotaStore.AddUsage(esimDelta);
+        if (adapterDelta > 0)
+            _quotaStore.AddUsage(adapterDelta);
     }
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)

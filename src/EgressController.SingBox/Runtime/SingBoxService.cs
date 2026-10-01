@@ -286,7 +286,7 @@ public sealed class SingBoxService : IAsyncDisposable
                 null,
                 true));
 
-            SingBoxProcessStatus started = await _processClient.StartAsync(candidate, restart: apply, cancellationToken).ConfigureAwait(false);
+            SingBoxProcessStatus started = await _processClient.StartAsync(candidate, restart: true, cancellationToken).ConfigureAwait(false);
             if (!started.Succeeded || started.State is not ("running" or "starting"))
                 throw new SingBoxServiceException(started.ErrorCode ?? "process.start", started.ErrorMessage ?? "sing-box 进程启动失败。");
 

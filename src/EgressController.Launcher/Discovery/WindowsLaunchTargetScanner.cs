@@ -177,7 +177,7 @@ public sealed class WindowsLaunchTargetScanner
                     Aumid = aumid,
                     OwnedRoots = roots,
                     OwnedExecutables = CollectExecutables(roots, fullExe),
-                    EsimSelected = false,
+                    RouteSelected = false,
                     // AUMID activation is valid even when the manifest omits Executable. The
                     // launch service correlates the resulting process against OwnedRoots.
                     ResolutionUnsupported = string.IsNullOrWhiteSpace(aumid),
@@ -313,7 +313,7 @@ public sealed class WindowsLaunchTargetScanner
                                 CanonicalExecutable = executable,
                                 OwnedRoots = roots,
                                 OwnedExecutables = CollectExecutables(roots, executable),
-                                EsimSelected = false,
+                                RouteSelected = false,
                                 ResolutionUnsupported = false,
                                 IconPath = iconPath,
                                 Source = "Windows 卸载注册表",
@@ -483,7 +483,7 @@ public sealed class WindowsLaunchTargetScanner
                         CanonicalExecutable = executable,
                         OwnedRoots = new[] { root },
                         OwnedExecutables = ownedExecutables,
-                    EsimSelected = false,
+                    RouteSelected = false,
                         ResolutionUnsupported = false,
                         IconPath = executable,
                         Source = "Program Files",
@@ -593,7 +593,7 @@ public sealed class WindowsLaunchTargetScanner
             CanonicalExecutable = full,
             OwnedRoots = roots,
             OwnedExecutables = CollectExecutables(roots, full),
-            EsimSelected = false,
+            RouteSelected = false,
             IconPath = full,
             Source = source,
         });

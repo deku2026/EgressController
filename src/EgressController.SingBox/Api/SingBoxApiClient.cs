@@ -95,6 +95,10 @@ public sealed class SingBoxApiClient : IDisposable
         return GetJsonAsync(query, SingBoxApiJsonContext.Default.SingBoxDnsResponse, cancellationToken);
     }
 
+    public Task<SingBoxDelayResponse> ProbeOutboundAsync(string tag, CancellationToken cancellationToken = default)
+        => GetJsonAsync($"proxies/{Uri.EscapeDataString(tag)}/delay?timeout=5000&url={Uri.EscapeDataString("https://www.cloudflare.com/cdn-cgi/trace")}",
+            SingBoxApiJsonContext.Default.SingBoxDelayResponse, cancellationToken);
+
     public Task FlushDnsCacheAsync(CancellationToken cancellationToken = default)
         => SendNoContentAsync("cache/dns/flush", HttpMethod.Post, cancellationToken);
 

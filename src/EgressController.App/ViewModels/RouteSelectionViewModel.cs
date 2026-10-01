@@ -5,13 +5,16 @@ namespace EgressController.App.ViewModels;
 
 public sealed record RouteOptionViewModel(EgressRouteTarget Target, string Label)
 {
+    public override string ToString() => Label;
+
     public static IReadOnlyList<RouteOptionViewModel> Create(EgressProfileDocument profile)
         => new[]
         {
-            new RouteOptionViewModel(EgressRouteTarget.Esim, "eSIM"),
-            new RouteOptionViewModel(EgressRouteTarget.Default, $"默认 · {profile.UpstreamPort}"),
-        }.Concat(profile.UpstreamPorts.Select(port =>
-            new RouteOptionViewModel(EgressRouteTarget.ForPort(port), $"端口 {port}"))).ToArray();
+            new RouteOptionViewModel(EgressRouteTarget.DefaultAdapter,
+                "默认网卡 · " + (profile.Adapters.FirstOrDefault(adapter => adapter.Id == profile.DefaultAdapterId)?.Name ?? "未设置")),
+        }.Concat(profile.Adapters.Select(adapter => new RouteOptionViewModel(EgressRouteTarget.ForAdapter(adapter.Id), adapter.Name)))
+        .Concat(profile.UpstreamPorts.Count == 0 ? [] : new[] { new RouteOptionViewModel(EgressRouteTarget.Default, $"默认端口 · {profile.UpstreamPort}") })
+        .Concat(profile.UpstreamPorts.Select(port => new RouteOptionViewModel(EgressRouteTarget.ForPort(port), $"端口 {port}"))).ToArray();
 }
 
 /// <summary>One transactional editor shared by application, catalog and custom-domain rows.</summary>
@@ -21,6 +24,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
     private readonly Action _changed;
     private bool _isSelected;
     private bool _isBusy;
+    private bool _notifyingOptions;
     private string _status = string.Empty;
     private IReadOnlyList<RouteOptionViewModel> _options;
     private RouteOptionViewModel _selectedRoute;
@@ -32,10 +36,33 @@ public sealed class RouteSelectionViewModel : ObservableObject
         _changed = changed;
         _isSelected = target is not null;
         _options = RouteOptionViewModel.Create(profile);
-        _selectedRoute = _options.First(option => option.Target == (target ?? EgressRouteTarget.Esim));
+        _selectedRoute = _options.First(option => option.Target == (target ?? EgressRouteTarget.DefaultAdapter));
     }
 
     public IReadOnlyList<RouteOptionViewModel> Options => _options;
+    public IReadOnlyList<string> Kinds { get; } = ["网卡", "端口"];
+    public IReadOnlyList<RouteOptionViewModel> VisibleOptions => _options.Where(option => option.Target.IsAdapter == _selectedRoute.Target.IsAdapter).ToArray();
+    public string SelectedKind
+    {
+        get => _selectedRoute.Target.IsAdapter ? "网卡" : "端口";
+        set
+        {
+            if (_isBusy || _notifyingOptions || value == SelectedKind) return;
+            RouteOptionViewModel? first = _options.FirstOrDefault(option => option.Target.IsAdapter == (value == "网卡"));
+            if (first is not null) SelectedRoute = first;
+        }
+    }
+    private void NotifyRouteOptions()
+    {
+        _notifyingOptions = true;
+        try
+        {
+            OnPropertyChanged(nameof(SelectedKind));
+            OnPropertyChanged(nameof(VisibleOptions));
+            OnPropertyChanged(nameof(SelectedRoute));
+        }
+        finally { _notifyingOptions = false; }
+    }
     public bool CanEdit => !_isBusy;
     public bool IsSelected
     {
@@ -51,12 +78,15 @@ public sealed class RouteSelectionViewModel : ObservableObject
         get => _selectedRoute;
         set
         {
-            if (_isBusy || value is null || value == _selectedRoute)
+            if (_isBusy || _notifyingOptions || value is null || value == _selectedRoute)
                 return;
             if (_isSelected)
                 _ = ApplyAsync(true, value);
             else
+            {
                 SetProperty(ref _selectedRoute, value);
+                NotifyRouteOptions();
+            }
         }
     }
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
@@ -73,7 +103,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
         _selectedRoute = options.FirstOrDefault(option => option.Target == preferred) ?? options[0];
         _isSelected = target is not null;
         OnPropertyChanged(nameof(Options));
-        OnPropertyChanged(nameof(SelectedRoute));
+        NotifyRouteOptions();
         OnPropertyChanged(nameof(IsSelected));
         _isBusy = false;
     }
@@ -113,6 +143,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
             OnPropertyChanged(nameof(IsSelected));
             OnPropertyChanged(nameof(SelectedRoute));
             OnPropertyChanged(nameof(CanEdit));
+            NotifyRouteOptions();
             _changed();
         }
     }

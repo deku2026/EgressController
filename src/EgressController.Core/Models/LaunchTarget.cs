@@ -39,8 +39,8 @@ public sealed class LaunchTarget
 
     public IReadOnlyList<string> OwnedRoots { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> OwnedExecutables { get; init; } = Array.Empty<string>();
-    /// <summary>User-selected eSIM route toggle. Newly discovered targets start unchecked.</summary>
-    public bool EsimSelected { get; set; }
+    /// <summary>User-selected application route toggle. Newly discovered targets start unchecked.</summary>
+    public bool RouteSelected { get; set; }
 
     /// <summary>Optional local icon path; the UI falls back to a kind-specific glyph.</summary>
     public string? IconPath { get; init; }
@@ -52,12 +52,14 @@ public sealed class LaunchTarget
 
     /// <summary>Stable key for merging discovery providers (see class doc). Purely lexical — no cwd/
     /// I/O dependence so it is unit-testable and AOT-safe.</summary>
-    public string DiscoveryKey => Kind switch
+    public string? SavedDiscoveryKey { get; init; }
+
+    public string DiscoveryKey => SavedDiscoveryKey ?? (Kind switch
     {
         LaunchKind.PackagedAumid => $"pkg:{PackageFamily ?? Aumid ?? Id}:{Aumid ?? Id}",
         LaunchKind.Shortcut => Prefix("sc:", Command, Id),
         _ => $"exe:{Prefix("", CanonicalExecutable, Command)}",
-    };
+    });
 
     public bool ResolutionUnsupported { get; init; }
 

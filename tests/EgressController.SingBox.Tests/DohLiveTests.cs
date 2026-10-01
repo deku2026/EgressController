@@ -122,7 +122,7 @@ public sealed class DohLiveTests
             443,
             "/dns-query",
             serverName,
-            EgressProfileCompiler.EsimDirectTag,
+            EgressProfileCompiler.DnsDirectTag,
             probeSuffix);
         string configPath = Path.Combine(root, "config.json");
         File.WriteAllText(configPath, CreateConfig(port, secret, [endpoint], useDomainServer: true));
@@ -215,13 +215,13 @@ public sealed class DohLiveTests
             : string.Empty;
         string defaultDomainResolver = useDomainServer ? "bootstrap" : endpoints[0].Tag;
         string interfaceName = JsonEncodedText.Encode(GetDefaultInterfaceName()).ToString();
-        string directOutbound = $"{{\"type\":\"direct\",\"tag\":\"{EgressProfileCompiler.EsimDirectTag}\",\"bind_interface\":\"{interfaceName}\"}}";
+        string directOutbound = $"{{\"type\":\"direct\",\"tag\":\"{EgressProfileCompiler.DnsDirectTag}\",\"bind_interface\":\"{interfaceName}\"}}";
 
         return "{\n"
             + "  \"log\": { \"level\": \"error\" },\n"
             + $"  \"dns\": {{\"servers\": [{bootstrap}{servers}],\"rules\": [{rules}],\"final\": \"{endpoints[0].Tag}\",\"strategy\": \"ipv4_only\"}},\n"
             + $"  \"outbounds\": [{directOutbound}],\n"
-            + $"  \"route\": {{\"final\":\"{EgressProfileCompiler.EsimDirectTag}\",\"default_domain_resolver\":\"{defaultDomainResolver}\"}},\n"
+            + $"  \"route\": {{\"final\":\"{EgressProfileCompiler.DnsDirectTag}\",\"default_domain_resolver\":\"{defaultDomainResolver}\"}},\n"
             + $"  \"experimental\": {{\"clash_api\":{{\"external_controller\":\"127.0.0.1:{port}\",\"secret\":\"{secret}\"}}}}\n"
             + "}\n";
     }

@@ -17,7 +17,7 @@ public class LaunchTargetRegistryTests
             PackageFamily = pkgFamily,
             Aumid = aumid,
             Arguments = args,
-            EsimSelected = selected,
+            RouteSelected = selected,
         };
 
     [Fact]

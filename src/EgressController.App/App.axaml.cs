@@ -46,19 +46,16 @@ public partial class App : Application
         var menu = new NativeMenu();
         var open = new NativeMenuItem("打开 EgressController");
         open.Click += (_, _) => ShowWindow(window);
-        var toggle = new NativeMenuItem("启动/停止 TUN");
-        toggle.Click += (_, _) => _ = Controller.ToggleTunAsync();
-        var exit = new NativeMenuItem("关闭 EgressController");
+        var exit = new NativeMenuItem("退出并结束进程保护");
         exit.Click += async (_, _) =>
         {
             exit.IsEnabled = false;
             await _exitCoordinator.ExitAsync(
-                async () => await Controller.StopTunAsync(),
+                async () => await Controller.ShutdownAsync(),
                 window.AllowApplicationExit,
                 () => desktop.Shutdown());
         };
         menu.Items.Add(open);
-        menu.Items.Add(toggle);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exit);
 

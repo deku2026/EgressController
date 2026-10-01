@@ -72,7 +72,7 @@ public sealed class EgressProfileStoreTests : IDisposable
         EgressProfileDocument loaded = store.Load();
         Assert.Equal(legacy, File.ReadAllText(store.ProfilePath));
         Assert.Equal([1080], loaded.UpstreamPorts);
-        Assert.Equal(EgressRouteTarget.Esim, Assert.Single(loaded.Domains).Target);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, Assert.Single(loaded.Domains).Target);
 
         store.Save(loaded);
         Assert.DoesNotContain("EsimDomains", File.ReadAllText(store.ProfilePath));
@@ -90,16 +90,16 @@ public sealed class EgressProfileStoreTests : IDisposable
             UpstreamPort = 7891,
             Applications = [new() { DiscoveryKey = "browser", Target = EgressRouteTarget.ForPort(7890) }],
             RuleSets = [new() { Name = "google", Target = EgressRouteTarget.Default }],
-            Domains = [new() { Name = "example.com", Target = EgressRouteTarget.Esim }],
+            Domains = [new() { Name = "example.com", Target = EgressRouteTarget.DefaultAdapter }],
         });
 
         EgressProfileDocument loaded = store.Load();
-        Assert.Equal(2, loaded.SchemaVersion);
+        Assert.Equal(3, loaded.SchemaVersion);
         Assert.Equal(7891, loaded.UpstreamPort);
         Assert.Equal([7890, 7891], loaded.UpstreamPorts);
         Assert.Equal(EgressRouteTarget.ForPort(7890), Assert.Single(loaded.Applications).Target);
         Assert.Equal(EgressRouteTarget.Default, Assert.Single(loaded.RuleSets).Target);
-        Assert.Equal(EgressRouteTarget.Esim, Assert.Single(loaded.Domains).Target);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, Assert.Single(loaded.Domains).Target);
     }
 
     public void Dispose()

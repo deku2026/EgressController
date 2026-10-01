@@ -8,7 +8,7 @@ namespace EgressController.Windows.IntegrationTests;
 public sealed class RouteSelectionViewModelTests
 {
     [Fact]
-    public void Unchecked_row_defaults_to_esim_and_saves_its_chosen_port_only_when_enabled()
+    public void Unchecked_row_defaults_to_default_adapter_and_saves_its_chosen_port_only_when_enabled()
     {
         var saves = new List<(bool Enabled, EgressRouteTarget Target)>();
         var vm = new RouteSelectionViewModel(Profile(), null, (enabled, target) =>
@@ -18,7 +18,7 @@ public sealed class RouteSelectionViewModelTests
         }, () => { });
 
         Assert.False(vm.IsSelected);
-        Assert.Equal(EgressRouteTarget.Esim, vm.SelectedRoute.Target);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, vm.SelectedRoute.Target);
         vm.SelectedRoute = vm.Options.Single(option => option.Target == EgressRouteTarget.ForPort(7891));
         Assert.Empty(saves);
         vm.IsSelected = true;
@@ -32,7 +32,7 @@ public sealed class RouteSelectionViewModelTests
     {
         var pending = new TaskCompletionSource<ControllerOperationResult>();
         var changed = new TaskCompletionSource();
-        var vm = new RouteSelectionViewModel(Profile(), EgressRouteTarget.Esim,
+        var vm = new RouteSelectionViewModel(Profile(), EgressRouteTarget.DefaultAdapter,
             (_, _) => pending.Task, () => changed.SetResult());
 
         vm.SelectedRoute = vm.Options.Single(option => option.Target == EgressRouteTarget.ForPort(7891));
@@ -43,7 +43,7 @@ public sealed class RouteSelectionViewModelTests
 
         Assert.True(vm.CanEdit);
         Assert.True(vm.IsSelected);
-        Assert.Equal(EgressRouteTarget.Esim, vm.SelectedRoute.Target);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, vm.SelectedRoute.Target);
         Assert.Equal("端口保存失败", vm.Status);
     }
 
@@ -67,7 +67,36 @@ public sealed class RouteSelectionViewModelTests
         Assert.Equal(0, writes);
         Assert.False(vm.IsSelected);
         Assert.Equal(EgressRouteTarget.Default, vm.SelectedRoute.Target);
-        Assert.Equal("默认 · 7891", vm.SelectedRoute.Label);
+        Assert.Equal("默认端口 · 7891", vm.SelectedRoute.Label);
+    }
+
+    [Fact]
+    public void Categories_have_independent_default_first_options_and_can_select_any_configured_adapter()
+    {
+        string a = "11111111-1111-1111-1111-111111111111", b = "22222222-2222-2222-2222-222222222222";
+        var profile = Profile().AddAdapter(a, "Redmi").AddAdapter(b, "Ethernet");
+        var vm = new RouteSelectionViewModel(profile, null, (_, _) => Task.FromResult(ControllerOperationResult.Success()), () => { });
+        Assert.Equal("网卡", vm.SelectedKind);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, vm.VisibleOptions[0].Target);
+        Assert.All(vm.VisibleOptions, option => Assert.True(option.Target.IsAdapter));
+        vm.SelectedRoute = vm.VisibleOptions.Single(option => option.Target.AdapterId == b);
+        Assert.Equal(b, vm.SelectedRoute.Target.AdapterId);
+        vm.SelectedKind = "端口";
+        Assert.Equal(EgressRouteTarget.Default, vm.VisibleOptions[0].Target);
+        Assert.All(vm.VisibleOptions, option => Assert.False(option.Target.IsAdapter));
+        Assert.Equal("默认端口 · 7890", vm.SelectedRoute.Label);
+    }
+
+    [Fact]
+    public void Protection_records_show_path_pid_reason_and_failure_without_claiming_success()
+    {
+        var row = new ProtectionEventViewModel(new(DateTimeOffset.UtcNow, "Browser", @"C:\Browser\browser.exe", 42, false, "CF 超时", "权限不足"));
+        Assert.True(row.Failed);
+        Assert.Contains("42", row.Summary);
+        Assert.Contains("终止失败", row.Summary);
+        Assert.Equal(@"C:\Browser\browser.exe", row.Path);
+        Assert.Contains("CF 超时", row.Detail);
+        Assert.Contains("权限不足", row.Detail);
     }
 
     private static EgressProfileDocument Profile() => new() { UpstreamPorts = [7890, 7891] };

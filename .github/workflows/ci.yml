@@ -19,6 +19,8 @@ jobs:
     name: Build, test, and package (win-x64)
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      EGRESS_MOCK_ONLY: '1'
 
     steps:
       - name: Check out source
@@ -33,9 +35,9 @@ jobs:
         run: dotnet restore EgressController.slnx
 
       - name: Build
-        run: dotnet build EgressController.slnx --configuration Release --no-restore
+        run: dotnet build EgressController.slnx --configuration Release --no-restore -p:EgressMockOnly=true
 
-      - name: Test
+      - name: Mock-only tests (no live TUN or process termination)
         shell: pwsh
         run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
 

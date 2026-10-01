@@ -40,7 +40,7 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             await Apps.ScanInitialAsync();
-            await Controller.StartTunAsync();
+            // The independent one-second supervisor starts TUN after discovery.
         }
         catch (Exception exception)
         {
@@ -90,6 +90,9 @@ public sealed class NetworkViewModel : ObservableObject
         CheckCommand = new AsyncRelayCommand(CheckAsync);
     }
 
+    public ObservableCollection<ProtectionEventViewModel> ProtectionEvents { get; } = new();
+    private EgressController.Core.Protection.ProtectionEvent? _lastEvent;
+
     public ObservableCollection<DohEndpointViewModel> DohStatuses { get; } = new();
     public string MonitorStatus { get => _monitorStatus; private set => SetProperty(ref _monitorStatus, value); }
     public string ProtectionStatus { get => _protectionStatus; private set => SetProperty(ref _protectionStatus, value); }
@@ -110,11 +113,18 @@ public sealed class NetworkViewModel : ObservableObject
     public void Refresh()
     {
         MonitorStatus = _controller.DohMonitorStatus;
-        ProtectionStatus = _controller.DohProtectionStatus;
+        ProtectionStatus = _controller.ProtectionStatus;
         LastChecked = _controller.DohLastCheckedAtUtc is { } checkedAt
             ? checkedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
             : "尚未检测";
 
+        var events = _controller.ProtectionEvents;
+        if (!Equals(_lastEvent, events.FirstOrDefault()))
+        {
+            _lastEvent = events.FirstOrDefault();
+            ProtectionEvents.Clear();
+            foreach (var item in events) ProtectionEvents.Add(new(item));
+        }
         DohStatuses.Clear();
         foreach (DohStatusSnapshot status in _controller.DohStatuses)
             DohStatuses.Add(new DohEndpointViewModel(status));
@@ -132,7 +142,7 @@ public sealed class DohEndpointViewModel(DohStatusSnapshot status)
 {
     public string Tag => status.Tag;
     public string RoutePlane => status.RoutePlane;
-    public string Provider => status.Provider + (status.IsFallback ? " · 候选" : " · 默认");
+    public string Provider => status.Provider + (status.IsFallback ? " · 必需检测" : " · 默认");
     public string Endpoint => $"https://{status.Server}:{status.ServerPort}{status.Path}";
     public string ServerName => "TLS SNI · " + status.ServerName;
     public string Detour => "detour · " + status.Detour;
@@ -146,157 +156,36 @@ public sealed class DohEndpointViewModel(DohStatusSnapshot status)
 public sealed class OverviewViewModel : ObservableObject
 {
     private readonly AppController _controller;
-    private bool _suppressAdapterChange;
-    private string _esim = "未选择";
-    private string _primary = "未选择";
-    private string _upstream = "127.0.0.1:7890 · SOCKS5";
-    private string _core = "Managed core · 未准备";
-    private string _tun = "已停止";
-    private string _tunBadge = "TUN · 已停止";
-    private string _notice = "C# 只负责配置和控制；Windows 全流量由 sing-box TUN 接管，未命中规则进入本地 SOCKS5。";
-    private AdapterOptionViewModel? _selectedAdapter;
-    private AdapterOptionViewModel? _selectedPrimaryAdapter;
-    private string _adapterSignature = string.Empty;
-
     public OverviewViewModel(AppController controller)
     {
         _controller = controller;
         Ports = new UpstreamPortsViewModel(controller);
-        RefreshCommand = new RelayCommand(RefreshAdapters);
-        StartCommand = new AsyncRelayCommand(StartTunAsync);
-        ToggleRoutingCommand = new AsyncRelayCommand(ToggleTunAsync);
-        RestoreStaleCommand = new RelayCommand(() => { });
+        NetworkAdapters = new NetworkAdaptersViewModel(controller);
+        RefreshCommand = new RelayCommand(() => { controller.RefreshAdapters(); Refresh(); });
     }
-
-    public string Esim { get => _esim; private set => SetProperty(ref _esim, value); }
-    public string Primary { get => _primary; private set => SetProperty(ref _primary, value); }
-    public string Upstream { get => _upstream; private set => SetProperty(ref _upstream, value); }
     public UpstreamPortsViewModel Ports { get; }
-    public string Core { get => _core; private set => SetProperty(ref _core, value); }
-    public string Tun { get => _tun; private set => SetProperty(ref _tun, value); }
-    public string TunBadge { get => _tunBadge; private set => SetProperty(ref _tunBadge, value); }
-    public string Notice { get => _notice; private set => SetProperty(ref _notice, value); }
+    public NetworkAdaptersViewModel NetworkAdapters { get; }
+    public string Upstream => _controller.Profile.UpstreamPorts.Count == 0 ? "未配置端口" : "默认端口 · " + _controller.UpstreamSummary;
+    public string Core => "sing-box · 自动准备与恢复";
+    public string Tun => _controller.TunStatus;
+    public string TunBadge => "TUN · " + Tun;
     public string Traffic => $"↑ {_controller.TrafficUp:N0} B · ↓ {_controller.TrafficDown:N0} B";
-    public string ToggleRoutingText => _controller.IsTunRunning ? "停止 TUN" : "启动 TUN";
-    public bool CanRestoreStale => false;
-
-    public ObservableCollection<AdapterOptionViewModel> Adapters { get; } = new();
-    public ObservableCollection<AdapterOptionViewModel> PrimaryAdapters { get; } = new();
-
-    public AdapterOptionViewModel? SelectedAdapter
-    {
-        get => _selectedAdapter;
-        set
-        {
-            if (!SetProperty(ref _selectedAdapter, value) || value is null || _suppressAdapterChange)
-                return;
-            _ = SaveAdaptersAsync(value, _selectedPrimaryAdapter);
-        }
-    }
-
-    public AdapterOptionViewModel? SelectedPrimaryAdapter
-    {
-        get => _selectedPrimaryAdapter;
-        set
-        {
-            if (!SetProperty(ref _selectedPrimaryAdapter, value) || value is null || _suppressAdapterChange)
-                return;
-            _ = SaveAdaptersAsync(_selectedAdapter, value);
-        }
-    }
-
+    public string ProtectionStatus => _controller.ProtectionStatus;
+    public string Notice => _controller.LastMessage;
     public RelayCommand RefreshCommand { get; }
-    public IAsyncRelayCommand StartCommand { get; }
-    public IAsyncRelayCommand ToggleRoutingCommand { get; }
-    public RelayCommand RestoreStaleCommand { get; }
-
     public void Refresh()
     {
-        Esim = SelectedAdapter?.Display ?? "未选择";
-        Primary = SelectedPrimaryAdapter?.Display ?? "未选择";
-        Upstream = "默认 · " + _controller.UpstreamSummary;
-        Ports.Refresh();
-        Core = "Managed core · sing-box 1.13.x · ruleset";
-        Tun = _controller.TunStatus;
-        TunBadge = "TUN · " + Tun;
-        Notice = string.IsNullOrWhiteSpace(_controller.LastMessage)
-            ? "C# 只负责配置和控制；Windows 全流量由 sing-box TUN 接管，未命中规则进入本地 SOCKS5。"
-            : _controller.LastMessage;
-        OnPropertyChanged(nameof(Traffic));
-        OnPropertyChanged(nameof(ToggleRoutingText));
-
-        string signature = string.Join('|', _controller.Adapters.Select(adapter =>
-            $"{adapter.Identity.Guid}:{adapter.IfIndex}:{adapter.IsUp}:{adapter.Addresses.Count}"));
-        if (signature == _adapterSignature)
-            return;
-
-        _suppressAdapterChange = true;
-        try
-        {
-            Adapters.Clear();
-            PrimaryAdapters.Clear();
-            foreach (NetworkAdapterInfo adapter in _controller.Adapters)
-            {
-                Adapters.Add(new AdapterOptionViewModel(adapter));
-                PrimaryAdapters.Add(new AdapterOptionViewModel(adapter));
-            }
-
-            Guid? esimId = Guid.TryParse(_controller.Profile.EsimAdapterId, out Guid esim) ? esim : null;
-            Guid? primaryId = Guid.TryParse(_controller.Profile.PrimaryAdapterId, out Guid primary) ? primary : null;
-            _selectedAdapter = esimId is Guid e
-                ? Adapters.FirstOrDefault(option => option.Guid == e)
-                : null;
-            _selectedPrimaryAdapter = primaryId is Guid p
-                ? PrimaryAdapters.FirstOrDefault(option => option.Guid == p)
-                : null;
-            OnPropertyChanged(nameof(SelectedAdapter));
-            OnPropertyChanged(nameof(SelectedPrimaryAdapter));
-            _adapterSignature = signature;
-        }
-        finally
-        {
-            _suppressAdapterChange = false;
-        }
-    }
-
-    private void RefreshAdapters()
-    {
-        _controller.RefreshAdapters();
-        _adapterSignature = string.Empty;
-        Refresh();
-    }
-
-    private async Task SaveAdaptersAsync(AdapterOptionViewModel? esim, AdapterOptionViewModel? primary)
-    {
-        if (esim is null || primary is null)
-            return;
-        ControllerOperationResult result = await _controller.SetAdaptersAsync(primary.Guid, esim.Guid);
-        if (!result.Succeeded)
-            Notice = result.Error ?? "网卡配置失败。";
-        Refresh();
-    }
-
-    private async Task StartTunAsync()
-    {
-        ControllerOperationResult result = await _controller.StartTunAsync();
-        if (!result.Succeeded)
-            Notice = result.Error ?? "TUN 启动失败。";
-        Refresh();
-    }
-
-    private async Task ToggleTunAsync()
-    {
-        ControllerOperationResult result = await _controller.ToggleTunAsync();
-        if (!result.Succeeded)
-            Notice = result.Error ?? "TUN 操作失败。";
-        Refresh();
+        Ports.Refresh(); NetworkAdapters.Refresh();
+        foreach (string property in new[] { nameof(Upstream), nameof(Core), nameof(Tun), nameof(TunBadge), nameof(Traffic), nameof(ProtectionStatus), nameof(Notice) })
+            OnPropertyChanged(property);
     }
 }
 
 public sealed class AdapterOptionViewModel(NetworkAdapterInfo adapter)
 {
     public Guid Guid => adapter.Identity.Guid;
-    public string Display => $"{adapter.Identity.NameSnapshot} · {(adapter.IsUp ? "在线" : "离线")} · {adapter.AddressState} · ifIndex {adapter.IfIndex}";
+    public string Name => adapter.Identity.NameSnapshot;
+    public string Display => $"{adapter.Identity.NameSnapshot} · {(adapter.IsUp ? "在线" : "离线")}";
 }
 
 public sealed class AppsViewModel : ObservableObject
@@ -382,7 +271,7 @@ public sealed class AppsViewModel : ObservableObject
         {
             foreach (AppEntryViewModel entry in targets)
                 entry.RefreshRoute();
-            Status = enabled ? "已启用应用分流，新选择默认走 eSIM。" : "已清空应用分流选择。";
+            Status = enabled ? "已启用应用分流，新选择默认走默认网卡。" : "已清空应用分流选择。";
         }
         RefreshVisible();
     }
@@ -439,7 +328,7 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public bool HasIcon => Icon is not null;
     public bool HasNoIcon => Icon is null;
     public bool CanRoute => Target.CanRoute;
-    public bool CanManage => CanRoute;
+    public bool CanManage => CanRoute || Routing.IsSelected;
     public RouteSelectionViewModel Routing { get; }
     public void RefreshRoute() => Routing.Refresh(_controller.Profile,
         _controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == DiscoveryKey)?.Target);
@@ -901,7 +790,7 @@ public sealed class TrafficViewModel : ObservableObject
     public string LastUpdated => TrafficFormat.UpdatedAt(_controller.TrafficUpdatedAtUtc);
     public string CurrentRate => $"↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
     public string Active => _controller.ConnectionHistory.ActiveCount.ToString("N0");
-    public string Note => "仅统计走 eSIM 的连接；保存套餐后会把本地累计用量从 0 开始计算。";
+    public string Note => "仅统计走 默认网卡 的连接；保存套餐后会把本地累计用量从 0 开始计算。";
     public IAsyncRelayCommand SaveQuotaCommand { get; }
     public RelayCommand ClearUsageCommand { get; }
 
@@ -937,7 +826,7 @@ public sealed class TrafficViewModel : ObservableObject
             }
 
             _controller.ConfigureQuota(total, remaining);
-            Status = "套餐已保存，本地 eSIM 用量已从 0 开始统计。";
+            Status = "套餐已保存，本地 默认网卡 用量已从 0 开始统计。";
             Refresh();
         }
         catch (Exception exception)
@@ -950,7 +839,7 @@ public sealed class TrafficViewModel : ObservableObject
     private void ClearUsage()
     {
         _controller.ClearQuotaUsage();
-        Status = "已清空本地 eSIM 用量统计。";
+        Status = "已清空本地 默认网卡 用量统计。";
         Refresh();
     }
 }
@@ -1089,4 +978,12 @@ internal static class QuotaFormat
 
     public static string Gigabytes(long bytes)
         => (Math.Max(0, bytes) / BytesPerGigabyte).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+public sealed class ProtectionEventViewModel(EgressController.Core.Protection.ProtectionEvent entry)
+{
+    public string Summary => $"{entry.At.ToLocalTime():HH:mm:ss} · {entry.Application} · PID {entry.Pid} · {(entry.Succeeded ? "已终止" : "终止失败")}";
+    public string Path => entry.Path;
+    public string Detail => entry.Reason + (entry.Error is null ? "" : " · " + entry.Error);
+    public bool Failed => !entry.Succeeded;
 }
