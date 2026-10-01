@@ -181,13 +181,6 @@ public sealed class OverviewViewModel : ObservableObject
     }
 }
 
-public sealed class AdapterOptionViewModel(NetworkAdapterInfo adapter)
-{
-    public Guid Guid => adapter.Identity.Guid;
-    public string Name => adapter.Identity.NameSnapshot;
-    public string Display => $"{adapter.Identity.NameSnapshot} · {(adapter.IsUp ? "在线" : "离线")}";
-}
-
 public sealed class AppsViewModel : ObservableObject
 {
     private readonly AppController _controller;

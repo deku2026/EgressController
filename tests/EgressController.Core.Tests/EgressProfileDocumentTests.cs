@@ -62,7 +62,7 @@ public sealed class EgressProfileDocumentTests
             EsimDomains = ["Example.com"],
         }.NormalizeAndValidate();
 
-        Assert.Equal(3, profile.SchemaVersion);
+        Assert.Equal(4, profile.SchemaVersion);
         Assert.Equal([1080], profile.UpstreamPorts);
         Assert.Equal(1080, profile.UpstreamPort);
         Assert.Equal(EgressRouteTarget.DefaultAdapter, Assert.Single(profile.Applications).Target);

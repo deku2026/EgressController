@@ -74,7 +74,7 @@ public sealed class RouteSelectionViewModelTests
     public void Categories_have_independent_default_first_options_and_can_select_any_configured_adapter()
     {
         string a = "11111111-1111-1111-1111-111111111111", b = "22222222-2222-2222-2222-222222222222";
-        var profile = Profile().AddAdapter(a, "Redmi").AddAdapter(b, "Ethernet");
+        var profile = Profile().SetAdapterRoles(a, b);
         var vm = new RouteSelectionViewModel(profile, null, (_, _) => Task.FromResult(ControllerOperationResult.Success()), () => { });
         Assert.Equal("网卡", vm.SelectedKind);
         Assert.Equal(EgressRouteTarget.DefaultAdapter, vm.VisibleOptions[0].Target);
@@ -97,6 +97,19 @@ public sealed class RouteSelectionViewModelTests
         Assert.Equal(@"C:\Browser\browser.exe", row.Path);
         Assert.Contains("CF 超时", row.Detail);
         Assert.Contains("权限不足", row.Detail);
+    }
+
+    [Fact]
+    public void Legacy_third_adapter_is_visible_for_reassignment_without_silently_switching()
+    {
+        var target = EgressRouteTarget.ForAdapter("33333333-3333-3333-3333-333333333333");
+        int writes = 0;
+        var vm = new RouteSelectionViewModel(Profile(), target, (_, _) =>
+        { writes++; return Task.FromResult(ControllerOperationResult.Success()); }, () => { });
+        vm.Refresh(Profile(), target);
+        Assert.Equal(target, vm.SelectedRoute.Target);
+        Assert.Contains("旧网卡", vm.SelectedRoute.Label);
+        Assert.Equal(0, writes);
     }
 
     private static EgressProfileDocument Profile() => new() { UpstreamPorts = [7890, 7891] };

@@ -25,9 +25,10 @@ public sealed record NetworkEnvironmentSnapshot
 {
     public IReadOnlyList<AdapterSelection> Adapters { get; init; } = [];
     public required AdapterSelection DefaultAdapter { get; init; }
+    public required AdapterSelection ProxyAdapter { get; init; }
     public required AdapterSelection DnsAdapter { get; init; }
     public DateTimeOffset CapturedAtUtc { get; init; } = DateTimeOffset.UtcNow;
-    public IEnumerable<AdapterSelection> AllAdapters => Adapters.Concat([DefaultAdapter, DnsAdapter]).DistinctBy(adapter => adapter.AdapterId);
+    public IEnumerable<AdapterSelection> AllAdapters => Adapters.Concat([DefaultAdapter, ProxyAdapter, DnsAdapter]).DistinctBy(adapter => adapter.AdapterId);
     public AdapterSelection? Find(string? id) => AllAdapters.FirstOrDefault(adapter => adapter.AdapterId.ToString("D") == id);
     public bool IsDnsReady => DnsAdapter.IsReady;
     public bool IsDualStack => DefaultAdapter.HasIpv4 && DefaultAdapter.HasIpv6 && DnsAdapter.HasIpv4 && DnsAdapter.HasIpv6;

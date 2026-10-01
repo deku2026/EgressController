@@ -1,16 +1,42 @@
-# Process protection and multiple adapters
+# Process protection and two adapter roles
 
 ## Configuration
 
-Schema 3 has `adapters` (stable Windows GUID plus display name), `defaultAdapterId`, and
-`dnsAdapterId` (null follows the default adapter). SOCKS5 `upstreamPorts` and `upstreamPort`
-remain separate. Routes use `adapter-default`, `adapter` plus `adapterId`, `default` (port),
-or `port` plus `port`. A missing selected interface remains selected and unavailable.
-No interface name or enumeration order is used as persistent identity.
+Schema 4 has exactly two configurable roles: `defaultAdapterId` (`ESIM-家宽`) and
+`proxyAdapterId` (`Proxy-代理`). `adapters` contains their stable GUIDs and fixed role names.
+They must be different and both must be configured before readiness can pass. A role can be
+replaced or the pair swapped atomically; explicit application/domain/SRS and DNS references
+follow that role. Interface enumeration never chooses a substitute. The default picker filters
+offline, unaddressed and common internal virtual interfaces, with an expanded view available.
+Saved unavailable choices remain visible. No name or enumeration order is persisted as identity.
 
-Schema 1/2 adapter IDs and eSIM routes are migrated. Selected applications retain a cached
-executable inventory for protection before discovery finishes. Cached entries missing from
-discovery remain visible and can be deselected; they are not silently discarded.
+`dnsAdapterId` null follows the direct role; an explicit value must be one of the selected pair.
+SOCKS5 `upstreamPorts` and `upstreamPort` remain separate. Routes use `adapter-default`,
+`adapter` plus `adapterId`, `default` (port), or `port` plus `port`.
+
+Schema 1/2 uses the old primary for proxy and eSIM for direct. Schema 3 preserves its saved
+default; the other card is inferred only from an explicit legacy primary binding or a two-card list. DNS selection never implies the proxy role.
+Ambiguous roles require user selection. Old rules and DNS references to a third card stay
+visible but block readiness until reassigned. Port selections are preserved.
+
+Each local port is resolved from the TCP listener table to PID, creation time and full executable
+path. IPv4 listeners must cover `127.0.0.1`; an unrelated NIC or `::1` listener is not a match.
+An IPv6 wildcard listener is considered only when there is no IPv4 listener; the actual SOCKS
+outbound health probe must still pass. Missing, inaccessible or ambiguous owners are shown as
+errors and prevent readiness for used proxy ports. Their application/domain rules reject until
+identity is confirmed; an unready default port also adds a final catch-all reject after known
+owner and recovery routes, preventing recursion through an unidentified core. Multiple ports
+may share one core.
+
+The exact path rule for all known proxy cores precedes business rules and routes only through
+`proxy-direct`, bound to the proxy role. An unavailable proxy role emits a reject rule instead;
+there is no unbound/system/direct-role fallback. A core's last known path remains exempt while
+its listener restarts; changing PID or creation time invalidates readiness and reapplies routing.
+Removing its final configured port removes that exemption. Controller/core recovery has a
+separate `recovery-direct` route and can still download dependencies.
+
+Selected applications retain a cached executable inventory for protection before discovery
+finishes. Missing discoveries remain visible and can be deselected, never silently discarded.
 
 ## Runtime sequence
 
@@ -20,7 +46,8 @@ discovery remain visible and can be deselected; they are not silently discarded.
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
 4. TUN API startup health must pass. Each configured DoH gets a unique DNS probe; both must
    respond successfully. Cloudflare remains the default resolver.
-5. Probe each distinct outbound used by application/domain/SRS rules and the DNS outbound.
+5. Require both chosen cards, then probe their direct outbounds, the DNS outbound and each
+   distinct outbound used by application/domain/SRS rules.
    Only fresh, successful results for the current configuration permit selected applications
    to remain running. Configuration changes invalidate prior results before application.
 6. A failed/expired probe, missing interface or exited TUN returns to protection. Guard sweeps
@@ -43,10 +70,13 @@ ends protection and stops the owned core. There is no persistent firewall or bac
   detached descendants, PID reuse, dependency exclusions, access failures and deduplication.
 - Readiness/supervisor tests: failed TUN, changes, network loss, DoH failure, stale health,
   recovery, one pending startup, retry, and no startup while already running or busy.
-- Profile/resolver/compiler tests: independent defaults, legacy migration, multiple bindings,
+- Profile/resolver/compiler tests: independent defaults, legacy migration, exactly two independent bindings,
   no fallback when absent, direct-only configuration and recovery route precedence.
 - Fake HTTP tests: authenticated outbound probes, explicit failure and bounded recovery downloads.
-- View-model tests: default-first category choices and transactional selection changes.
+- Fake listener tests: shared cores, PID/creation-time changes, restart gaps, replaced owners,
+  ambiguity, permissions, removed ports and unrelated-interface listeners.
+- View-model tests: filtered choices, saved offline cards, atomic swap/save/cancel, error
+  recovery, legacy third-card repair and live binding row updates without starting the product.
 
 Default builds omit live tests. `build/Invoke-Tests.ps1` and CI set `EGRESS_MOCK_ONLY=1`, which
 also prevents the real process and core adapters from running if called accidentally. Compile,

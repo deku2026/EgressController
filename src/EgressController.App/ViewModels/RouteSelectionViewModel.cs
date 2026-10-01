@@ -11,8 +11,8 @@ public sealed record RouteOptionViewModel(EgressRouteTarget Target, string Label
         => new[]
         {
             new RouteOptionViewModel(EgressRouteTarget.DefaultAdapter,
-                "默认网卡 · " + (profile.Adapters.FirstOrDefault(adapter => adapter.Id == profile.DefaultAdapterId)?.Name ?? "未设置")),
-        }.Concat(profile.Adapters.Select(adapter => new RouteOptionViewModel(EgressRouteTarget.ForAdapter(adapter.Id), adapter.Name)))
+                "默认直连 · " + (profile.Adapters.FirstOrDefault(adapter => adapter.Id == profile.DefaultAdapterId)?.Name ?? "未设置")),
+        }.Concat(profile.Adapters.Select(adapter => new RouteOptionViewModel(EgressRouteTarget.ForAdapter(adapter.Id), adapter.Name + " · 直连")))
         .Concat(profile.UpstreamPorts.Count == 0 ? [] : new[] { new RouteOptionViewModel(EgressRouteTarget.Default, $"默认端口 · {profile.UpstreamPort}") })
         .Concat(profile.UpstreamPorts.Select(port => new RouteOptionViewModel(EgressRouteTarget.ForPort(port), $"端口 {port}"))).ToArray();
 }
@@ -35,9 +35,13 @@ public sealed class RouteSelectionViewModel : ObservableObject
         _save = save;
         _changed = changed;
         _isSelected = target is not null;
-        _options = RouteOptionViewModel.Create(profile);
+        _options = WithCurrent(RouteOptionViewModel.Create(profile), target);
         _selectedRoute = _options.First(option => option.Target == (target ?? EgressRouteTarget.DefaultAdapter));
     }
+
+    private static IReadOnlyList<RouteOptionViewModel> WithCurrent(IReadOnlyList<RouteOptionViewModel> options, EgressRouteTarget? target)
+        => target is not null && options.All(option => option.Target != target)
+            ? options.Append(new(target, "旧网卡，请重新选择")).ToArray() : options;
 
     public IReadOnlyList<RouteOptionViewModel> Options => _options;
     public IReadOnlyList<string> Kinds { get; } = ["网卡", "端口"];
@@ -98,7 +102,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
         _isBusy = true;
         // Keep an unchecked row's chosen destination until the user enables it.
         EgressRouteTarget preferred = target ?? _selectedRoute.Target;
-        var options = RouteOptionViewModel.Create(profile);
+        var options = WithCurrent(RouteOptionViewModel.Create(profile), target);
         _options = options;
         _selectedRoute = options.FirstOrDefault(option => option.Target == preferred) ?? options[0];
         _isSelected = target is not null;

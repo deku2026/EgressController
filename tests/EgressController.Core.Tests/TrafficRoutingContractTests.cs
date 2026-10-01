@@ -19,7 +19,7 @@ public sealed class TrafficRoutingContractTests
         Assert.Equal("hijack-dns", rules[1].GetProperty("action").GetString());
         Assert.Equal(6, rules[2].GetProperty("ip_version").GetInt32());
         Assert.Equal("reject", rules[2].GetProperty("action").GetString());
-        Assert.Equal("primary-direct", rules[3].GetProperty("outbound").GetString());
+        Assert.Equal("proxy-direct", rules[3].GetProperty("outbound").GetString());
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public sealed class TrafficRoutingContractTests
         EgressProfileCompileInput input = Input() with
         {
             ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.DefaultAdapter)],
-            Profile = new EgressProfileDocument { EsimAdapterId = "22222222-2222-2222-2222-222222222222", EsimDomains = new[] { "openai.com" } },
+            Profile = new EgressProfileDocument { DefaultAdapterId = "22222222-2222-2222-2222-222222222222", ProxyAdapterId = "11111111-1111-1111-1111-111111111111", EsimDomains = new[] { "openai.com" } },
         };
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
@@ -50,10 +50,11 @@ public sealed class TrafficRoutingContractTests
     private static EgressProfileCompileInput Input()
         => new()
         {
-            Profile = new EgressProfileDocument(),
+            Profile = new EgressProfileDocument().SetAdapterRoles("22222222-2222-2222-2222-222222222222", "11111111-1111-1111-1111-111111111111"),
             Environment = new NetworkEnvironmentSnapshot
             {
-                DefaultAdapter = Adapter(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Ethernet", "192.0.2.10"),
+                ProxyAdapter = Adapter(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Ethernet", "192.0.2.10"),
+                DefaultAdapter = Adapter(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cellular", "198.51.100.10"),
                 DnsAdapter = Adapter(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cellular", "198.51.100.10"),
             },
             ApplicationRoutes = [],

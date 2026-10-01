@@ -104,15 +104,22 @@ public sealed partial class AppController
     private IEnumerable<string?> RequiredAdapterIds(EgressProfileDocument profile)
         => RequiredRoutes(profile).Where(target => target.IsAdapter)
             .Select(target => target.AdapterId ?? profile.DefaultAdapterId)
-            .Append(profile.DefaultAdapterId).Append(profile.EffectiveDnsAdapterId).Distinct();
+            .Append(profile.DefaultAdapterId).Append(profile.ProxyAdapterId).Append(profile.EffectiveDnsAdapterId).Distinct();
 
     private string? RequiredNetworkError(EgressProfileDocument profile, NetworkEnvironmentSnapshot environment)
     {
+        if (profile.AdapterConfigurationError is string configurationError) return configurationError;
         foreach (string? id in RequiredAdapterIds(profile))
         {
             if (id is null) return "尚未设置默认网卡";
             if (environment.Find(id)?.IsReady != true)
                 return $"网卡未连接或没有 IP：{profile.Adapters.FirstOrDefault(adapter => adapter.Id == id)?.Name ?? id}";
+        }
+        foreach (int port in RequiredRoutes(profile).Where(target => !target.IsAdapter)
+            .Select(target => target.Port ?? profile.UpstreamPort).Distinct())
+        {
+            ProxyPortBinding? binding = ProxyBindings.Ports.FirstOrDefault(item => item.Port == port);
+            if (binding?.IsReady != true) return $"代理端口 {port}：{binding?.Error ?? "等待识别监听进程"}";
         }
         return null;
     }
@@ -128,7 +135,7 @@ public sealed partial class AppController
                 string? networkError;
                 try
                 {
-                    ValidateProtectionConflicts(profile, ResolveUpstreamOwners(profile, token));
+                    ValidateProtectionConflicts(profile, ResolveProxyBindings(profile, token).OwnerPaths);
                     _protectionError = null;
                     networkError = RequiredNetworkError(profile, _environmentResolver.Resolve(profile, _adapters));
                 }
@@ -164,7 +171,9 @@ public sealed partial class AppController
         var tags = RequiredRoutes(profile).Select(target => target.IsAdapter
             ? EgressProfileCompiler.AdapterTag(Guid.Parse(target.AdapterId ?? profile.DefaultAdapterId!))
             : EgressProfileCompiler.SocksTag(target.Port ?? profile.UpstreamPort))
-            .Append(EgressProfileCompiler.DnsDirectTag).Distinct().ToArray();
+            .Append(EgressProfileCompiler.DnsDirectTag)
+            .Append(EgressProfileCompiler.ProxyDirectTag)
+            .Append(EgressProfileCompiler.AdapterTag(Guid.Parse(profile.DefaultAdapterId!))).Distinct().ToArray();
         string?[] failures = await Task.WhenAll(tags.Select(async tag =>
         {
             try
@@ -182,16 +191,10 @@ public sealed partial class AppController
 
     private string DescribeOutbound(string tag)
         => _profile.Adapters.FirstOrDefault(adapter => EgressProfileCompiler.AdapterTag(Guid.Parse(adapter.Id)) == tag)?.Name
-            ?? (tag == EgressProfileCompiler.DnsDirectTag ? "DNS 网卡" : tag.Replace("clash-", "SOCKS5 端口 "));
+            ?? (tag == EgressProfileCompiler.DnsDirectTag ? "DNS 网卡" : tag == EgressProfileCompiler.ProxyDirectTag ? EgressProfileDocument.ProxyAdapterName : tag.Replace("clash-", "SOCKS5 端口 "));
 
-    public Task<ControllerOperationResult> AddAdapterAsync(Guid id, string name)
-        => UpdateProfileAsync(profile => profile.AddAdapter(id.ToString("D"), name), _lifetimeCts.Token);
-    public Task<ControllerOperationResult> SetDefaultAdapterAsync(string id)
-        => UpdateProfileAsync(profile => profile.SetDefaultAdapter(id), _lifetimeCts.Token);
-    public Task<ControllerOperationResult> RemoveAdapterAsync(string id)
-        => UpdateProfileAsync(profile => profile.RemoveAdapter(id), _lifetimeCts.Token);
-    public Task<ControllerOperationResult> RenameAdapterAsync(string id, string name)
-        => UpdateProfileAsync(profile => profile with { Adapters = profile.Adapters.Select(adapter => adapter.Id == id ? adapter with { Name = name } : adapter).ToArray() }, _lifetimeCts.Token);
+    public Task<ControllerOperationResult> SetAdapterRolesAsync(string? directId, string? proxyId)
+        => UpdateProfileAsync(profile => profile.SetAdapterRoles(directId, proxyId), _lifetimeCts.Token);
     public Task<ControllerOperationResult> SetDnsAdapterAsync(string? id)
         => UpdateProfileAsync(profile => profile with { DnsAdapterId = id }, _lifetimeCts.Token);
 

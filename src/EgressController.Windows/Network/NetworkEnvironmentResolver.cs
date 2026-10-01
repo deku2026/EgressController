@@ -18,7 +18,9 @@ public sealed class NetworkEnvironmentResolver
         return new()
         {
             DefaultAdapter = ResolveOne(profile.DefaultAdapterId),
-            DnsAdapter = ResolveOne(profile.EffectiveDnsAdapterId),
+            ProxyAdapter = ResolveOne(profile.ProxyAdapterId),
+            DnsAdapter = profile.EffectiveDnsAdapterId == profile.DefaultAdapterId || profile.EffectiveDnsAdapterId == profile.ProxyAdapterId
+                ? ResolveOne(profile.EffectiveDnsAdapterId) : Unavailable(profile.EffectiveDnsAdapterId),
             Adapters = profile.Adapters.Select(adapter => ResolveOne(adapter.Id)).ToArray(),
             CapturedAtUtc = DateTimeOffset.UtcNow,
         };
@@ -32,15 +34,13 @@ public sealed class NetworkEnvironmentResolver
         Ipv4BindAddress = adapter.Ipv4BindAddress, Ipv6BindAddress = adapter.Ipv6BindAddress,
     };
 
-    public static EgressProfileDocument EnsureAutomaticDefaults(EgressProfileDocument profile, IReadOnlyList<NetworkAdapterInfo> adapters)
+    public static bool IsRecommended(NetworkAdapterInfo adapter)
     {
-        profile = profile.NormalizeAndValidate();
-        // An absent saved interface is never silently replaced by another network.
-        if (profile.DefaultAdapterId is not null || profile.Adapters.Count > 0) return profile;
-        NetworkAdapterInfo? first = adapters.Where(IsSelectable)
-            .Where(adapter => adapter.IsUp && (adapter.Ipv4BindAddress is not null || adapter.Ipv6BindAddress is not null))
-            .OrderBy(adapter => adapter.Identity.NameSnapshot, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
-        return first is null ? profile : profile.AddAdapter(first.Identity.Guid.ToString("D"), "网卡1 · " + first.Identity.NameSnapshot);
+        if (!IsSelectable(adapter) || !adapter.IsUp || !ToSelection(adapter).IsReady) return false;
+        string description = $"{adapter.Identity.NameSnapshot} {adapter.Description}";
+        string[] internalInterfaces = ["hyper-v", "vethernet", "vmware", "virtualbox", "wsl", "docker", "host-only", "wi-fi direct", "bluetooth"];
+        return adapter.InterfaceType is 6 or 71 or 243 or 244
+            && !internalInterfaces.Any(name => description.Contains(name, StringComparison.OrdinalIgnoreCase));
     }
 
     public static bool IsSelectable(NetworkAdapterInfo adapter)
