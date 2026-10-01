@@ -39,7 +39,10 @@
                     <StackPanel Spacing="12">
                         <TextBlock Classes="section-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
                         <TextBlock Classes="muted" Text="按勾选应用及目录递归扫描出的 EXE 路径匹配所有运行实例，同时处理子孙进程。每秒检查；恢复后不会自动启动应用。关闭窗口会继续在托盘保护，退出程序会结束保护。" TextWrapping="Wrap" />
-                        <TextBlock Classes="section-title" Text="最近的终止记录（最多 200 条）" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Classes="section-title" Text="最近 24 小时的终止记录（最多 200 条，自动清理）" VerticalAlignment="Center" />
+                            <Button Content="清空记录" Command="{Binding Network.ClearProtectionHistoryCommand}" />
+                        </StackPanel>
                         <ItemsControl ItemsSource="{Binding Network.ProtectionEvents}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ProtectionEventViewModel">
@@ -89,7 +92,7 @@
                                     <TextBlock Classes="eyebrow" Text="DNS 网卡" />
                                     <TextBlock Classes="card-title" Text="Cloudflare DoH" />
                                     <TextBlock Text="ESIM-家宽 · 直连网卡" />
-                                    <TextBlock Classes="muted" Text="Cloudflare 优先，失败时使用 DNSPod。任一个 DoH 正常即可运行所选应用；复检期间保留上次结果，两个都失败或超时后才恢复保护。代理端口单独管理。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="Cloudflare 优先，DNSPod 备用。每分钟检测，也可手动检测；仅 DNS 选择变化时重启 TUN，重启前终止所选应用。两个 DoH 均失败时保留当前配置。" TextWrapping="Wrap" />
                                     <TextBlock Classes="section-title" Text="进程保护" />
                                     <TextBlock Text="{Binding Overview.ProtectionStatus}" TextWrapping="Wrap" />
                                 </StackPanel>
@@ -145,7 +148,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="数据面" />
                                      <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                      <TextBlock Classes="muted" Text="优先级：代理进程固定出口 → 应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。网络未就绪时持续终止所选应用，恢复后由你重新打开。" TextWrapping="Wrap" />
+                                      <TextBlock Classes="muted" Text="优先级：代理进程固定出口 → 应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。TUN 未接管时持续终止所选应用，接管恢复后由你重新打开。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -162,23 +165,23 @@
                         <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="14">
                             <Border Classes="card">
                                 <StackPanel Spacing="6">
-                                    <TextBlock Classes="eyebrow" Text="DoH 保护" />
+                                    <TextBlock Classes="eyebrow" Text="TUN 接管保护" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="未就绪时持续终止所选应用；TUN 运行时同时拒绝这些应用的连接，恢复下载保持可用。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="TUN 未接管或配置重启时持续终止所选应用；接管正常即可运行，DoH 与出口连通性不作为终止条件。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="1">
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="检测状态" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.MonitorStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="并行检测 ESIM-家宽 的两个 DoH；复检不重启 TUN，首次检测完成前保持保护。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="进程保护只依据 TUN 接管状态。TUN 未建立、退出或接管路由丢失时终止所选应用；DoH 检测与出口网卡掉线本身不触发终止。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="2">
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="最后检测" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.LastChecked}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="Cloudflare 为默认项，失败时切换腾讯 DNSPod，恢复后自动切回。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="每分钟并行检测两个 DoH，可随时手动检测。Cloudflare 优先；切换 DNS 配置时先终止所选应用，再重启 TUN。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Button Grid.Column="3" Classes="primary" Content="立即检测"

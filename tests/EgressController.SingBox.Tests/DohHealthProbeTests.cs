@@ -1,4 +1,3 @@
-using EgressController.Core.Protection;
 using EgressController.SingBox.Api.Models;
 using EgressController.SingBox.Configuration;
 
@@ -7,18 +6,15 @@ namespace EgressController.SingBox.Tests;
 public sealed class DohHealthProbeTests
 {
     [Theory]
-    [InlineData(0, 0, false, EgressDohConfiguration.CloudflareTag)]
-    [InlineData(3, 2, false, EgressDohConfiguration.CloudflareTag)]
-    [InlineData(2, 0, false, EgressDohConfiguration.DnsPodTag)]
-    [InlineData(2, 2, true, EgressDohConfiguration.CloudflareTag)]
-    public async Task Both_queries_start_together_and_only_a_complete_round_is_published(int cf, int pod, bool protect, string tag)
+    [InlineData(0, 0, EgressDohConfiguration.CloudflareTag)]
+    [InlineData(3, 2, EgressDohConfiguration.CloudflareTag)]
+    [InlineData(2, 0, EgressDohConfiguration.DnsPodTag)]
+    [InlineData(2, 2, EgressDohConfiguration.CloudflareTag)]
+    public async Task Both_queries_start_together_and_only_a_complete_round_is_published(int cf, int pod, string tag)
     {
         var cloudflare = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         var dnspod = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         var requested = new List<string>();
-        var health = new DohHealthState();
-        health.Complete(health.BeginCheck(), true);
-        health.BeginCheck();
         var pending = DohHealthProbe.RunAsync((host, _) =>
         {
             requested.Add(host);
@@ -27,11 +23,9 @@ public sealed class DohHealthProbeTests
         Assert.Equal(2, requested.Count);
         cloudflare.SetResult(new() { Status = cf });
         Assert.False(pending.IsCompleted); // No failure result while the other DoH is pending.
-        Assert.True(health.Snapshot.Ready);
         dnspod.SetResult(new() { Status = pod });
         var probes = await pending;
         var decision = EgressDohConfiguration.Decide(probes, true, DohRoutingDecision.Default);
-        Assert.Equal(protect, decision.FailClosed);
         Assert.Equal(tag, decision.DnsTag);
     }
 
@@ -45,7 +39,7 @@ public sealed class DohHealthProbeTests
         Assert.False(probes[0].IsHealthy);
         Assert.Contains("超时", probes[0].Detail);
         Assert.True(probes[1].IsHealthy);
-        Assert.False(EgressDohConfiguration.Decide(probes, true, DohRoutingDecision.Default).FailClosed);
+        Assert.Equal(EgressDohConfiguration.DnsPodTag, EgressDohConfiguration.Decide(probes, true, DohRoutingDecision.Default).DnsTag);
     }
 
     [Fact]

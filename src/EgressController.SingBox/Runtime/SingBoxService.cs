@@ -124,6 +124,7 @@ public sealed class SingBoxService : IAsyncDisposable
     private readonly ISingBoxProcessClient _processClient;
     private readonly SingBoxStateStore _stateStore;
     private readonly Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>> _healthCheck;
+    private readonly Action? _beforeTunChange;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly object _gate = new();
     private CancellationTokenSource? _operation;
@@ -132,11 +133,13 @@ public sealed class SingBoxService : IAsyncDisposable
     public SingBoxService(
         ISingBoxProcessClient processClient,
         SingBoxStateStore stateStore,
-        Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>>? healthCheck = null)
+        Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>>? healthCheck = null,
+        Action? beforeTunChange = null)
     {
         _processClient = processClient ?? throw new ArgumentNullException(nameof(processClient));
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
         _healthCheck = healthCheck ?? ((_, _) => Task.FromResult(true));
+        _beforeTunChange = beforeTunChange;
         _processClient.Output += OnOutput;
     }
 
@@ -173,6 +176,7 @@ public sealed class SingBoxService : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _beforeTunChange?.Invoke();
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopping, null, null, null, HasPending()));
             await _processClient.StopAsync(cancellationToken).ConfigureAwait(false);
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopped, null, null, null, HasPending()));
@@ -198,10 +202,11 @@ public sealed class SingBoxService : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _beforeTunChange?.Invoke();
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.RollingBack, null, null, null, true));
             SingBoxRuntimeCandidate candidate = SingBoxRuntimeCandidate.FromPointer(lastGood);
             SingBoxProcessStatus status = await _processClient.StartAsync(candidate, restart: true, cancellationToken).ConfigureAwait(false);
-            if (!status.Succeeded)
+            if (!status.Succeeded || !await _healthCheck(candidate, cancellationToken).ConfigureAwait(false))
             {
                 SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, status.ProcessId, status.ErrorCode, status.ErrorMessage, true));
                 return false;
@@ -239,7 +244,10 @@ public sealed class SingBoxService : IAsyncDisposable
             _operation?.Dispose();
             _operation = operation;
         }
-        SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Preparing, null, null, null, HasPending()));
+        // Preparing/validating a replacement does not stop the current TUN.
+        bool keptRunning = Status.State == SingBoxServiceState.Running;
+        if (!keptRunning)
+            SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Preparing, null, null, null, HasPending()));
         try
         {
             SingBoxRuntimeCandidate candidate = await prepare(operation.Token).ConfigureAwait(false);
@@ -251,7 +259,8 @@ public sealed class SingBoxService : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, null, "prepare.failed", ex.Message, HasPending()));
+            if (!keptRunning)
+                SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, null, "prepare.failed", ex.Message, HasPending()));
             return new SingBoxApplyResult(false, false, "prepare.failed", ex.Message);
         }
         finally
@@ -271,8 +280,22 @@ public sealed class SingBoxService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(candidate);
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        bool restartIssued = false;
         try
         {
+            SingBoxRuntimePointer? current = _stateStore.LoadCurrentRuntime();
+            if (Status.State == SingBoxServiceState.Running && current is not null
+                && string.Equals(current.ConfigSha256, candidate.ConfigSha256, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(current.Core.Sha256, candidate.CoreSha256, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(current.Core.ExecutablePath, candidate.CorePath, StringComparison.OrdinalIgnoreCase))
+                return new(true, false, null, null);
+            // Synchronous guard must complete before StartAsync(restart: true) can stop TUN.
+            // If termination fails, leave the current core untouched, including no rollback.
+            try { _beforeTunChange?.Invoke(); }
+            catch (Exception exception)
+            {
+                return new(false, false, "protection.failed", exception.Message);
+            }
             SingBoxRuntimePointer pending = candidate.ToPointer();
             _stateStore.SavePendingApply(new SingBoxPendingApply
             {
@@ -286,13 +309,15 @@ public sealed class SingBoxService : IAsyncDisposable
                 null,
                 true));
 
+            restartIssued = true;
             SingBoxProcessStatus started = await _processClient.StartAsync(candidate, restart: true, cancellationToken).ConfigureAwait(false);
             if (!started.Succeeded || started.State is not ("running" or "starting"))
                 throw new SingBoxServiceException(started.ErrorCode ?? "process.start", started.ErrorMessage ?? "sing-box 进程启动失败。");
 
             bool healthy = await _healthCheck(candidate, cancellationToken).ConfigureAwait(false);
-            if (!healthy)
-                throw new SingBoxServiceException("health.failed", "sing-box API 健康检查失败。");
+            SingBoxProcessStatus confirmed = await _processClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (!healthy || !confirmed.Succeeded || confirmed.State != "running")
+                throw new SingBoxServiceException("health.failed", "sing-box API 或 TUN 接管检查失败。");
 
             _stateStore.SaveCurrentRuntime(pending);
             _stateStore.SaveLastGoodRuntime(pending);
@@ -304,11 +329,20 @@ public sealed class SingBoxService : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await TryRestoreLastGoodAsync().ConfigureAwait(false);
-            return new SingBoxApplyResult(false, false, "operation.cancelled", "操作已取消。");
+            bool restored = await TryRestoreLastGoodAsync().ConfigureAwait(false);
+            SetStatus(new(restored ? SingBoxServiceState.Running : SingBoxServiceState.Failed,
+                null, "operation.cancelled", "操作已取消。", !restored && HasPending()));
+            return new SingBoxApplyResult(false, restored, "operation.cancelled", "操作已取消。");
         }
         catch (Exception ex)
         {
+            // A failed state read/write before StartAsync has not touched the old core.
+            if (!restartIssued)
+            {
+                if (Status.State != SingBoxServiceState.Running)
+                    SetStatus(new(SingBoxServiceState.Failed, null, "apply.failed", ex.Message, false));
+                return new(false, false, "apply.failed", ex.Message);
+            }
             bool restored = await TryRestoreLastGoodAsync().ConfigureAwait(false);
             SetStatus(new SingBoxServiceStatus(
                 restored ? SingBoxServiceState.Running : SingBoxServiceState.Failed,
@@ -332,12 +366,15 @@ public sealed class SingBoxService : IAsyncDisposable
         SetStatus(new SingBoxServiceStatus(SingBoxServiceState.RollingBack, null, null, null, true));
         try
         {
+            SingBoxRuntimeCandidate candidate = SingBoxRuntimeCandidate.FromPointer(lastGood);
             SingBoxProcessStatus restored = await _processClient.StartAsync(
-                SingBoxRuntimeCandidate.FromPointer(lastGood),
+                candidate,
                 restart: true,
                 CancellationToken.None).ConfigureAwait(false);
-            if (!restored.Succeeded)
+            if (!restored.Succeeded || !await _healthCheck(candidate, CancellationToken.None).ConfigureAwait(false))
                 return false;
+            SingBoxProcessStatus confirmed = await _processClient.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!confirmed.Succeeded || confirmed.State != "running") return false;
             _stateStore.SaveCurrentRuntime(lastGood);
             _stateStore.ClearPendingApply();
             return true;
@@ -361,6 +398,17 @@ public sealed class SingBoxService : IAsyncDisposable
         lock (_gate)
             _status = status;
         StatusChanged?.Invoke(status);
+    }
+
+    public void ReportTakeoverFailure(string error, SingBoxServiceStatus? observed = null)
+    {
+        SingBoxServiceStatus failed;
+        lock (_gate)
+        {
+            if (_status.State != SingBoxServiceState.Running || (observed is not null && !ReferenceEquals(_status, observed))) return;
+            failed = _status = _status with { State = SingBoxServiceState.Failed, ErrorCode = "tun.takeover", ErrorMessage = error };
+        }
+        StatusChanged?.Invoke(failed);
     }
 
     private void OnOutput(SingBoxOutputEvent output)

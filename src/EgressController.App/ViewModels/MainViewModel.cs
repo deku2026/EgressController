@@ -86,10 +86,11 @@ public sealed class NetworkViewModel : ObservableObject
     {
         _controller = controller;
         CheckCommand = new AsyncRelayCommand(CheckAsync);
+        ClearProtectionHistoryCommand = new RelayCommand(() => { _controller.ClearProtectionHistory(); Refresh(); });
     }
 
     public ObservableCollection<ProtectionEventViewModel> ProtectionEvents { get; } = new();
-    private EgressController.Core.Protection.ProtectionEvent? _lastEvent;
+    private IReadOnlyList<EgressController.Core.Protection.ProtectionEvent>? _lastEvents;
 
     public ObservableCollection<DohEndpointViewModel> DohStatuses { get; } = new();
     public string MonitorStatus { get => _monitorStatus; private set => SetProperty(ref _monitorStatus, value); }
@@ -107,6 +108,7 @@ public sealed class NetworkViewModel : ObservableObject
     }
     public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
     public IAsyncRelayCommand CheckCommand { get; }
+    public IRelayCommand ClearProtectionHistoryCommand { get; }
 
     public void Refresh()
     {
@@ -117,9 +119,9 @@ public sealed class NetworkViewModel : ObservableObject
             : "尚未检测";
 
         var events = _controller.ProtectionEvents;
-        if (!Equals(_lastEvent, events.FirstOrDefault()))
+        if (!ReferenceEquals(_lastEvents, events))
         {
-            _lastEvent = events.FirstOrDefault();
+            _lastEvents = events;
             ProtectionEvents.Clear();
             foreach (var item in events) ProtectionEvents.Add(new(item));
         }
@@ -140,7 +142,7 @@ public sealed class DohEndpointViewModel(DohStatusSnapshot status)
 {
     public string Tag => status.Tag;
     public string RoutePlane => status.RoutePlane;
-    public string Provider => status.Provider + (status.IsFallback ? " · 必需检测" : " · 默认");
+    public string Provider => status.Provider + (status.IsFallback ? " · 备用" : " · 默认");
     public string Endpoint => $"https://{status.Server}:{status.ServerPort}{status.Path}";
     public string ServerName => "TLS SNI · " + status.ServerName;
     public string Detour => "detour · " + status.Detour;

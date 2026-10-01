@@ -16,7 +16,6 @@ public sealed class DohConfigurationTests
             DohRoutingDecision.Default);
 
         Assert.Equal(EgressDohConfiguration.DnsPodTag, decision.DnsTag);
-        Assert.False(decision.FailClosed);
     }
 
     [Fact]
@@ -31,11 +30,10 @@ public sealed class DohConfigurationTests
             new DohRoutingDecision { DnsTag = EgressDohConfiguration.DnsPodTag });
 
         Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
-        Assert.False(decision.FailClosed);
     }
 
     [Fact]
-    public void Both_global_doh_endpoints_failed_enters_fail_closed_mode()
+    public void Both_failed_keep_the_previously_selected_resolver()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
@@ -45,19 +43,17 @@ public sealed class DohConfigurationTests
             dnsReady: true,
             DohRoutingDecision.Default);
 
-        Assert.True(decision.FailClosed);
         Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
     }
 
     [Fact]
-    public void Offline_esim_enters_fail_closed_mode()
+    public void Offline_esim_keeps_the_current_selection()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             Array.Empty<DohProbeResult>(),
             dnsReady: false,
             DohRoutingDecision.Default);
 
-        Assert.True(decision.FailClosed);
         Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
     }
 

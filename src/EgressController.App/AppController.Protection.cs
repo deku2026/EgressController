@@ -16,8 +16,9 @@ public sealed partial class AppController
     private EgressController.SingBox.Core.SingBoxCoreCandidate? _preparedCore;
     private volatile bool _shuttingDown;
     private volatile bool _inventoryReady;
-    private readonly DohHealthState _dohHealth = new();
-    private readonly DohModeController _dohModes = new();
+    private readonly EgressController.Windows.Network.WindowsTunInspector _tunInspector = new();
+    private readonly AdapterBindingCache _adapterBindings = new();
+    private string? _takeoverError = "等待 TUN 接管";
     private string? _coreExecutable;
     private string? _protectionError;
     private ProtectedExecutable[] _protectedExecutables = [];
@@ -26,6 +27,8 @@ public sealed partial class AppController
 
     public string ProtectionStatus => _protectionStatus;
     public IReadOnlyList<ProtectionEvent> ProtectionEvents => _processProtection.Events;
+
+    public void ClearProtectionHistory() => _processProtection.ClearHistory();
 
     private void InitializeProtection()
     {
@@ -38,6 +41,7 @@ public sealed partial class AppController
         _coreExecutable = _stateStore.LoadCurrent()?.ExecutablePath;
         _excludedPaths = new[] { Environment.ProcessPath, _coreExecutable }.OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
         RefreshProtectedInventory();
+        _singBox.StatusChanged += OnTunStatusChanged;
         _protectionTask = Task.Run(() => ProtectionLoopAsync(_lifetimeCts.Token));
     }
 
@@ -73,18 +77,34 @@ public sealed partial class AppController
 
     private void InvalidateReadiness(string reason)
     {
-        lock (_dohStateGate)
-        {
-            _dohHealth.Invalidate(reason);
-            _dohModes.Invalidate();
-            _dohRouting = _dohRouting with { FailClosed = true };
-        }
+        _dohSelection.Invalidate();
+        _profileApplied = false;
+        _protectionStatus = "保护中：" + reason;
     }
 
-    private static string? RequiredNetworkError(EgressProfileDocument profile, NetworkEnvironmentSnapshot environment)
+    private void BeforeTunChange()
     {
-        if (profile.AdapterConfigurationError is string configurationError) return configurationError;
-        return environment.DefaultAdapter.IsReady ? null : "ESIM-家宽 未连接或没有 IP";
+        _profileApplied = false;
+        int failures = SweepProtection(new(false, "TUN 即将启动或重启，先终止所选应用"));
+        if (failures > 0)
+            throw new InvalidOperationException("部分所选进程无法终止，已取消本次 TUN 变更；请检查进程保护记录。");
+    }
+
+    private void OnTunStatusChanged(EgressController.SingBox.Runtime.SingBoxServiceStatus status)
+    {
+        if (status.State != EgressController.SingBox.Runtime.SingBoxServiceState.Failed) return;
+        InvalidateReadiness(status.ErrorMessage ?? "TUN 已退出");
+        try { SweepProtection(new(false, status.ErrorMessage ?? "TUN 已退出")); }
+        catch (Exception exception) { _protectionStatus = "保护未完成：" + exception.Message; }
+    }
+
+    private int SweepProtection(ProtectionReadiness readiness)
+    {
+        int failures = _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready, readiness.Reason);
+        _protectionStatus = readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
+        if (failures > 0)
+            _protectionStatus = $"保护未完成：{failures} 个进程终止失败；{readiness.Reason}";
+        return failures;
     }
 
     private async Task ProtectionLoopAsync(CancellationToken token)
@@ -95,36 +115,32 @@ public sealed partial class AppController
             {
                 RefreshAdapters();
                 EgressProfileDocument profile = _profile;
-                string? networkError;
                 try
                 {
                     ValidateProtectionConflicts(profile, ResolveProxyBindings(profile, token).OwnerPaths);
-                    _protectionError = null;
-                    networkError = RequiredNetworkError(profile, _environmentResolver.Resolve(profile, _adapters));
+                    _protectionError = profile.AdapterConfigurationError;
                 }
-                catch (Exception exception) { _protectionError = exception.Message; networkError = exception.Message; }
-                ProtectionReadiness readiness;
-                lock (_dohStateGate)
+                catch (Exception exception) { _protectionError = exception.Message; }
+                var observed = _singBox.Status;
+                if (observed.State == EgressController.SingBox.Runtime.SingBoxServiceState.Running)
                 {
-                    if ((!IsTunRunning || networkError is not null) && (_dohHealth.Snapshot.Ready || _dohHealth.Snapshot.Checking))
-                        InvalidateReadiness(networkError ?? "TUN 未就绪，等待重新检测");
-                    readiness = ProtectionReadiness.Evaluate(IsTunRunning,
-                        _singBox.Status.ErrorMessage ?? _tunSupervisor.LastError, IsUpdatingProfile && !_profileApplied,
-                        _protectionError ?? (IsTunRunning && !_profileApplied ? "配置尚未成功应用，正在自动恢复" : null),
-                        networkError, _dohHealth.Snapshot);
+                    var process = await _directSingBox.GetStatusAsync(token).ConfigureAwait(false);
+                    string? error = process.State == "running" ? _tunInspector.GetError() : "sing-box 进程已退出";
+                    // An observation spanning a restart must not fail the replacement TUN.
+                    if (error is not null) _singBox.ReportTakeoverFailure(error, observed);
                 }
-                _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready, readiness.Reason);
-                _protectionStatus = readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
-                if (_processProtection.FailedCount > 0)
-                    _protectionStatus = $"保护未完成：{_processProtection.FailedCount} 个进程终止失败；{readiness.Reason}";
+                var readiness = ProtectionReadiness.Evaluate(IsTunRunning,
+                    _singBox.Status.ErrorMessage ?? _tunSupervisor.LastError,
+                    _profileApplied, _protectionError, _takeoverError);
+                SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)
                     _tunSupervisor.Tick(IsTunRunning, IsUpdatingProfile, token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
-                InvalidateReadiness("进程保护检查失败：" + exception.Message);
-                _protectionStatus = "保护未完成：" + exception.Message;
+                try { SweepProtection(new(false, "无法确认 TUN 接管状态：" + exception.Message)); }
+                catch (Exception failure) { _protectionStatus = "保护未完成：" + failure.Message; }
             }
             try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }

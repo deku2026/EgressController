@@ -125,11 +125,8 @@ public sealed class EgressProfileCompilerTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement root = json.RootElement;
         JsonElement dns = root.GetProperty("dns");
-        Assert.Equal(EgressDohConfiguration.CloudflareTag, dns.GetProperty("final").GetString());
-        Assert.Equal(EgressDohConfiguration.DnsPodMode, root.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
-        Assert.Equal(EgressDohConfiguration.DnsPodTag, dns.GetProperty("rules").EnumerateArray()
-            .Single(rule => rule.TryGetProperty("clash_mode", out var mode) && mode.GetString() == EgressDohConfiguration.DnsPodMode)
-            .GetProperty("server").GetString());
+        Assert.Equal(EgressDohConfiguration.DnsPodTag, dns.GetProperty("final").GetString());
+        Assert.Equal("rule", root.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
         Assert.DoesNotContain(dns.GetProperty("rules").EnumerateArray(), rule =>
             rule.TryGetProperty("process_name", out _));
         Assert.Equal(EgressProfileCompiler.UpstreamSocksTag, root.GetProperty("route").GetProperty("final").GetString());
@@ -144,12 +141,11 @@ public sealed class EgressProfileCompilerTests
     }
 
     [Fact]
-    public void Fail_closed_rejects_selected_apps_but_keeps_recovery_traffic_available()
+    public void Initial_config_routes_selected_apps_without_waiting_for_doh_and_keeps_recovery_available()
     {
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(
-            Input(new EgressProfileDocument(), applicationPaths: [@"C:\Apps\A\a.exe"], selfPaths: [@"C:\Controller\controller.exe"]) with
-            { DohRouting = new DohRoutingDecision { FailClosed = true } }).JsonBytes);
-        Assert.Equal("reject", RouteForProcess(json.RootElement, @"C:\Apps\A\a.exe"));
+            Input(new EgressProfileDocument(), applicationPaths: [@"C:\Apps\A\a.exe"], selfPaths: [@"C:\Controller\controller.exe"])).JsonBytes);
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\Apps\A\a.exe"));
         Assert.Equal("recovery-direct", RouteForProcess(json.RootElement, @"C:\Controller\controller.exe"));
         Assert.DoesNotContain(json.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray(),
             rule => rule.TryGetProperty("inbound", out _));
@@ -260,8 +256,7 @@ public sealed class EgressProfileCompilerTests
         Assert.DoesNotContain(root.GetProperty("dns").GetProperty("servers").EnumerateArray(), item =>
             item.GetProperty("tag").GetString() == EgressProfileCompiler.DnsTag);
         Assert.Equal(EgressProfileCompiler.DohBootstrapTag, root.GetProperty("dns").GetProperty("final").GetString());
-        Assert.All(root.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
-            Assert.Equal(EgressProfileCompiler.DohBootstrapTag, rule.GetProperty("server").GetString()));
+        Assert.False(root.GetProperty("dns").TryGetProperty("rules", out _));
         Assert.DoesNotContain(routeRules.EnumerateArray(), rule => rule.TryGetProperty("inbound", out _));
     }
 
@@ -525,12 +520,12 @@ public sealed class EgressProfileCompilerTests
         };
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         Assert.Equal("reject", RouteForProcess(json.RootElement, esimHelper));
-        Assert.Equal("reject", RouteForProcess(json.RootElement, portHelper));
-        // Every selected application is protected, independent of its chosen exit.
+        Assert.Equal("clash-7890", RouteForProcess(json.RootElement, portHelper));
+        // Each selected exit retains its own rules; offline direct does not disable proxy traffic.
     }
 
     [Fact]
-    public void Offline_esim_and_global_doh_protection_do_not_change_selected_port_routes()
+    public void Offline_esim_does_not_change_selected_port_routes()
     {
         EgressProfileCompileInput input = Input(new EgressProfileDocument
         {
@@ -581,9 +576,9 @@ public sealed class EgressProfileCompilerTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Owner_rule_precedes_app_domain_and_final_routes_even_during_fail_closed(bool failClosed)
+    [InlineData(EgressDohConfiguration.CloudflareTag)]
+    [InlineData(EgressDohConfiguration.DnsPodTag)]
+    public void Owner_rule_precedes_app_domain_and_final_routes_for_either_dns(string dnsTag)
     {
         const string proxy = @"C:\Proxy (Preview)\core[1].exe";
         var input = Input(new EgressProfileDocument
@@ -592,7 +587,7 @@ public sealed class EgressProfileCompilerTests
         }, ownerPaths: [proxy]) with
         {
             ApplicationRoutes = [new([proxy], EgressRouteTarget.Default)],
-            DohRouting = new() { FailClosed = failClosed },
+            DohRouting = new() { DnsTag = dnsTag },
         };
         using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, proxy.ToUpperInvariant()));
@@ -669,31 +664,27 @@ public sealed class EgressProfileCompilerTests
             !rule.TryGetProperty("clash_mode", out var required) || required.GetString() == mode).ToArray();
     }
 
-    [Fact]
-    public void One_config_switches_protection_and_dns_in_place_without_changing_loop_exemptions()
+    [Theory]
+    [InlineData(EgressDohConfiguration.CloudflareTag)]
+    [InlineData(EgressDohConfiguration.DnsPodTag)]
+    public void Dns_selection_only_changes_dns_final_and_preserves_loop_exemptions(string dnsTag)
     {
         const string app = @"C:\Apps\a.exe", owner = @"C:\Proxy\core.exe", self = @"C:\Controller\app.exe";
-        var input = Input(new(), [app], [owner], [self]) with { DohRouting = new() { FailClosed = true } };
-        using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        var input = Input(new(), [app], [owner], [self]) with { DohRouting = new() { DnsTag = dnsTag } };
+        var compiler = new EgressProfileCompiler();
+        using var json = JsonDocument.Parse(compiler.Compile(input).JsonBytes);
+        using var previous = JsonDocument.Parse(compiler.Compile(input with { DohRouting = DohRoutingDecision.Default }).JsonBytes);
         var root = json.RootElement;
-        var rules = root.GetProperty("route").GetProperty("rules").EnumerateArray().ToArray();
-        int protection = Array.FindIndex(rules, rule => rule.TryGetProperty("clash_mode", out _));
-        Assert.True(Array.FindIndex(rules, rule => rule.TryGetProperty("outbound", out var outbound)
-            && outbound.GetString() == "proxy-direct") < protection);
-        foreach (string mode in new[] { EgressDohConfiguration.ProtectedMode, EgressDohConfiguration.CloudflareMode, EgressDohConfiguration.DnsPodMode })
-        {
-            Assert.Equal(mode == EgressDohConfiguration.ProtectedMode ? "reject" : EgressProfileCompiler.AdapterTag(input.Environment.DefaultAdapter.AdapterId),
-                RouteForProcess(root, app, mode));
-            Assert.Equal("proxy-direct", RouteForProcess(root, owner, mode));
-            Assert.Equal("recovery-direct", RouteForProcess(root, self, mode));
-        }
+        Assert.Equal(previous.RootElement.GetProperty("route").GetRawText(), root.GetProperty("route").GetRawText());
+        Assert.Equal(previous.RootElement.GetProperty("outbounds").GetRawText(), root.GetProperty("outbounds").GetRawText());
+        Assert.Equal(dnsTag, root.GetProperty("dns").GetProperty("final").GetString());
+        Assert.Equal(EgressProfileCompiler.AdapterTag(input.Environment.DefaultAdapter.AdapterId), RouteForProcess(root, app));
+        Assert.Equal("proxy-direct", RouteForProcess(root, owner));
+        Assert.Equal("recovery-direct", RouteForProcess(root, self));
+        Assert.DoesNotContain("clash_mode", root.GetRawText());
         var dnsRules = root.GetProperty("dns").GetProperty("rules").EnumerateArray().ToArray();
         foreach (var endpoint in EgressDohConfiguration.Endpoints)
-        {
-            int probe = Array.FindIndex(dnsRules, rule => Matches(rule, "domain_suffix", endpoint.ProbeSuffix));
-            Assert.True(probe >= 0 && probe < Array.FindIndex(dnsRules, rule => rule.TryGetProperty("clash_mode", out _)));
-            Assert.Equal(endpoint.Tag, dnsRules[probe].GetProperty("server").GetString());
-        }
+            Assert.Equal(endpoint.Tag, dnsRules.Single(rule => Matches(rule, "domain_suffix", endpoint.ProbeSuffix)).GetProperty("server").GetString());
     }
 
     [Fact]
@@ -704,7 +695,7 @@ public sealed class EgressProfileCompilerTests
         using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         Assert.Equal(EgressProfileCompiler.AdapterTag(input.Environment.DefaultAdapter.AdapterId), RouteForProcess(json.RootElement, @"C:\app.exe"));
         Assert.Equal("reject", RouteForProcess(json.RootElement, @"C:\Apps\Mihomo\mihomo.exe"));
-        Assert.Equal(EgressDohConfiguration.CloudflareMode, json.RootElement.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
+        Assert.Equal("rule", json.RootElement.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
     }
 
     [Fact]

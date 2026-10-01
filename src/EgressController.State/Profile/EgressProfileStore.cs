@@ -40,6 +40,10 @@ public sealed class EgressProfileStore
         }
     }
 
+    public static bool HasSameContent(EgressProfileDocument left, EgressProfileDocument right)
+        => JsonSerializer.Serialize(left.NormalizeAndValidate(), EgressStateJsonContext.Default.EgressProfileDocument)
+            == JsonSerializer.Serialize(right.NormalizeAndValidate(), EgressStateJsonContext.Default.EgressProfileDocument);
+
     public void Save(EgressProfileDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
