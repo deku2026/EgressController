@@ -25,3 +25,7 @@ Process32NextW
 TerminateProcess
 
 WaitForSingleObject
+
+// Read-only TUN takeover route inspection
+GetIpForwardTable2
+FreeMibTable

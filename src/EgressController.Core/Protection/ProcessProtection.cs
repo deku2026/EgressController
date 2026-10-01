@@ -17,8 +17,11 @@ public interface IProcessControl
 }
 
 /// <summary>Exact paths seed the tree; PID plus creation time identify every termination.</summary>
-public sealed class ProcessProtection(IProcessControl processes)
+public sealed class ProcessProtection(IProcessControl processes, TimeProvider? clock = null)
 {
+    public static readonly TimeSpan HistoryRetention = TimeSpan.FromHours(24);
+    public const int HistoryLimit = 200;
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly Dictionary<ProcessKey, ProtectedExecutable> _tracked = new();
     private readonly Dictionary<ProcessKey, string> _reportedFailures = new();
     private readonly HashSet<string> _inspectionReported = new(StringComparer.Ordinal);
@@ -28,11 +31,33 @@ public sealed class ProcessProtection(IProcessControl processes)
     public IReadOnlyList<ProtectionEvent> Events => Volatile.Read(ref _eventSnapshot);
     public int FailedCount { get; private set; }
 
-    public void Sweep(IReadOnlyList<ProtectedExecutable> targets, IReadOnlySet<string> excludedPaths,
+    public void ClearHistory()
+    {
+        lock (_gate)
+        {
+            _events.Clear();
+            Volatile.Write(ref _eventSnapshot, []);
+        }
+    }
+
+    private void PruneHistory()
+    {
+        DateTimeOffset cutoff = _clock.GetUtcNow() - HistoryRetention;
+        bool changed = false;
+        while (_events.Count > 0 && (_events.Count > HistoryLimit || _events.Peek().At <= cutoff))
+        {
+            _events.Dequeue();
+            changed = true;
+        }
+        if (changed) Volatile.Write(ref _eventSnapshot, _events.Reverse().ToArray());
+    }
+
+    public int Sweep(IReadOnlyList<ProtectedExecutable> targets, IReadOnlySet<string> excludedPaths,
         bool ready, string reason)
     {
         lock (_gate)
         {
+            PruneHistory();
             var targetPaths = targets.GroupBy(target => target.Path, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             foreach (ProcessKey key in _tracked.Keys.Where(key => !targetPaths.ContainsKey(_tracked[key].Path)).ToArray()) _tracked.Remove(key);
@@ -61,7 +86,7 @@ public sealed class ProcessProtection(IProcessControl processes)
             } while (changed);
 
             FailedCount = 0;
-            if (ready) return;
+            if (ready) return 0;
             var inaccessible = processes.InspectionFailures.Where(failure => targetPaths.Keys.Any(path =>
                 string.Equals(Path.GetFileName(path), failure.FileName, StringComparison.OrdinalIgnoreCase))).ToArray();
             _inspectionReported.IntersectWith(inaccessible.Select(failure => $"{failure.Pid}:{failure.FileName}:{failure.Error}"));
@@ -69,7 +94,7 @@ public sealed class ProcessProtection(IProcessControl processes)
             {
                 FailedCount++;
                 if (!_inspectionReported.Add($"{failure.Pid}:{failure.FileName}:{failure.Error}")) continue;
-                _events.Enqueue(new(DateTimeOffset.UtcNow, failure.FileName, "完整路径无法确认", failure.Pid,
+                _events.Enqueue(new(_clock.GetUtcNow(), failure.FileName, "完整路径无法确认", failure.Pid,
                     false, reason, failure.Error));
             }
             // Newer descendants are usually youngest; each identity is separately validated by the adapter.
@@ -85,11 +110,12 @@ public sealed class ProcessProtection(IProcessControl processes)
                 if (!result.Succeeded && _reportedFailures.GetValueOrDefault(process.Key) == errorKey) continue;
                 if (result.Succeeded) _reportedFailures.Remove(process.Key);
                 else _reportedFailures[process.Key] = errorKey;
-                _events.Enqueue(new(DateTimeOffset.UtcNow, application.Application, process.ExecutablePath,
+                _events.Enqueue(new(_clock.GetUtcNow(), application.Application, process.ExecutablePath,
                     process.Key.Pid, result.Succeeded, reason, result.Error));
             }
-            while (_events.Count > 200) _events.Dequeue();
+            PruneHistory();
             Volatile.Write(ref _eventSnapshot, _events.Reverse().ToArray());
+            return FailedCount;
         }
     }
 }

@@ -31,19 +31,13 @@ public sealed record DohProbeResult(
 public sealed record DohRoutingDecision
 {
     public string DnsTag { get; init; } = EgressDohConfiguration.CloudflareTag;
-    public bool FailClosed { get; init; }
 
     public static DohRoutingDecision Default { get; } = new();
 }
 
 public static class EgressDohConfiguration
 {
-    public const string ProtectedMode = "egress-protected";
-    public const string CloudflareMode = "egress-cloudflare";
-    public const string DnsPodMode = "egress-dnspod";
-
-    public static string ModeFor(DohRoutingDecision decision)
-        => decision.FailClosed ? ProtectedMode : decision.DnsTag == DnsPodTag ? DnsPodMode : CloudflareMode;
+    public static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(1);
 
     public const string CloudflareTag = "dns-global";
     public const string DnsPodTag = "dns-global-backup";
@@ -80,15 +74,13 @@ public static class EgressDohConfiguration
         ArgumentNullException.ThrowIfNull(probes);
         ArgumentNullException.ThrowIfNull(current);
 
-        bool cloudflare = probes.Any(probe => probe.Tag == CloudflareTag && probe.IsHealthy);
-        bool dnspod = probes.Any(probe => probe.Tag == DnsPodTag && probe.IsHealthy);
+        bool cloudflare = dnsReady && probes.Any(probe => probe.Tag == CloudflareTag && probe.IsHealthy);
+        bool dnspod = dnsReady && probes.Any(probe => probe.Tag == DnsPodTag && probe.IsHealthy);
         string dnsTag = cloudflare ? CloudflareTag : dnspod ? DnsPodTag : current.DnsTag;
-        bool hasHealthyEndpoint = dnsReady && (cloudflare || dnspod);
 
         return new DohRoutingDecision
         {
             DnsTag = dnsTag,
-            FailClosed = !hasHealthyEndpoint,
         };
     }
 

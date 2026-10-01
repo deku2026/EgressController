@@ -86,8 +86,6 @@ public sealed class EgressProfileCompiler
         string tunName = NormalizeTunName(input.TunInterfaceName);
         DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
         ValidateDohRouting(dohRouting, input.Environment.DefaultAdapter.IsReady);
-        bool failClosed = dohRouting.FailClosed || !input.Environment.DefaultAdapter.IsReady
-            || profile.AdapterConfigurationError is not null;
 
         var rules = new List<SingBoxRouteRuleDocument>
         {
@@ -106,15 +104,6 @@ public sealed class EgressProfileCompiler
             });
         if (self.Length > 0)
             rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = RecoveryDirectTag });
-        // Mode changes update this rule in place; no core/TUN restart is needed.
-        if (applicationTargets.Count > 0)
-            rules.Add(new()
-            {
-                ClashMode = EgressDohConfiguration.ProtectedMode,
-                ProcessPathRegex = applicationTargets.Keys.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                    .Select(ProcessPathPattern).ToArray(),
-                Action = "reject",
-            });
         foreach (var group in applicationTargets
             .GroupBy(route => route.Value)
             .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
@@ -176,16 +165,6 @@ public sealed class EgressProfileCompiler
                 Server = endpoint.Tag,
             });
         }
-        // Probe suffixes above bypass the active mode, so a failed resolver can recover.
-        // Rules also register all three custom modes in sing-box's Clash API mode-list.
-        foreach (var (mode, tag) in new[]
-        {
-            (EgressDohConfiguration.CloudflareMode, EgressDohConfiguration.CloudflareTag),
-            (EgressDohConfiguration.DnsPodMode, EgressDohConfiguration.DnsPodTag),
-            (EgressDohConfiguration.ProtectedMode, EgressDohConfiguration.CloudflareTag),
-        })
-            dnsRules.Add(new() { ClashMode = mode, Action = "route",
-                Server = input.Environment.DefaultAdapter.IsReady ? tag : DohBootstrapTag });
         var dnsServers = new List<SingBoxDnsServerDocument>
         {
             new()
@@ -246,7 +225,7 @@ public sealed class EgressProfileCompiler
             {
                 Servers = dnsServers,
                 Rules = dnsRules.Count == 0 ? null : dnsRules,
-                Final = input.Environment.DefaultAdapter.IsReady ? EgressDohConfiguration.CloudflareTag : DohBootstrapTag,
+                Final = input.Environment.DefaultAdapter.IsReady ? dohRouting.DnsTag : DohBootstrapTag,
                 Strategy = "ipv4_only",
                 ReverseMapping = true,
             },
@@ -285,7 +264,7 @@ public sealed class EgressProfileCompiler
                 {
                     ExternalController = $"{ControllerHost}:{input.ControllerPort}",
                     Secret = input.ControllerSecret.Trim(),
-                    DefaultMode = EgressDohConfiguration.ModeFor(dohRouting with { FailClosed = failClosed }),
+                    DefaultMode = "rule",
                 },
             },
         };

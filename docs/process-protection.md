@@ -21,9 +21,7 @@ visible but block readiness until reassigned. Port selections are preserved.
 
 Each local port is resolved from the TCP listener table to PID, creation time and full executable
 path. IPv4 listeners must cover `127.0.0.1`; an unrelated NIC or `::1` listener is not a match.
-An IPv6 wildcard listener is considered only when there is no IPv4 listener; the actual SOCKS
-outbound health probe must still pass. Missing, inaccessible or ambiguous owners are shown as
-errors and prevent readiness for used proxy ports. Their application/domain rules reject until
+An IPv6 wildcard listener is considered only when there is no IPv4 listener; missing, inaccessible or ambiguous owners are shown as errors. Their application/domain rules reject until
 identity is confirmed; an unready default port also adds a final catch-all reject after known
 owner and recovery routes, preventing recursion through an unidentified core. Multiple ports
 may share one core.
@@ -31,7 +29,7 @@ may share one core.
 The exact path rule for all known proxy cores precedes business rules and routes only through
 `proxy-direct`, bound to the proxy role. An unavailable proxy role emits a reject rule instead;
 there is no unbound/system/direct-role fallback. A core's last known path remains exempt while
-its listener restarts; changing PID or creation time invalidates readiness and reapplies routing.
+its listener restarts; a PID/creation-time change with identical paths does not require a new configuration.
 Removing its final configured port removes that exemption. Controller/core recovery has a
 separate `recovery-direct` route and can still download dependencies.
 
@@ -44,20 +42,28 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
 2. Discover applications and prepare cached/downloaded core and rules. Recovery downloads
    do not require a SOCKS listener. Their explicit self route precedes TUN DNS interception.
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
-4. TUN API startup health must pass. Each configured DoH gets a unique DNS probe; both must
-   respond successfully. Cloudflare remains the default resolver.
-5. Require both chosen cards, then probe their direct outbounds, the DNS outbound and each
-   distinct outbound used by application/domain/SRS rules.
-   Only fresh, successful results for the current configuration permit selected applications
-   to remain running. Configuration changes invalidate prior results before application.
-6. A failed/expired probe, missing interface or exited TUN returns to protection. Guard sweeps
-   continue independently of downloads, configuration application and network timeouts.
+4. Confirm the authenticated local API and owned core are running; verify the named TUN has
+   its expected IPv4/IPv6 addresses and both default routes. Only then allow selected apps.
+   The one-second guard keeps checking the owned process, local interface and routes. These
+   checks do not send Internet traffic or require a physical exit to be online.
+5. Independently probe both DoHs in parallel, at most eight seconds each, once per minute or
+   manually. Cloudflare is preferred; DNSPod is the fallback. In-progress, canceled, failed or
+   timed-out checks cannot revoke TUN readiness. If both fail, keep the current resolver.
+6. Only a changed resolver prepares a new immutable checked config. Keep the old core while
+   preparing. Before stopping it, enter protection and terminate selected processes. A failed
+   termination cancels the transition. Start with the new DNS final and confirm takeover again.
+   Configuration generations reject stale results; rollback also requires takeover confirmation.
+7. Keep a previously bound physical interface/address through an outage. No fallback and no
+   restart just for link loss; actual address/alias changes on recovery require a config update.
+   Newly selected or initially absent adapters emit rejects until bindings are available.
 
 The guard expands exact executable membership, identifies instances by PID and creation time,
 and tracks descendants while healthy as well as protected. Windows verifies the creation time
 on the same handle used to terminate, then waits briefly for exit. Access failures are recorded.
 Control-plane executables and SOCKS listener owners are excluded and selection conflicts are
-reported. Identical failures are retried without repeated UI records; history is capped at 200.
+reported. Identical failures are retried without repeated UI records. History retains the latest
+24 hours, capped at 200; healthy guard ticks also prune expired records. Clearing history only
+clears displayed records, not identities, descendant tracking, protection or retry state.
 
 Configured recovery communication remains permitted. This is not an operating-system kill
 switch: process termination has a detection interval and does not guarantee zero packets.
@@ -68,8 +74,11 @@ ends protection and stops the owned core. There is no persistent firewall or bac
 
 - `ProcessProtectionTests`: exact paths, all instances, recursive inventory, descendants,
   detached descendants, PID reuse, dependency exclusions, access failures and deduplication.
-- Readiness/supervisor tests: failed TUN, changes, network loss, DoH failure, stale health,
+- Readiness/supervisor tests: failed TUN, missing takeover routes, unapplied configuration,
   recovery, one pending startup, retry, and no startup while already running or busy.
+- Resolver/lifecycle tests: unchanged and failed probes never reload, stale/canceled results,
+  changed DNS final, preparation preserving TUN, protection before restart, and checked rollback.
+- History tests: pruning while healthy, count limits, clear preserving descendants and retries.
 - Profile/resolver/compiler tests: independent defaults, legacy migration, exactly two independent bindings,
   no fallback when absent, direct-only configuration and recovery route precedence.
 - Fake HTTP tests: authenticated outbound probes, explicit failure and bounded recovery downloads.

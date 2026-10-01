@@ -65,17 +65,17 @@ public sealed class CompiledConfigCheckLiveTests
 
             Assert.True(check.Succeeded, check.StandardError + check.StandardOutput);
 
-            EgressProfileCompilationResult failClosed = compiler.Compile(input with
+            EgressProfileCompilationResult fallback = compiler.Compile(input with
             {
-                DohRouting = new DohRoutingDecision { FailClosed = true },
+                DohRouting = new DohRoutingDecision { DnsTag = EgressDohConfiguration.DnsPodTag },
             });
-            string failClosedPath = Path.Combine(root, "config.fail-closed.json");
-            EgressProfileCompiler.WriteNext(failClosedPath, failClosed);
-            SingBoxCommandResult failClosedCheck = await new SingBoxCli().CheckAsync(
+            string fallbackPath = Path.Combine(root, "config.fallback.json");
+            EgressProfileCompiler.WriteNext(fallbackPath, fallback);
+            SingBoxCommandResult fallbackCheck = await new SingBoxCli().CheckAsync(
                 executable,
-                failClosedPath,
+                fallbackPath,
                 TestContext.Current.CancellationToken);
-            Assert.True(failClosedCheck.Succeeded, failClosedCheck.StandardError + failClosedCheck.StandardOutput);
+            Assert.True(fallbackCheck.Succeeded, fallbackCheck.StandardError + fallbackCheck.StandardOutput);
         }
         finally
         {

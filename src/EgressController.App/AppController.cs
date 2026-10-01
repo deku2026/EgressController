@@ -97,7 +97,7 @@ public sealed partial class AppController : IAsyncDisposable
     private string? _lastConnectionMonitorError;
     private string? _lastTrafficMonitorError;
     private int _diagnosticsGeneration;
-    private DohRoutingDecision _dohRouting = DohRoutingDecision.Default;
+    private readonly DohSelectionController _dohSelection = new();
     private IReadOnlyList<DohStatusSnapshot> _dohStatuses = CreateStoppedDohStatuses();
     private string _dohMonitorStatus = "未启动";
     private DateTimeOffset? _dohLastCheckedAtUtc;
@@ -123,7 +123,7 @@ public sealed partial class AppController : IAsyncDisposable
         _profile = _profile.NormalizeAndValidate();
         _profileStore.Save(_profile);
 
-        _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync);
+        _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync, BeforeTunChange);
         _singBox.Output += OnSingBoxOutput;
         InitializeProtection();
     }
@@ -210,8 +210,6 @@ public sealed partial class AppController : IAsyncDisposable
         }
     }
 
-    public string DohProtectionStatus => ProtectionStatus;
-    public bool IsDohFailClosed => !_dohHealth.Snapshot.Ready;
 
     public string UpstreamSummary => $"127.0.0.1:{_profile.UpstreamPort} · SOCKS5";
 
@@ -250,6 +248,7 @@ public sealed partial class AppController : IAsyncDisposable
                     ResolutionUnsupported = true,
                 });
             }
+            string previousInventory = InventoryFingerprint(ApplicationInventorySnapshot.Create(_targets.All()));
             _targets.Clear();
             foreach (LaunchTarget target in discovered)
             {
@@ -265,8 +264,8 @@ public sealed partial class AppController : IAsyncDisposable
             };
             _profileStore.Save(_profile);
             RefreshProtectedInventory();
-            InvalidateReadiness("应用扫描已更新，正在应用规则");
-            _profileApplied = false;
+            if (previousInventory != InventoryFingerprint(inventory))
+                InvalidateReadiness("应用扫描已更新，正在应用规则");
             _inventoryReady = true;
         }
         finally { _configurationGate.Release(); }
@@ -489,11 +488,6 @@ public sealed partial class AppController : IAsyncDisposable
             InvalidateReadiness("正在启动 TUN");
             _profileApplied = false;
 
-            // Start in a fail-closed state until the first sing-box DNS probes have completed.
-            // The probe rules are not TUN-bound, so the monitor can still verify and unlock the
-            // data plane without allowing a startup window with unknown DNS health.
-            lock (_dohStateGate)
-                _dohRouting = new DohRoutingDecision { FailClosed = true };
             SingBoxApplyResult result = await _singBox.StartAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
@@ -600,10 +594,7 @@ public sealed partial class AppController : IAsyncDisposable
 
         try
         {
-            await RunDohHealthCheckAsync(cancellationToken, announce: true).ConfigureAwait(false);
-            return !_dohHealth.Snapshot.Ready
-                ? ControllerOperationResult.Failure("网络未就绪，正在终止所选应用。")
-                : ControllerOperationResult.Success();
+            return await RunDohHealthCheckAsync(cancellationToken, announce: true).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -672,7 +663,7 @@ public sealed partial class AppController : IAsyncDisposable
             _profileStore.Save(_profile);
         }
         profile = normalizedProfile;
-        NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
+        NetworkEnvironmentSnapshot environment = _adapterBindings.Resolve(_environmentResolver.Resolve(profile, _adapters), _adapters);
         ProxyPortSnapshot proxyBindings = ResolveProxyBindings(profile, cancellationToken);
         IReadOnlyList<string> ownerPaths = proxyBindings.OwnerPaths;
         ValidateProtectionConflicts(profile, ownerPaths);
@@ -682,11 +673,13 @@ public sealed partial class AppController : IAsyncDisposable
         SingBoxCoreCandidate core = _preparedCore ??= await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
         _coreExecutable = core.ExecutablePath;
         // Downloads may outlive a proxy restart; compile one consistent fresh snapshot.
-        environment = _environmentResolver.Resolve(profile, _adapters);
+        environment = _adapterBindings.Resolve(_environmentResolver.Resolve(profile, _adapters), _adapters);
         proxyBindings = ResolveProxyBindings(profile, cancellationToken);
         ownerPaths = proxyBindings.OwnerPaths;
         ValidateProtectionConflicts(profile, ownerPaths);
-        ControllerEndpoint endpoint = CreateControllerEndpoint(profile.UpstreamPorts);
+        ControllerEndpoint? existingEndpoint = IsTunRunning ? LoadControllerEndpoint() : null;
+        ControllerEndpoint endpoint = existingEndpoint is not null && !profile.UpstreamPorts.Contains(existingEndpoint.Port)
+            ? existingEndpoint : CreateControllerEndpoint(profile.UpstreamPorts);
 
         string runtimeDirectory = Path.Combine(_dataRoot, "runtime");
         Directory.CreateDirectory(runtimeDirectory);
@@ -740,6 +733,10 @@ public sealed partial class AppController : IAsyncDisposable
         return snapshot;
     }
 
+    private static string InventoryFingerprint(ApplicationInventorySnapshot inventory)
+        => string.Join("\n", inventory.Entries.Select(entry =>
+            entry.DiscoveryKey + ":" + entry.CanRoute + ":" + string.Join("|", entry.ExecutablePaths)));
+
     private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
         EgressProfileDocument profile, ApplicationInventorySnapshot inventory)
     {
@@ -766,7 +763,12 @@ public sealed partial class AppController : IAsyncDisposable
             try
             {
                 SingBoxVersionResponse version = await api.GetVersionAsync(cancellationToken).ConfigureAwait(false);
-                return version.Version.StartsWith("sing-box ", StringComparison.OrdinalIgnoreCase);
+                if (version.Version.StartsWith("sing-box ", StringComparison.OrdinalIgnoreCase))
+                {
+                    _takeoverError = _tunInspector.GetError();
+                    if (_takeoverError is null) return true;
+                }
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             }
             catch (SingBoxApiException exception) when (exception.StatusCode is null)
             {
@@ -785,6 +787,7 @@ public sealed partial class AppController : IAsyncDisposable
         try
         {
             EgressProfileDocument previous = _profile;
+            bool previouslyApplied = _profileApplied;
             EgressProfileDocument next;
             try
             {
@@ -795,9 +798,11 @@ public sealed partial class AppController : IAsyncDisposable
                 return ControllerOperationResult.Failure(exception.Message);
             }
 
+            if (EgressProfileStore.HasSameContent(next, previous))
+                return ControllerOperationResult.Success();
             try { ValidateProtectionConflicts(next, ResolveProxyBindings(next, cancellationToken).OwnerPaths); }
             catch (Exception exception) { return ControllerOperationResult.Failure(exception.Message); }
-            InvalidateReadiness("配置已变更，等待重新检测");
+            InvalidateReadiness("配置已变更，等待 TUN 应用新规则");
             _profileApplied = false;
             try
             {
@@ -824,11 +829,12 @@ public sealed partial class AppController : IAsyncDisposable
                 _profileApplied = true;
                 StartDiagnostics(LoadControllerEndpoint());
                 StartDohMonitor();
-                SetMessage("配置已校验并应用，sing-box 已重启。");
+                SetMessage("配置已校验并应用。");
                 return ControllerOperationResult.Success();
             }
 
             SetRuntimeFingerprint(previousRuntimeFingerprint);
+            _profileApplied = IsTunRunning && previouslyApplied;
             _profile = previous;
             RefreshProtectedInventory();
             try
@@ -885,7 +891,7 @@ public sealed partial class AppController : IAsyncDisposable
 
     private void StartDohMonitor()
     {
-        InvalidateReadiness("等待 ESIM-家宽 的首次 DoH 检测");
+        _dohSelection.Invalidate();
         StopDohMonitor(resetRouting: false);
         _dohMonitorCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         CancellationToken token = _dohMonitorCts.Token;
@@ -915,7 +921,7 @@ public sealed partial class AppController : IAsyncDisposable
         lock (_dohStateGate)
         {
             if (resetRouting)
-                _dohRouting = DohRoutingDecision.Default;
+                _dohSelection.Reset();
             _dohMonitorStatus = resetRouting ? "未运行" : "重新连接中…";
             _dohLastCheckedAtUtc = null;
             if (resetRouting)
@@ -929,6 +935,11 @@ public sealed partial class AppController : IAsyncDisposable
         {
             try
             {
+                if (IsUpdatingProfile)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 if (await _dohProbeGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
                 {
                     try
@@ -941,7 +952,7 @@ public sealed partial class AppController : IAsyncDisposable
                     }
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(EgressDohConfiguration.CheckInterval, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -952,7 +963,7 @@ public sealed partial class AppController : IAsyncDisposable
                 SetMessage("DoH 检测失败：" + DescribeDiagnosticsFailure(exception));
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(EgressDohConfiguration.CheckInterval, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -962,12 +973,11 @@ public sealed partial class AppController : IAsyncDisposable
         }
     }
 
-    private async Task RunDohHealthCheckAsync(CancellationToken cancellationToken, bool announce)
+    private async Task<ControllerOperationResult> RunDohHealthCheckAsync(CancellationToken cancellationToken, bool announce)
     {
-        if (!IsTunRunning) return;
-        DohCheckTicket ticket;
+        if (!IsTunRunning || IsUpdatingProfile) return ControllerOperationResult.Failure("TUN 或配置正在变化，请稍后检测。");
+        int generation = _dohSelection.Generation;
         bool dnsReady = ResolveCurrentDnsReady();
-        lock (_dohStateGate) ticket = _dohHealth.BeginCheck();
         SingBoxDohEndpointDefinition[] endpoints = EgressDohConfiguration.Endpoints.ToArray();
         SetDohChecking(endpoints, dnsReady);
         try
@@ -977,68 +987,56 @@ public sealed partial class AppController : IAsyncDisposable
                 ? await DohHealthProbe.RunAsync((host, token) => api.QueryDnsAsync(host, "A", token), cancellationToken).ConfigureAwait(false)
                 : endpoints.Select(endpoint => new DohProbeResult(endpoint.Tag, false, "ESIM-家宽 未连接或没有 IP")).ToArray();
             cancellationToken.ThrowIfCancellationRequested();
-            DohRoutingDecision desired;
-            string? failure;
-            lock (_dohStateGate)
-            {
-                if (!_dohHealth.IsCurrent(ticket)) return;
-                desired = EgressDohConfiguration.Decide(probes, dnsReady, _dohRouting);
-                failure = desired.FailClosed ? "ESIM-家宽 的两个 DoH 均失败：" + string.Join("；",
-                    probes.Select(probe => $"{EgressDohConfiguration.Find(probe.Tag)?.Provider}：{probe.Detail}")) : null;
-                // Publish a completed negative result immediately; mode PATCH must not
-                // delay process protection when both resolvers have already failed.
-                if (failure is not null) _dohHealth.RecordFailure(ticket, failure);
-            }
-            (bool succeeded, string? error) = await ApplyDohRoutingAsync(api, desired, ticket, cancellationToken).ConfigureAwait(false);
-            lock (_dohStateGate)
-            {
-                if (!_dohHealth.Complete(ticket, succeeded && !desired.FailClosed, error ?? failure)) return;
-                if (succeeded) _dohRouting = desired;
-                UpdateDohStatuses(endpoints, dnsReady, probes, _dohRouting, DateTimeOffset.UtcNow, error);
-            }
-            if (announce) SetMessage(_dohHealth.Snapshot.Reason);
+            if (generation != _dohSelection.Generation) return ControllerOperationResult.Failure("配置已变化，丢弃过期的 DoH 结果。");
+            DohRoutingDecision desired = EgressDohConfiguration.Decide(probes, dnsReady, GetDohRouting());
+            string? error = await ApplyDohRoutingAsync(desired, generation, cancellationToken).ConfigureAwait(false);
+            if (generation != _dohSelection.Generation) return ControllerOperationResult.Failure("配置已变化，丢弃过期的 DoH 结果。");
+            UpdateDohStatuses(endpoints, dnsReady, probes, GetDohRouting(), DateTimeOffset.UtcNow, error);
+            if (announce) SetMessage(DohMonitorStatus);
+            return error is not null ? ControllerOperationResult.Failure(error)
+                : probes.Any(probe => probe.IsHealthy) ? ControllerOperationResult.Success()
+                : ControllerOperationResult.Failure("两个 DoH 均不可用，保留当前 DNS；TUN 接管正常时不终止应用。");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _dohHealth.Cancel(ticket);
+            if (generation == _dohSelection.Generation)
+                lock (_dohStateGate) _dohMonitorStatus = "检测已取消，保留现有 DNS 配置";
             throw;
         }
         catch (Exception exception)
         {
-            lock (_dohStateGate)
-            {
-                string error = "DoH 检测失败：" + DescribeDiagnosticsFailure(exception);
-                if (_dohHealth.Complete(ticket, false, error)) _dohMonitorStatus = error;
-            }
+            if (generation == _dohSelection.Generation)
+                lock (_dohStateGate) _dohMonitorStatus = "DoH 检测失败，保留现有 DNS 配置：" + DescribeDiagnosticsFailure(exception);
+            return ControllerOperationResult.Failure(DescribeDiagnosticsFailure(exception));
         }
     }
 
-    private async Task<(bool Succeeded, string? Error)> ApplyDohRoutingAsync(
-        SingBoxApiClient api, DohRoutingDecision desired, DohCheckTicket ticket, CancellationToken cancellationToken)
+    private async Task<string?> ApplyDohRoutingAsync(
+        DohRoutingDecision desired, int generation, CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(3));
-        bool acquired = false;
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await _configurationGate.WaitAsync(timeout.Token).ConfigureAwait(false);
-            acquired = true;
-            if (!IsTunRunning || !_dohHealth.IsCurrent(ticket))
-                return (false, "TUN 或配置已变化，等待重新检测。");
-            // PATCH only changes mode and clears the DNS cache; TUN and the core stay up.
-            // Read-back in SetModeAsync also repairs an earlier canceled/failed PATCH.
-            await _dohModes.ApplyAsync(desired, api.SetModeAsync, timeout.Token).ConfigureAwait(false);
-            return (true, null);
+            if (!IsTunRunning || generation != _dohSelection.Generation) return "TUN 或配置已变化，等待下次检测。";
+            return await _dohSelection.ApplyAsync(generation, desired, async (selection, token) =>
+            {
+                string previousFingerprint = GetRuntimeFingerprint();
+                bool previouslyApplied = _profileApplied;
+                // Keep the old TUN through validation, then guard before the restart.
+                SingBoxApplyResult applied = await _singBox.ApplyAsync(async prepareToken =>
+                {
+                    var candidate = await PrepareRuntimeAsync(prepareToken, selection).ConfigureAwait(false);
+                    if (!IsTunRunning || generation != _dohSelection.Generation)
+                        throw new InvalidOperationException("TUN 或配置已变化，丢弃过期的 DoH 结果。");
+                    return candidate;
+                }, token).ConfigureAwait(false);
+                _profileApplied = IsTunRunning && (applied.Succeeded || previouslyApplied);
+                if (!applied.Succeeded) SetRuntimeFingerprint(previousFingerprint);
+                if (IsTunRunning) StartDiagnostics(LoadControllerEndpoint());
+                return applied.Succeeded ? null : applied.ErrorMessage ?? "DNS 配置应用失败，保留原选择。";
+            }, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception exception)
-        {
-            return (false, "DoH 模式切换未确认：" + DescribeDiagnosticsFailure(exception));
-        }
-        finally
-        {
-            if (acquired) _configurationGate.Release();
-        }
+        finally { _configurationGate.Release(); }
     }
 
     private void SetDohChecking(
@@ -1058,7 +1056,7 @@ public sealed partial class AppController : IAsyncDisposable
                     available && string.Equals(endpoint.Tag, routing.DnsTag, StringComparison.Ordinal),
                     isHealthy: _dohStatuses.FirstOrDefault(previous => previous.Tag == endpoint.Tag)?.IsHealthy,
                     available ? "复检中…" : "未启用",
-                    available ? "等待本轮结果；进程保护沿用上次已确认状态。" : "ESIM-家宽 当前不可用。");
+                    available ? "等待本轮结果；继续使用当前 DNS 配置。" : "ESIM-家宽 当前不可用。");
             })
                 .ToArray();
         }
@@ -1116,16 +1114,16 @@ public sealed partial class AppController : IAsyncDisposable
                     probe?.LatencyMilliseconds);
             }).ToArray();
             _dohLastCheckedAtUtc = observedAt;
-            _dohMonitorStatus = !_dohHealth.Snapshot.Ready
-                ? "保护中：" + _dohHealth.Snapshot.Reason
-                : $"检测完成：{healthyCount}/{availableCount} 个 DoH 可用（任一个正常即可）";
+            _dohMonitorStatus = applyError is not null ? "DNS 配置应用失败：" + applyError
+                : healthyCount == 0 ? "两个 DoH 均不可用，保留当前 DNS；TUN 接管正常时不终止应用"
+                : $"检测完成：{healthyCount}/{availableCount} 个 DoH 可用；当前 {EgressDohConfiguration.Find(routing.DnsTag)?.Provider}";
         }
     }
 
     private DohRoutingDecision GetDohRouting()
     {
         lock (_dohStateGate)
-            return _dohRouting;
+            return _dohSelection.Current;
     }
 
     private bool ResolveCurrentDnsReady()
@@ -1252,7 +1250,7 @@ public sealed partial class AppController : IAsyncDisposable
 
                 RefreshAdapters();
                 EgressProfileDocument profile = _profile.NormalizeAndValidate();
-                NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
+                NetworkEnvironmentSnapshot environment = _adapterBindings.Resolve(_environmentResolver.Resolve(profile, _adapters), _adapters);
                 ProxyPortSnapshot proxyBindings = ResolveProxyBindings(profile, cancellationToken);
                 string fingerprint = BuildRuntimeFingerprint(environment, proxyBindings);
                 bool changed;
@@ -1261,7 +1259,6 @@ public sealed partial class AppController : IAsyncDisposable
                 if (!changed && _profileApplied)
                     continue;
 
-                InvalidateReadiness("网卡或代理状态改变，正在重新配置");
                 await ApplyRuntimeChangeAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1271,7 +1268,6 @@ public sealed partial class AppController : IAsyncDisposable
             catch (Exception exception)
             {
                 string detail = DescribeDiagnosticsFailure(exception);
-                InvalidateReadiness("网络状态检测失败：" + detail);
                 SetMessage("网络状态检测失败：" + detail);
             }
         }
@@ -1285,7 +1281,8 @@ public sealed partial class AppController : IAsyncDisposable
             if (!IsTunRunning)
                 return;
 
-            _profileApplied = false;
+            _dohSelection.Invalidate();
+            bool previouslyApplied = _profileApplied;
             string previousRuntimeFingerprint = GetRuntimeFingerprint();
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
@@ -1298,6 +1295,7 @@ public sealed partial class AppController : IAsyncDisposable
             else
             {
                 SetRuntimeFingerprint(previousRuntimeFingerprint);
+                _profileApplied = IsTunRunning && previouslyApplied;
                 SetMessage("网络状态变化后的配置应用失败，已保留当前配置：" + (applied.ErrorMessage ?? "未知错误"));
             }
         }

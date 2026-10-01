@@ -1,9 +1,11 @@
 # Contributing
 
-EgressController is a Windows-only .NET application. Changes must preserve explicit adapter/port bindings and keep selected applications guarded until
-TUN and the ESIM-家宽 direct adapter are ready and at least one of Cloudflare/DNSPod is confirmed healthy.
-Keep the last confirmed result during rechecks; only a complete failed round or explicit timeout may revoke it.
-DoH mode changes must not restart TUN. Proxy-specific failures must not become a global process-kill condition. Recovery downloads must remain
+EgressController is a Windows-only .NET application. Keep selected applications guarded until
+TUN takeover and the selected routing configuration are confirmed. DNS health and physical exit
+reachability must not gate process protection. Check DoH once a minute (or manually); keep the
+current resolver when both fail. Only an actual resolver selection change prepares and validates
+a replacement configuration, guards selected processes before stopping the old TUN, and restarts.
+Keep explicit adapter/port bindings and proxy loop prevention. Recovery downloads must remain
 possible while application protection is active. Do not change system network state during tests.
 
 ## Development setup

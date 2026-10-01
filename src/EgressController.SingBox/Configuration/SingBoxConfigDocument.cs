@@ -63,10 +63,6 @@ public sealed record SingBoxDnsDocument
 
 public sealed record SingBoxDnsRuleDocument
 {
-    [JsonPropertyName("clash_mode")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ClashMode { get; init; }
-
     [JsonPropertyName("domain")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Domain { get; init; }
@@ -232,10 +228,6 @@ public sealed record SingBoxRuleSetDocument
 
 public sealed record SingBoxRouteRuleDocument
 {
-    [JsonPropertyName("clash_mode")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ClashMode { get; init; }
-
     [JsonPropertyName("inbound")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Inbound { get; init; }

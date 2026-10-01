@@ -110,22 +110,72 @@ public sealed class ProcessProtectionTests
     }
 
     [Theory]
-    [InlineData(false, false, null, false, "TUN")]
-    [InlineData(true, true, null, true, "配置")]
-    [InlineData(true, false, "Redmi 已断开", true, "Redmi")]
-    [InlineData(true, false, null, false, "DoH")]
-    public void Every_unready_condition_keeps_protection(bool tun, bool busy, string? network, bool doh, string expected)
+    [InlineData(false, true, null, null, "TUN")]
+    [InlineData(true, false, null, null, "配置")]
+    [InlineData(true, true, "配置冲突", null, "配置冲突")]
+    [InlineData(true, true, null, "TUN IPv4 接管路由缺失", "IPv4")]
+    public void Only_tun_or_unapplied_configuration_blocks_apps(bool tun, bool applied, string? config, string? takeover, string expected)
     {
-        var state = ProtectionReadiness.Evaluate(tun, null, busy, null, network, new(doh, false, doh ? "ready" : "等待 DoH"));
+        var state = ProtectionReadiness.Evaluate(tun, null, applied, config, takeover);
         Assert.False(state.Ready);
         Assert.Contains(expected, state.Reason);
     }
 
     [Fact]
-    public void Unknown_health_cannot_unlock_and_confirmed_health_can()
+    public void Confirmed_tun_allows_apps_without_any_dns_or_internet_input()
     {
-        Assert.False(ProtectionReadiness.Evaluate(true, null, false, null, null, new(false, true, "首次检测")).Ready);
-        Assert.True(ProtectionReadiness.Evaluate(true, null, false, null, null, new(true, true, "复检中")).Ready);
+        var fake = new FakeProcesses([P(1, @"C:\a.exe")]);
+        var guard = new ProcessProtection(fake);
+        var ready = ProtectionReadiness.Evaluate(true, null, true, null, null);
+        Assert.True(ready.Ready);
+        guard.Sweep([new(@"C:\a.exe", "A")], NoExclusions, ready.Ready, ready.Reason);
+        Assert.Empty(fake.Killed);
+    }
+
+    [Fact]
+    public void Clearing_history_keeps_descendant_tracking_and_failure_retries()
+    {
+        var fake = new FakeProcesses([P(1, @"C:\a.exe"), P(2, @"C:\child.exe", 1, 1)]) { Result = new(false, "拒绝访问") };
+        var guard = new ProcessProtection(fake);
+        ProtectedExecutable[] targets = [new(@"C:\a.exe", "A")];
+        guard.Sweep(targets, NoExclusions, false, "TUN stopped");
+        Assert.Equal(2, guard.Events.Count);
+        guard.ClearHistory();
+        Assert.Empty(guard.Events);
+        Assert.Equal(2, guard.FailedCount);
+        fake.Snapshot = [P(2, @"C:\child.exe", 1, 1)];
+        guard.Sweep(targets, NoExclusions, false, "TUN stopped");
+        Assert.Equal(3, fake.Killed.Count);
+        Assert.Empty(guard.Events); // Same error remains de-duplicated, but termination was retried.
+        fake.Result = new(true);
+        guard.Sweep(targets, NoExclusions, false, "TUN stopped");
+        Assert.Equal(2u, Assert.Single(guard.Events).Pid);
+    }
+
+    [Fact]
+    public void History_expires_even_while_ready_and_stays_bounded()
+    {
+        var clock = new HistoryClock();
+        var fake = new FakeProcesses([P(1, @"C:\a.exe")]);
+        var guard = new ProcessProtection(fake, clock);
+        ProtectedExecutable[] targets = [new(@"C:\a.exe", "A")];
+        for (int i = 0; i < 205; i++) guard.Sweep(targets, NoExclusions, false, "TUN stopped");
+        Assert.Equal(200, guard.Events.Count);
+        clock.Now += TimeSpan.FromHours(23);
+        guard.Sweep(targets, NoExclusions, false, "TUN stopped");
+        var newest = guard.Events[0];
+        clock.Now += TimeSpan.FromHours(1);
+        guard.Sweep(targets, NoExclusions, true, "TUN ready");
+        Assert.Equal(newest, Assert.Single(guard.Events));
+        clock.Now += TimeSpan.FromHours(23);
+        guard.Sweep(targets, NoExclusions, true, "TUN ready");
+        Assert.Empty(guard.Events);
+    }
+
+    private sealed class HistoryClock : TimeProvider
+    {
+        public DateTimeOffset Now = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     [Fact]
