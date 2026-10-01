@@ -116,17 +116,16 @@ public sealed class ProcessProtectionTests
     [InlineData(true, false, null, false, "DoH")]
     public void Every_unready_condition_keeps_protection(bool tun, bool busy, string? network, bool doh, string expected)
     {
-        var state = ProtectionReadiness.Evaluate(tun, null, busy, null, network, doh, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);
+        var state = ProtectionReadiness.Evaluate(tun, null, busy, null, network, new(doh, false, doh ? "ready" : "等待 DoH"));
         Assert.False(state.Ready);
         Assert.Contains(expected, state.Reason);
     }
 
     [Fact]
-    public void Stale_health_cannot_unlock_and_complete_health_can()
+    public void Unknown_health_cannot_unlock_and_confirmed_health_can()
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        Assert.False(ProtectionReadiness.Evaluate(true, null, false, null, null, true, now.AddMinutes(-1), now, null).Ready);
-        Assert.True(ProtectionReadiness.Evaluate(true, null, false, null, null, true, now, now, null).Ready);
+        Assert.False(ProtectionReadiness.Evaluate(true, null, false, null, null, new(false, true, "首次检测")).Ready);
+        Assert.True(ProtectionReadiness.Evaluate(true, null, false, null, null, new(true, true, "复检中")).Ready);
     }
 
     [Fact]

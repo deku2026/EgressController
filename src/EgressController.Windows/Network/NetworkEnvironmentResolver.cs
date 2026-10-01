@@ -19,8 +19,7 @@ public sealed class NetworkEnvironmentResolver
         {
             DefaultAdapter = ResolveOne(profile.DefaultAdapterId),
             ProxyAdapter = ResolveOne(profile.ProxyAdapterId),
-            DnsAdapter = profile.EffectiveDnsAdapterId == profile.DefaultAdapterId || profile.EffectiveDnsAdapterId == profile.ProxyAdapterId
-                ? ResolveOne(profile.EffectiveDnsAdapterId) : Unavailable(profile.EffectiveDnsAdapterId),
+            DnsAdapter = ResolveOne(profile.DefaultAdapterId),
             Adapters = profile.Adapters.Select(adapter => ResolveOne(adapter.Id)).ToArray(),
             CapturedAtUtc = DateTimeOffset.UtcNow,
         };

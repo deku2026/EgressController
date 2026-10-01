@@ -10,6 +10,9 @@ public sealed record ProxyPortBinding(int Port, IReadOnlyList<TcpListenerOwner> 
 public sealed record ProxyPortSnapshot(IReadOnlyList<ProxyPortBinding> Ports, IReadOnlyList<string> OwnerPaths)
 {
     public static ProxyPortSnapshot Empty { get; } = new([], []);
+    // PID/start-time changes alone do not change the generated path-based rules.
+    public string RoutingFingerprint => string.Join(';', Ports.OrderBy(port => port.Port).Select(port => $"{port.Port}:{port.IsReady}"))
+        + "|" + string.Join('|', OwnerPaths.Order(StringComparer.OrdinalIgnoreCase));
     public string Fingerprint => string.Join(';', Ports.Select(port => port.Fingerprint));
 }
 

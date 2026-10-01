@@ -38,7 +38,8 @@ public sealed class MultiAdapterProfileTests
         var profile = (new EgressProfileDocument().SetAdapterRoles(A, B) with
         { DnsAdapterId = B, Domains = [new() { Name = "example.com", Target = EgressRouteTarget.ForAdapter(A) }] });
         var swapped = profile.SetAdapterRoles(B, A);
-        Assert.Equal(A, swapped.DnsAdapterId);
+        Assert.Null(swapped.DnsAdapterId);
+        Assert.Equal(B, swapped.EffectiveDnsAdapterId);
         Assert.Equal(B, Assert.Single(swapped.Domains).Target.AdapterId);
         Assert.Equal(2, swapped.Adapters.Count);
         Assert.Null(swapped.AdapterConfigurationError);
@@ -81,7 +82,7 @@ public sealed class MultiAdapterProfileTests
         Assert.Equal(2, selected.Adapters.Count);
         Assert.Equal(C, Assert.Single(selected.Applications).Target.AdapterId);
         Assert.Contains("旧网卡", selected.AdapterConfigurationError);
-        Assert.Contains("DNS", (selected with { Applications = [], DnsAdapterId = C }).AdapterConfigurationError);
+        Assert.Null((selected with { Applications = [], DnsAdapterId = C }).NormalizeAndValidate().AdapterConfigurationError);
     }
 
     [Fact]
@@ -93,8 +94,9 @@ public sealed class MultiAdapterProfileTests
             Adapters = [new() { Id = A, Name = "one" }, new() { Id = B, Name = "two" }, new() { Id = C, Name = "three" }],
         }.NormalizeAndValidate();
         Assert.Null(profile.ProxyAdapterId);
-        Assert.Equal(B, profile.DnsAdapterId);
-        Assert.Contains("DNS", profile.SetAdapterRoles(A, C).AdapterConfigurationError);
+        Assert.Null(profile.DnsAdapterId);
+        Assert.Equal(A, profile.EffectiveDnsAdapterId);
+        Assert.Null(profile.SetAdapterRoles(A, C).AdapterConfigurationError);
     }
 
     [Fact]

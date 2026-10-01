@@ -37,6 +37,8 @@ public sealed class ProxyPortBindingTrackerTests
         var restarted = tracker.Capture([7890], TestContext.Current.CancellationToken);
         Assert.True(restarted.Ports[0].IsReady);
         Assert.NotEqual(before.Fingerprint, restarted.Fingerprint);
+        Assert.Equal(before.RoutingFingerprint, restarted.RoutingFingerprint);
+        Assert.NotEqual(before.RoutingFingerprint, down.RoutingFingerprint);
         source.Table[7890] = [new(11, path, Started.AddSeconds(4))];
         Assert.NotEqual(restarted.Fingerprint, tracker.Capture([7890], TestContext.Current.CancellationToken).Fingerprint);
     }

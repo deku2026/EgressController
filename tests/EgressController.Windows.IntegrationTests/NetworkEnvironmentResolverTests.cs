@@ -13,14 +13,14 @@ public sealed class NetworkEnvironmentResolverTests
         .SetAdapterRoles(PrimaryId.ToString("D"), EsimId.ToString("D"));
 
     [Fact]
-    public void Default_dns_follows_default_adapter_but_explicit_dns_does_not()
+    public void Dns_always_follows_direct_role_and_migrates_legacy_overrides()
     {
         var adapters = new[] { Adapter(PrimaryId, "USB", true, ["192.0.2.10"]), Adapter(EsimId, "Ethernet", true, ["198.51.100.10"]) };
         var resolver = new NetworkEnvironmentResolver();
         Assert.Equal(PrimaryId, resolver.Resolve(Profile(), adapters).DnsAdapter.AdapterId);
         EgressProfileDocument changed = Profile().SetAdapterRoles(EsimId.ToString("D"), PrimaryId.ToString("D"));
         Assert.Equal(EsimId, resolver.Resolve(changed, adapters).DnsAdapter.AdapterId);
-        Assert.Equal(PrimaryId, resolver.Resolve(changed with { DnsAdapterId = PrimaryId.ToString("D") }, adapters).DnsAdapter.AdapterId);
+        Assert.Equal(EsimId, resolver.Resolve(changed with { DnsAdapterId = PrimaryId.ToString("D") }, adapters).DnsAdapter.AdapterId);
     }
 
     [Fact]
@@ -85,7 +85,8 @@ public sealed class NetworkEnvironmentResolverTests
         Assert.True(state.DefaultAdapter.IsReady);
         Assert.False(state.ProxyAdapter.IsReady);
         Assert.Equal(EsimId, state.ProxyAdapter.AdapterId);
-        Assert.False(state.DnsAdapter.IsReady);
+        Assert.True(state.DnsAdapter.IsReady);
+        Assert.Equal(PrimaryId, state.DnsAdapter.AdapterId);
     }
 
     private static NetworkAdapterInfo Adapter(Guid id, string name, bool isUp, IReadOnlyList<string> addresses, uint interfaceType = 6)
