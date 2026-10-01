@@ -55,7 +55,9 @@ public sealed partial class AppController : IAsyncDisposable
     private readonly NetworkEnvironmentResolver _environmentResolver = new();
     private readonly WindowsLaunchTargetScanner _targetScanner = new();
     private readonly LaunchTargetRegistry _targets = new();
-    private readonly TcpListenerOwnerResolver _ownerResolver = new();
+    private readonly ProxyPortBindingTracker _portTracker = new(new TcpListenerOwnerResolver());
+    private ProxyPortSnapshot _proxyBindings = ProxyPortSnapshot.Empty;
+    public ProxyPortSnapshot ProxyBindings => Volatile.Read(ref _proxyBindings);
     private readonly EgressProfileCompiler _compiler = new();
     private readonly DirectSingBoxProcessClient _directSingBox = new();
     private readonly SingBoxService _singBox;
@@ -118,7 +120,7 @@ public sealed partial class AppController : IAsyncDisposable
         _profile = LoadProfile();
         ConfigureControlPlane();
         RefreshAdapters();
-        _profile = NetworkEnvironmentResolver.EnsureAutomaticDefaults(_profile, _adapters);
+        _profile = _profile.NormalizeAndValidate();
         _profileStore.Save(_profile);
 
         _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync);
@@ -686,22 +688,27 @@ public sealed partial class AppController : IAsyncDisposable
         EgressProfileDocument profile = _profile.NormalizeAndValidate();
 
         RefreshAdapters();
-        EgressProfileDocument withAdapterDefaults = NetworkEnvironmentResolver.EnsureAutomaticDefaults(profile, _adapters)
-            .NormalizeAndValidate();
-        if (!Equals(withAdapterDefaults, _profile))
+        // Only migrate persisted intent. Interface discovery must never choose either role.
+        EgressProfileDocument normalizedProfile = profile.NormalizeAndValidate();
+        if (!Equals(normalizedProfile, _profile))
         {
-            _profile = withAdapterDefaults;
+            _profile = normalizedProfile;
             _profileStore.Save(_profile);
         }
-        profile = withAdapterDefaults;
+        profile = normalizedProfile;
         NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
-        string[] ownerPaths = ResolveUpstreamOwners(profile, cancellationToken);
+        ProxyPortSnapshot proxyBindings = ResolveProxyBindings(profile, cancellationToken);
+        IReadOnlyList<string> ownerPaths = proxyBindings.OwnerPaths;
         ValidateProtectionConflicts(profile, ownerPaths);
         ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(_targets.All());
         IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory);
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = _preparedCore ??= await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
         _coreExecutable = core.ExecutablePath;
+        // Downloads may outlive a proxy restart; compile one consistent fresh snapshot.
+        environment = _environmentResolver.Resolve(profile, _adapters);
+        proxyBindings = ResolveProxyBindings(profile, cancellationToken);
+        ownerPaths = proxyBindings.OwnerPaths;
         ValidateProtectionConflicts(profile, ownerPaths);
         ControllerEndpoint endpoint = CreateControllerEndpoint(profile.UpstreamPorts);
 
@@ -714,6 +721,7 @@ public sealed partial class AppController : IAsyncDisposable
             ApplicationRoutes = applicationRoutes,
             KnownApplicationExecutablePaths = inventory.Entries.SelectMany(entry => entry.ExecutablePaths).ToArray(),
             UpstreamOwnerPaths = ownerPaths,
+            UnreadyUpstreamPorts = proxyBindings.Ports.Where(binding => !binding.IsReady).Select(binding => binding.Port).ToArray(),
             SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty, core.ExecutablePath],
             RuleSets = ruleSets,
             ControllerPort = endpoint.Port,
@@ -726,7 +734,7 @@ public sealed partial class AppController : IAsyncDisposable
         string configPath = Path.Combine(runtimeDirectory, $"config-{compiled.Sha256}.json");
         EgressProfileCompiler.WriteNext(configPath, compiled);
         await _coreManager.CheckConfigAsync(core, configPath, cancellationToken).ConfigureAwait(false);
-        SetRuntimeFingerprint(environment, ownerPaths);
+        SetRuntimeFingerprint(environment, proxyBindings);
         return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256, endpoint.Port, endpoint.Secret);
     }
 
@@ -749,20 +757,11 @@ public sealed partial class AppController : IAsyncDisposable
             .ToArray();
     }
 
-    private string[] ResolveUpstreamOwners(EgressProfileDocument profile, CancellationToken cancellationToken)
+    private ProxyPortSnapshot ResolveProxyBindings(EgressProfileDocument profile, CancellationToken cancellationToken)
     {
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (int port in profile.UpstreamPorts)
-        {
-            IReadOnlyList<TcpListenerOwner> owners = _ownerResolver.Resolve(port, cancellationToken);
-            if (owners.Any(owner => !owner.IsResolved))
-                throw new ControllerPreparationException("upstream.owner.identity", $"端口 {port} 的监听进程存在，但无法解析其最终 EXE 路径。");
-            foreach (TcpListenerOwner owner in owners)
-                paths.Add(owner.CanonicalExecutablePath!);
-        }
-        // An offline optional port stays a SOCKS outbound: it fails at that port and never
-        // falls back. The monitor adds its owner exemption when the listener appears.
-        return paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        ProxyPortSnapshot snapshot = _portTracker.Capture(profile.UpstreamPorts, cancellationToken);
+        Volatile.Write(ref _proxyBindings, snapshot);
+        return snapshot;
     }
 
     private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
@@ -820,7 +819,7 @@ public sealed partial class AppController : IAsyncDisposable
                 return ControllerOperationResult.Failure(exception.Message);
             }
 
-            try { ValidateProtectionConflicts(next, ResolveUpstreamOwners(next, cancellationToken)); }
+            try { ValidateProtectionConflicts(next, ResolveProxyBindings(next, cancellationToken).OwnerPaths); }
             catch (Exception exception) { return ControllerOperationResult.Failure(exception.Message); }
             InvalidateReadiness("配置已变更，等待重新检测");
             _profileApplied = false;
@@ -1353,8 +1352,8 @@ public sealed partial class AppController : IAsyncDisposable
                 RefreshAdapters();
                 EgressProfileDocument profile = _profile.NormalizeAndValidate();
                 NetworkEnvironmentSnapshot environment = _environmentResolver.Resolve(profile, _adapters);
-                string[] ownerPaths = ResolveUpstreamOwners(profile, cancellationToken);
-                string fingerprint = BuildRuntimeFingerprint(environment, ownerPaths);
+                ProxyPortSnapshot proxyBindings = ResolveProxyBindings(profile, cancellationToken);
+                string fingerprint = BuildRuntimeFingerprint(environment, proxyBindings);
                 bool changed;
                 lock (_runtimeStateGate)
                     changed = _runtimeFingerprint.Length > 0 && !string.Equals(_runtimeFingerprint, fingerprint, StringComparison.Ordinal);
@@ -1407,9 +1406,9 @@ public sealed partial class AppController : IAsyncDisposable
         }
     }
 
-    private void SetRuntimeFingerprint(NetworkEnvironmentSnapshot environment, IReadOnlyList<string> ownerPaths)
+    private void SetRuntimeFingerprint(NetworkEnvironmentSnapshot environment, ProxyPortSnapshot proxyBindings)
     {
-        SetRuntimeFingerprint(BuildRuntimeFingerprint(environment, ownerPaths));
+        SetRuntimeFingerprint(BuildRuntimeFingerprint(environment, proxyBindings));
     }
 
     private string GetRuntimeFingerprint()
@@ -1424,9 +1423,9 @@ public sealed partial class AppController : IAsyncDisposable
             _runtimeFingerprint = fingerprint;
     }
 
-    private string BuildRuntimeFingerprint(
+    private static string BuildRuntimeFingerprint(
         NetworkEnvironmentSnapshot environment,
-        IEnumerable<string> ownerPaths)
+        ProxyPortSnapshot proxyBindings)
     {
         static string AdapterFingerprint(AdapterSelection adapter)
             => string.Join(
@@ -1440,9 +1439,10 @@ public sealed partial class AppController : IAsyncDisposable
 
         return string.Join(
             "|",
-            environment.AllAdapters.Where(adapter => RequiredAdapterIds(_profile).Contains(adapter.AdapterId.ToString("D")))
+            environment.AllAdapters
                 .OrderBy(adapter => adapter.AdapterId).Select(AdapterFingerprint)
-                .Concat(ownerPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)));
+                .Concat(proxyBindings.OwnerPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                .Append(proxyBindings.Fingerprint));
     }
 
     private async Task DiagnosticsLoopAsync(

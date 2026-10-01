@@ -63,29 +63,24 @@
                         <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="14" RowSpacing="14">
                             <Border Classes="card" Grid.Row="0" Grid.Column="0">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="网卡出口" />
-                                    <ItemsControl ItemsSource="{Binding Overview.NetworkAdapters.Entries}" IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:AdapterEntryViewModel">
-                                                <StackPanel Spacing="6" Margin="0,6">
-                                                    <TextBox Text="{Binding Name}" />
-                                                    <TextBlock Classes="muted" Text="{Binding State}" TextWrapping="Wrap" />
-                                                    <WrapPanel>
-                                                        <Button Content="保存名称" Command="{Binding RenameCommand}" />
-                                                        <Button Content="{Binding DefaultLabel}" Command="{Binding SetDefaultCommand}" IsEnabled="{Binding CanSetDefault}" />
-                                                        <Button Content="移除" Command="{Binding RemoveCommand}" IsEnabled="{Binding CanRemove}" ToolTip.Tip="{Binding RemovalHint}" />
-                                                    </WrapPanel>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <StackPanel Spacing="6" IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}">
-                                        <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedAvailable}" HorizontalAlignment="Stretch">
-                                            <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:AdapterOptionViewModel"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
+                                    <TextBlock Classes="eyebrow" Text="两个网卡出口" />
+                                    <StackPanel Spacing="8" IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}">
+                                        <TextBlock Classes="section-title" Text="ESIM-家宽 · 默认直连" />
+                                        <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedDirect}" PlaceholderText="选择直连网卡" HorizontalAlignment="Stretch">
+                                            <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:RoleAdapterOption"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
                                         </ComboBox>
-                                        <TextBox Text="{Binding Overview.NetworkAdapters.Name}" PlaceholderText="自定义名称，例如 Redmi（可选）" />
-                                        <Button Content="添加网卡" Command="{Binding Overview.NetworkAdapters.AddCommand}" HorizontalAlignment="Left" />
+                                        <TextBlock Classes="section-title" Text="Proxy-代理 · 代理进程出口" />
+                                        <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedProxy}" PlaceholderText="选择代理网卡" HorizontalAlignment="Stretch">
+                                            <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:RoleAdapterOption"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <CheckBox Content="显示更多网卡（包含离线和虚拟网卡）" IsChecked="{Binding Overview.NetworkAdapters.ShowAll}" />
+                                        <WrapPanel>
+                                            <Button Content="保存两个出口" Command="{Binding Overview.NetworkAdapters.SaveCommand}" />
+                                            <Button Content="交换网卡" Command="{Binding Overview.NetworkAdapters.SwapCommand}" />
+                                            <Button Content="取消修改" Command="{Binding Overview.NetworkAdapters.CancelCommand}" />
+                                        </WrapPanel>
                                     </StackPanel>
+                                    <TextBlock Classes="muted" Text="{Binding Overview.NetworkAdapters.ConfigurationStatus}" TextWrapping="Wrap" />
                                     <TextBlock Classes="muted" Text="{Binding Overview.NetworkAdapters.Status}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
@@ -96,7 +91,7 @@
                                     <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.DnsOptions}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedDns}" IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}" HorizontalAlignment="Stretch">
                                         <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:DnsAdapterOption"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <TextBlock Classes="muted" Text="DNS 默认跟随默认网卡，也可以指定其他网卡。默认端口单独管理。两个 DoH 和所用出口全部正常后，才允许所选应用运行。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="DNS 默认跟随 ESIM-家宽，也可以选择 Proxy-代理。默认端口单独管理。两张网卡、两个 DoH 和所用出口全部正常后，才允许所选应用运行。" TextWrapping="Wrap" />
                                     <TextBlock Classes="section-title" Text="进程保护" />
                                     <TextBlock Text="{Binding Overview.ProtectionStatus}" TextWrapping="Wrap" />
                                 </StackPanel>
@@ -105,16 +100,18 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="本地 SOCKS5 端口" />
                                     <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="未匹配分流的流量走默认端口。添加端口后，可在应用和域名规则中选择。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="端口自动识别监听进程，所有代理进程统一走 Proxy-代理；多个端口可以属于同一个进程。未匹配规则的流量走默认端口。" TextWrapping="Wrap" />
                                     <ItemsControl ItemsSource="{Binding Overview.Ports.Entries}" IsEnabled="{Binding Overview.Ports.CanEdit}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:UpstreamPortEntryViewModel">
-                                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,3" ToolTip.Tip="{Binding RemovalHint}">
+                                                <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" Margin="0,6" ToolTip.Tip="{Binding RemovalHint}">
                                                     <TextBlock Text="{Binding Endpoint}" VerticalAlignment="Center" />
                                                     <Button Grid.Column="1" Content="{Binding DefaultLabel}" Command="{Binding SetDefaultCommand}"
                                                             IsEnabled="{Binding CanSetDefault}" />
                                                     <Button Grid.Column="2" Content="移除" Command="{Binding RemoveCommand}"
                                                             IsEnabled="{Binding CanRemove}" ToolTip.Tip="{Binding RemovalHint}" />
+                                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding BindingSummary}" TextWrapping="Wrap" />
+                                                    <SelectableTextBlock Grid.Row="2" Grid.ColumnSpan="3" Classes="muted" Text="{Binding OwnerPath}" TextWrapping="Wrap" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -150,7 +147,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="数据面" />
                                      <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                      <TextBlock Classes="muted" Text="优先级：应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。网络未就绪时持续终止所选应用，恢复后由你重新打开。" TextWrapping="Wrap" />
+                                      <TextBlock Classes="muted" Text="优先级：代理进程固定出口 → 应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。网络未就绪时持续终止所选应用，恢复后由你重新打开。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>

@@ -17,6 +17,7 @@ public sealed record EgressProfileCompileInput
     // Includes unchecked applications so a selected app's helper cannot capture another app.
     public IReadOnlyList<string> KnownApplicationExecutablePaths { get; init; } = [];
     public required IReadOnlyList<string> UpstreamOwnerPaths { get; init; }
+    public IReadOnlyList<int> UnreadyUpstreamPorts { get; init; } = [];
     public IReadOnlyList<string> SelfExecutablePaths { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<SingBoxRuleSetInput> RuleSets { get; init; }
     public int ControllerPort { get; init; }
@@ -41,7 +42,8 @@ public sealed record EgressProfileCompilationResult(
 public sealed class EgressProfileCompiler
 {
     public const string TunTag = "tun-in";
-    public const string PrimaryDirectTag = "primary-direct";
+    public const string RecoveryDirectTag = "recovery-direct";
+    public const string ProxyDirectTag = "proxy-direct";
     public const string DnsDirectTag = "dns-direct";
     public static string AdapterTag(Guid id) => "adapter-" + id.ToString("N");
     public const string UpstreamSocksTag = "clash-7890";
@@ -84,7 +86,9 @@ public sealed class EgressProfileCompiler
         string tunName = NormalizeTunName(input.TunInterfaceName);
         DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
         ValidateDohRouting(dohRouting, input.Environment.IsDnsReady);
-        bool failClosed = dohRouting.FailClosed || !input.Environment.IsDnsReady;
+        bool failClosed = dohRouting.FailClosed || !input.Environment.IsDnsReady
+            || !input.Environment.DefaultAdapter.IsReady || !input.Environment.ProxyAdapter.IsReady
+            || profile.AdapterConfigurationError is not null;
 
         var rules = new List<SingBoxRouteRuleDocument>
         {
@@ -92,9 +96,17 @@ public sealed class EgressProfileCompiler
             new() { Protocol = "dns", Action = "hijack-dns" },
             new() { IpVersion = 6, Action = "reject" },
         };
-        AddProcessRules(owners, new() { Action = "route", Outbound = PrimaryDirectTag });
+        // Port owners must never match an application/domain rule or the final SOCKS route.
+        // Use full paths even when no discovered app currently shares the filename.
+        if (owners.Length > 0)
+            rules.Add(new()
+            {
+                ProcessPathRegex = owners.Select(ProcessPathPattern).ToArray(),
+                Action = input.Environment.ProxyAdapter.IsReady ? "route" : "reject",
+                Outbound = input.Environment.ProxyAdapter.IsReady ? ProxyDirectTag : null,
+            });
         if (self.Length > 0)
-            rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = PrimaryDirectTag });
+            rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = RecoveryDirectTag });
         foreach (var group in applicationTargets
             .GroupBy(route => route.Value)
             .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
@@ -105,7 +117,8 @@ public sealed class EgressProfileCompiler
         void AddProcessRules(IEnumerable<string> executablePaths, SingBoxRouteRuleDocument action)
         {
             string[] paths = executablePaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
-            bool NeedsPath(string path) => sharedNames.Contains(Path.GetFileNameWithoutExtension(path));
+            bool NeedsPath(string path) => sharedNames.Contains(Path.GetFileNameWithoutExtension(path))
+                || owners.Contains(path, StringComparer.OrdinalIgnoreCase);
             string[] names = NormalizeProcessNames(paths.Where(path => !NeedsPath(path)));
             if (names.Length > 0)
                 rules.Add(action with { ProcessName = names });
@@ -131,9 +144,15 @@ public sealed class EgressProfileCompiler
         SingBoxRouteRuleDocument RouteTo(EgressRouteTarget target)
         {
             if (!target.IsAdapter)
-                return new() { Action = "route", Outbound = SocksTag(target.Port ?? profile.UpstreamPort) };
+            {
+                int port = target.Port ?? profile.UpstreamPort;
+                return input.UnreadyUpstreamPorts.Contains(port)
+                    ? new() { Action = "reject" }
+                    : new() { Action = "route", Outbound = SocksTag(port) };
+            }
             string? id = target.AdapterId ?? profile.DefaultAdapterId;
-            AdapterSelection? adapter = input.Environment.Find(id);
+            AdapterSelection? adapter = id == profile.DefaultAdapterId || id == profile.ProxyAdapterId
+                ? input.Environment.Find(id) : null;
             return adapter?.IsReady == true
                 ? new() { Action = "route", Outbound = AdapterTag(adapter.AdapterId) }
                 : new() { Action = "reject" };
@@ -175,11 +194,14 @@ public sealed class EgressProfileCompiler
         var outbounds = new List<SingBoxOutboundDocument>();
         if (input.Environment.IsDnsReady)
             outbounds.Add(CreateDirect(DnsDirectTag, input.Environment.DnsAdapter));
-        // Recovery downloads remain possible even when a configured interface is absent.
+        if (input.Environment.ProxyAdapter.IsReady)
+            outbounds.Add(CreateDirect(ProxyDirectTag, input.Environment.ProxyAdapter));
+        // Recovery has its own route; proxy processes must never use its unbound fallback.
         outbounds.Add(input.Environment.DefaultAdapter.IsReady
-            ? CreateDirect(PrimaryDirectTag, input.Environment.DefaultAdapter)
-            : new SingBoxOutboundDocument { Type = "direct", Tag = PrimaryDirectTag });
-        foreach (AdapterSelection adapter in input.Environment.AllAdapters.Where(adapter => adapter.IsReady))
+            ? CreateDirect(RecoveryDirectTag, input.Environment.DefaultAdapter)
+            : new SingBoxOutboundDocument { Type = "direct", Tag = RecoveryDirectTag });
+        foreach (AdapterSelection adapter in input.Environment.AllAdapters.Where(adapter => adapter.IsReady
+            && (adapter.AdapterId.ToString("D") == profile.DefaultAdapterId || adapter.AdapterId.ToString("D") == profile.ProxyAdapterId)))
             outbounds.Add(CreateDirect(AdapterTag(adapter.AdapterId), adapter));
         foreach (int port in profile.UpstreamPorts)
         {
@@ -192,6 +214,12 @@ public sealed class EgressProfileCompiler
                 Version = "5",
             });
         }
+
+        // An unidentified core must not recursively enter its own default SOCKS endpoint.
+        // Recovery and positively identified owners already have higher-priority routes.
+        if ((profile.UpstreamPorts.Count > 0 && input.UnreadyUpstreamPorts.Contains(profile.UpstreamPort))
+            || (profile.UpstreamPorts.Count == 0 && !input.Environment.DefaultAdapter.IsReady))
+            rules.Add(new() { Action = "reject" });
 
         var document = new SingBoxConfigDocument
         {
@@ -227,7 +255,8 @@ public sealed class EgressProfileCompiler
                     Type = "local",
                     Format = "binary",
                 }).ToArray(),
-                Final = profile.UpstreamPorts.Count > 0 ? SocksTag(profile.UpstreamPort) : PrimaryDirectTag,
+                Final = profile.UpstreamPorts.Count > 0 ? SocksTag(profile.UpstreamPort)
+                    : input.Environment.DefaultAdapter.IsReady ? AdapterTag(input.Environment.DefaultAdapter.AdapterId) : RecoveryDirectTag,
                 DefaultDomainResolver = DohBootstrapTag,
                 AutoDetectInterface = true,
                 FindProcess = true,

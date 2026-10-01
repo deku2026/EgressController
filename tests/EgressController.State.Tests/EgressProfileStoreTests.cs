@@ -88,13 +88,17 @@ public sealed class EgressProfileStoreTests : IDisposable
         {
             UpstreamPorts = [7890, 7891],
             UpstreamPort = 7891,
+            DefaultAdapterId = "11111111-1111-1111-1111-111111111111",
+            ProxyAdapterId = "22222222-2222-2222-2222-222222222222",
             Applications = [new() { DiscoveryKey = "browser", Target = EgressRouteTarget.ForPort(7890) }],
             RuleSets = [new() { Name = "google", Target = EgressRouteTarget.Default }],
             Domains = [new() { Name = "example.com", Target = EgressRouteTarget.DefaultAdapter }],
         });
 
         EgressProfileDocument loaded = store.Load();
-        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(4, loaded.SchemaVersion);
+        Assert.Equal("22222222-2222-2222-2222-222222222222", loaded.ProxyAdapterId);
+        Assert.Equal(2, loaded.Adapters.Count);
         Assert.Equal(7891, loaded.UpstreamPort);
         Assert.Equal([7890, 7891], loaded.UpstreamPorts);
         Assert.Equal(EgressRouteTarget.ForPort(7890), Assert.Single(loaded.Applications).Target);

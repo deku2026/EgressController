@@ -10,7 +10,7 @@ public sealed class NetworkEnvironmentResolverTests
     private static readonly Guid PrimaryId = Guid.Parse("d3f02c20-56f8-4a18-9408-19a7f819bd01");
     private static readonly Guid EsimId = Guid.Parse("d3f02c20-56f8-4a18-9408-19a7f819bd02");
     private static EgressProfileDocument Profile() => new EgressProfileDocument()
-        .AddAdapter(PrimaryId.ToString("D"), "Redmi").AddAdapter(EsimId.ToString("D"), "Ethernet");
+        .SetAdapterRoles(PrimaryId.ToString("D"), EsimId.ToString("D"));
 
     [Fact]
     public void Default_dns_follows_default_adapter_but_explicit_dns_does_not()
@@ -18,7 +18,7 @@ public sealed class NetworkEnvironmentResolverTests
         var adapters = new[] { Adapter(PrimaryId, "USB", true, ["192.0.2.10"]), Adapter(EsimId, "Ethernet", true, ["198.51.100.10"]) };
         var resolver = new NetworkEnvironmentResolver();
         Assert.Equal(PrimaryId, resolver.Resolve(Profile(), adapters).DnsAdapter.AdapterId);
-        EgressProfileDocument changed = Profile().SetDefaultAdapter(EsimId.ToString("D"));
+        EgressProfileDocument changed = Profile().SetAdapterRoles(EsimId.ToString("D"), PrimaryId.ToString("D"));
         Assert.Equal(EsimId, resolver.Resolve(changed, adapters).DnsAdapter.AdapterId);
         Assert.Equal(PrimaryId, resolver.Resolve(changed with { DnsAdapterId = PrimaryId.ToString("D") }, adapters).DnsAdapter.AdapterId);
     }
@@ -27,7 +27,7 @@ public sealed class NetworkEnvironmentResolverTests
     public void Missing_or_offline_selected_adapter_is_retained_without_falling_back()
     {
         var other = new[] { Adapter(EsimId, "Ethernet", true, ["198.51.100.10"]) };
-        EgressProfileDocument profile = NetworkEnvironmentResolver.EnsureAutomaticDefaults(Profile(), other);
+        EgressProfileDocument profile = Profile().NormalizeAndValidate();
         Assert.Equal(PrimaryId.ToString("D"), profile.DefaultAdapterId);
         var state = new NetworkEnvironmentResolver().Resolve(profile, other);
         Assert.False(state.DefaultAdapter.IsReady);
@@ -50,7 +50,8 @@ public sealed class NetworkEnvironmentResolverTests
     {
         var adapter = Adapter(PrimaryId, "Redmi", true, ["192.0.2.10"], interfaceType);
         Assert.True(NetworkEnvironmentResolver.IsSelectable(adapter));
-        Assert.Equal(PrimaryId.ToString("D"), NetworkEnvironmentResolver.EnsureAutomaticDefaults(new(), [adapter]).DefaultAdapterId);
+        Assert.True(NetworkEnvironmentResolver.IsRecommended(adapter));
+        Assert.Equal(Guid.Empty, new NetworkEnvironmentResolver().Resolve(new(), [adapter]).DefaultAdapter.AdapterId);
     }
 
     [Fact]
@@ -66,6 +67,25 @@ public sealed class NetworkEnvironmentResolverTests
         var state = new NetworkEnvironmentResolver().Resolve(new(), []);
         Assert.False(state.DefaultAdapter.IsReady);
         Assert.False(state.IsDnsReady);
+    }
+
+    [Theory]
+    [InlineData("vEthernet (WSL)", true)]
+    [InlineData("VMware adapter", true)]
+    [InlineData("Bluetooth Network Connection", true)]
+    [InlineData("Ethernet", false)]
+    public void Default_list_excludes_offline_and_internal_interfaces(string name, bool up)
+        => Assert.False(NetworkEnvironmentResolver.IsRecommended(Adapter(PrimaryId, name, up, ["192.0.2.10"])));
+
+    [Fact]
+    public void Missing_proxy_has_no_fallback_and_legacy_third_dns_cannot_be_used()
+    {
+        var state = new NetworkEnvironmentResolver().Resolve(Profile() with { DnsAdapterId = Guid.NewGuid().ToString("D") },
+            [Adapter(PrimaryId, "USB", true, ["192.0.2.10"])]);
+        Assert.True(state.DefaultAdapter.IsReady);
+        Assert.False(state.ProxyAdapter.IsReady);
+        Assert.Equal(EsimId, state.ProxyAdapter.AdapterId);
+        Assert.False(state.DnsAdapter.IsReady);
     }
 
     private static NetworkAdapterInfo Adapter(Guid id, string name, bool isUp, IReadOnlyList<string> addresses, uint interfaceType = 6)

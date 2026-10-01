@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EgressController.Core.Profile;
+using EgressController.Windows.Process;
 
 namespace EgressController.App.ViewModels;
 
@@ -29,14 +30,23 @@ public sealed class UpstreamPortsViewModel : ObservableObject
     public void Refresh()
     {
         EgressProfileDocument profile = _controller.Profile;
-        if (_busy || _controller.IsUpdatingProfile || ReferenceEquals(_displayed, profile))
+        if (_busy || _controller.IsUpdatingProfile)
             return;
+        if (ReferenceEquals(_displayed, profile)) { RefreshBindings(); return; }
         _displayed = profile;
         Entries.Clear();
         foreach (int port in profile.UpstreamPorts)
             Entries.Add(new UpstreamPortEntryViewModel(profile, port,
                 () => ApplyAsync(() => _controller.SetDefaultUpstreamPortAsync(port)),
                 () => ApplyAsync(() => _controller.RemoveUpstreamPortAsync(port))));
+        RefreshBindings();
+    }
+
+    private void RefreshBindings()
+    {
+        string alias = _controller.Adapters.FirstOrDefault(adapter => adapter.Identity.Guid.ToString("D") == _controller.Profile.ProxyAdapterId)?.Identity.NameSnapshot ?? "未连接 / 未配置";
+        foreach (var entry in Entries)
+            entry.UpdateBinding(_controller.ProxyBindings.Ports.FirstOrDefault(binding => binding.Port == entry.Port), alias);
     }
 
     private async Task AddAsync()
@@ -82,10 +92,11 @@ public sealed class UpstreamPortsViewModel : ObservableObject
     }
 }
 
-public sealed class UpstreamPortEntryViewModel
+public sealed class UpstreamPortEntryViewModel : ObservableObject
 {
     public UpstreamPortEntryViewModel(EgressProfileDocument profile, int port, Func<Task> setDefault, Func<Task> remove)
     {
+        Port = port;
         Endpoint = $"127.0.0.1:{port}";
         IsDefault = port == profile.UpstreamPort;
         RemovalHint = profile.PortRemovalError(port) ?? "移除这个端口";
@@ -94,6 +105,17 @@ public sealed class UpstreamPortEntryViewModel
         RemoveCommand = new AsyncRelayCommand(remove);
     }
 
+    private string _bindingSummary = "等待识别监听进程", _ownerPath = "";
+    public int Port { get; }
+    public string BindingSummary { get => _bindingSummary; private set => SetProperty(ref _bindingSummary, value); }
+    public string OwnerPath { get => _ownerPath; private set => SetProperty(ref _ownerPath, value); }
+    public void UpdateBinding(ProxyPortBinding? binding, string adapterAlias)
+    {
+        BindingSummary = binding?.IsReady == true
+            ? $"PID {binding.Owners[0].ProcessId} → Proxy-代理 · {adapterAlias}"
+            : binding?.Error ?? "等待识别监听进程";
+        OwnerPath = string.Join("\n", binding?.Owners.Select(owner => owner.CanonicalExecutablePath ?? $"PID {owner.ProcessId} · 路径未知") ?? []);
+    }
     public string Endpoint { get; }
     public bool IsDefault { get; }
     public bool CanSetDefault => !IsDefault;
