@@ -267,6 +267,7 @@ public sealed partial class AppController : IAsyncDisposable
                 {
                     Id = selected.DiscoveryKey, SavedDiscoveryKey = selected.DiscoveryKey,
                     Name = selected.DisplayName ?? selected.DiscoveryKey,
+                    Source = "缓存记录（当前未发现）",
                     OwnedExecutables = selected.ExecutablePaths,
                     ResolutionUnsupported = true,
                 });
@@ -837,7 +838,7 @@ public sealed partial class AppController : IAsyncDisposable
 
             if (!IsTunRunning)
             {
-                SetMessage("配置已保存；启动 TUN 后生效。");
+                SetMessage("配置已保存，正在等待 TUN 自动启动。");
                 return ControllerOperationResult.Success();
             }
 

@@ -169,7 +169,7 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="DoH 保护" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="故障时只拒绝 TUN 外部流量，控制面仍可检测并恢复。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="未就绪时持续终止所选应用；TUN 运行时同时拒绝这些应用的连接，恢复下载保持可用。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="1">
