@@ -5,7 +5,7 @@ namespace EgressController.SingBox.Tests;
 public sealed class DohConfigurationTests
 {
     [Fact]
-    public void Either_doh_failure_keeps_protection_and_cloudflare_as_default()
+    public void Cloudflare_failure_uses_healthy_backup_without_protection()
     {
         DohRoutingDecision decision = EgressDohConfiguration.Decide(
             [
@@ -15,8 +15,8 @@ public sealed class DohConfigurationTests
             dnsReady: true,
             DohRoutingDecision.Default);
 
-        Assert.Equal(EgressDohConfiguration.CloudflareTag, decision.DnsTag);
-        Assert.True(decision.FailClosed);
+        Assert.Equal(EgressDohConfiguration.DnsPodTag, decision.DnsTag);
+        Assert.False(decision.FailClosed);
     }
 
     [Fact]

@@ -83,10 +83,10 @@ public sealed class EgressProfileCompilerTests
 
             EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(input);
             using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
-            JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
+            JsonElement[] rules = ActiveRules(json.RootElement);
             JsonElement outbounds = json.RootElement.GetProperty("outbounds");
 
-            Assert.Equal(7, rules.GetArrayLength());
+            Assert.Equal(7, rules.Length);
             Assert.Equal("sniff", rules[0].GetProperty("action").GetString());
             Assert.Equal("hijack-dns", rules[1].GetProperty("action").GetString());
             Assert.Equal("reject", rules[2].GetProperty("action").GetString());
@@ -125,7 +125,11 @@ public sealed class EgressProfileCompilerTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement root = json.RootElement;
         JsonElement dns = root.GetProperty("dns");
-        Assert.Equal(EgressDohConfiguration.DnsPodTag, dns.GetProperty("final").GetString());
+        Assert.Equal(EgressDohConfiguration.CloudflareTag, dns.GetProperty("final").GetString());
+        Assert.Equal(EgressDohConfiguration.DnsPodMode, root.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
+        Assert.Equal(EgressDohConfiguration.DnsPodTag, dns.GetProperty("rules").EnumerateArray()
+            .Single(rule => rule.TryGetProperty("clash_mode", out var mode) && mode.GetString() == EgressDohConfiguration.DnsPodMode)
+            .GetProperty("server").GetString());
         Assert.DoesNotContain(dns.GetProperty("rules").EnumerateArray(), rule =>
             rule.TryGetProperty("process_name", out _));
         Assert.Equal(EgressProfileCompiler.UpstreamSocksTag, root.GetProperty("route").GetProperty("final").GetString());
@@ -167,8 +171,8 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal(first.JsonBytes, second.JsonBytes);
         Assert.Equal(first.Sha256, second.Sha256);
         using JsonDocument json = JsonDocument.Parse(first.JsonBytes);
-        JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
-        Assert.Equal(6, rules.GetArrayLength());
+        JsonElement[] rules = ActiveRules(json.RootElement);
+        Assert.Equal(6, rules.Length);
         Assert.Equal("proxy-direct", rules[3].GetProperty("outbound").GetString());
         Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, owner));
         Assert.False(rules[3].TryGetProperty("process_name", out _));
@@ -184,7 +188,7 @@ public sealed class EgressProfileCompilerTests
             applicationPaths: new[] { configuredPath }));
 
         using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
-        JsonElement applicationRule = json.RootElement.GetProperty("route").GetProperty("rules")[4];
+        JsonElement applicationRule = ActiveRules(json.RootElement)[4];
         string[] processNames = applicationRule.GetProperty("process_name").EnumerateArray()
             .Select(value => value.GetString()!)
             .ToArray();
@@ -205,7 +209,7 @@ public sealed class EgressProfileCompilerTests
             }));
 
         using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
-        JsonElement routeRule = json.RootElement.GetProperty("route").GetProperty("rules")[4];
+        JsonElement routeRule = ActiveRules(json.RootElement)[4];
         string[] routeNames = routeRule.GetProperty("process_name")
             .EnumerateArray()
             .Select(value => value.GetString()!)
@@ -256,7 +260,8 @@ public sealed class EgressProfileCompilerTests
         Assert.DoesNotContain(root.GetProperty("dns").GetProperty("servers").EnumerateArray(), item =>
             item.GetProperty("tag").GetString() == EgressProfileCompiler.DnsTag);
         Assert.Equal(EgressProfileCompiler.DohBootstrapTag, root.GetProperty("dns").GetProperty("final").GetString());
-        Assert.False(root.GetProperty("dns").TryGetProperty("rules", out _));
+        Assert.All(root.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
+            Assert.Equal(EgressProfileCompiler.DohBootstrapTag, rule.GetProperty("server").GetString()));
         Assert.DoesNotContain(routeRules.EnumerateArray(), rule => rule.TryGetProperty("inbound", out _));
     }
 
@@ -357,7 +362,7 @@ public sealed class EgressProfileCompilerTests
             foreach (JsonElement outbound in socks)
                 Assert.Equal($"clash-{outbound.GetProperty("server_port").GetInt32()}", outbound.GetProperty("tag").GetString());
 
-            JsonElement[] rules = root.GetProperty("route").GetProperty("rules").EnumerateArray().ToArray();
+            JsonElement[] rules = ActiveRules(root);
             Assert.Equal("proxy-direct", rules[3].GetProperty("outbound").GetString());
             Assert.Equal("proxy-direct", RouteForProcess(root, @"C:\Apps\Proxy2\xray.exe"));
             Assert.Equal("proxy-direct", RouteForProcess(root, @"C:\Apps\Proxy\mihomo.exe"));
@@ -484,7 +489,7 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal("clash-7890", RouteForProcess(json.RootElement, second));
         Assert.Equal("clash-7890", RouteForProcess(json.RootElement, first + ".other.exe"));
         Assert.Equal("clash-7890", RouteForProcess(json.RootElement, first.Replace("App[1]+", "App1")));
-        string pattern = json.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray()
+        string pattern = ActiveRules(json.RootElement)
             .First(rule => rule.TryGetProperty("process_path_regex", out _)
                 && rule.GetProperty("outbound").GetString() == "adapter-22222222222222222222222222222222")
             .GetProperty("process_path_regex")[0].GetString()!;
@@ -571,7 +576,7 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal(EgressProfileCompiler.AdapterTag(b), RouteForProcess(json.RootElement, @"C:\B.exe"));
         Assert.Equal("reject", RouteForProcess(json.RootElement, @"C:\C.exe"));
         JsonElement dns = json.RootElement.GetProperty("outbounds").EnumerateArray().Single(item => item.GetProperty("tag").GetString() == EgressProfileCompiler.DnsDirectTag);
-        Assert.Equal("USB Redmi", dns.GetProperty("bind_interface").GetString());
+        Assert.Equal("Ethernet", dns.GetProperty("bind_interface").GetString());
         Assert.DoesNotContain(json.RootElement.GetProperty("outbounds").EnumerateArray(), item => item.GetProperty("type").GetString() == "socks");
     }
 
@@ -606,7 +611,7 @@ public sealed class EgressProfileCompilerTests
             environment: EnvironmentSnapshot(hasPrimaryAddress: false));
         using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         Assert.Equal("reject", RouteForProcess(json.RootElement, proxy));
-        Assert.Equal("reject", RouteForProcess(json.RootElement, @"C:\app.exe"));
+        Assert.Equal(EgressProfileCompiler.AdapterTag(input.Environment.DefaultAdapter.AdapterId), RouteForProcess(json.RootElement, @"C:\app.exe"));
         Assert.Equal("recovery-direct", RouteForProcess(json.RootElement, self));
         Assert.DoesNotContain(json.RootElement.GetProperty("outbounds").EnumerateArray(),
             item => item.GetProperty("tag").GetString() == "proxy-direct");
@@ -657,13 +662,70 @@ public sealed class EgressProfileCompilerTests
         Assert.Single(rules[^1].EnumerateObject()); // Unconditional final rejection, no port recursion.
     }
 
+    private static JsonElement[] ActiveRules(JsonElement root, string? mode = null)
+    {
+        mode ??= root.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString();
+        return root.GetProperty("route").GetProperty("rules").EnumerateArray().Where(rule =>
+            !rule.TryGetProperty("clash_mode", out var required) || required.GetString() == mode).ToArray();
+    }
+
+    [Fact]
+    public void One_config_switches_protection_and_dns_in_place_without_changing_loop_exemptions()
+    {
+        const string app = @"C:\Apps\a.exe", owner = @"C:\Proxy\core.exe", self = @"C:\Controller\app.exe";
+        var input = Input(new(), [app], [owner], [self]) with { DohRouting = new() { FailClosed = true } };
+        using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        var root = json.RootElement;
+        var rules = root.GetProperty("route").GetProperty("rules").EnumerateArray().ToArray();
+        int protection = Array.FindIndex(rules, rule => rule.TryGetProperty("clash_mode", out _));
+        Assert.True(Array.FindIndex(rules, rule => rule.TryGetProperty("outbound", out var outbound)
+            && outbound.GetString() == "proxy-direct") < protection);
+        foreach (string mode in new[] { EgressDohConfiguration.ProtectedMode, EgressDohConfiguration.CloudflareMode, EgressDohConfiguration.DnsPodMode })
+        {
+            Assert.Equal(mode == EgressDohConfiguration.ProtectedMode ? "reject" : EgressProfileCompiler.AdapterTag(input.Environment.DefaultAdapter.AdapterId),
+                RouteForProcess(root, app, mode));
+            Assert.Equal("proxy-direct", RouteForProcess(root, owner, mode));
+            Assert.Equal("recovery-direct", RouteForProcess(root, self, mode));
+        }
+        var dnsRules = root.GetProperty("dns").GetProperty("rules").EnumerateArray().ToArray();
+        foreach (var endpoint in EgressDohConfiguration.Endpoints)
+        {
+            int probe = Array.FindIndex(dnsRules, rule => Matches(rule, "domain_suffix", endpoint.ProbeSuffix));
+            Assert.True(probe >= 0 && probe < Array.FindIndex(dnsRules, rule => rule.TryGetProperty("clash_mode", out _)));
+            Assert.Equal(endpoint.Tag, dnsRules[probe].GetProperty("server").GetString());
+        }
+    }
+
+    [Fact]
+    public void Proxy_card_and_port_failure_do_not_disable_a_healthy_direct_app()
+    {
+        var input = Input(new(), [@"C:\app.exe"], environment: EnvironmentSnapshot(hasPrimaryAddress: false))
+            with { UnreadyUpstreamPorts = [7890] };
+        using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal(EgressProfileCompiler.AdapterTag(input.Environment.DefaultAdapter.AdapterId), RouteForProcess(json.RootElement, @"C:\app.exe"));
+        Assert.Equal("reject", RouteForProcess(json.RootElement, @"C:\Apps\Mihomo\mihomo.exe"));
+        Assert.Equal(EgressDohConfiguration.CloudflareMode, json.RootElement.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
+    }
+
+    [Fact]
+    public void Dns_probes_cannot_be_redirected_to_proxy_card_by_legacy_dns_selection()
+    {
+        var input = Input(new());
+        input = input with { Profile = input.Profile with { DnsAdapterId = input.Profile.ProxyAdapterId },
+            Environment = input.Environment with { DnsAdapter = input.Environment.ProxyAdapter } };
+        var config = new EgressProfileCompiler().Compile(input).Document;
+        var dns = config.Outbounds.Single(outbound => outbound.Tag == EgressProfileCompiler.DnsDirectTag);
+        Assert.Equal(input.Environment.DefaultAdapter.Alias, dns.BindInterface);
+        Assert.Equal(input.Environment.DefaultAdapter.Ipv4BindAddress!.ToString(), dns.Inet4BindAddress);
+    }
+
     private static bool Matches(JsonElement rule, string field, string value)
         => rule.TryGetProperty(field, out JsonElement values)
             && values.EnumerateArray().Any(item => item.GetString() == value);
 
-    private static string RouteForProcess(JsonElement root, string path)
+    private static string RouteForProcess(JsonElement root, string path, string? mode = null)
     {
-        foreach (JsonElement rule in root.GetProperty("route").GetProperty("rules").EnumerateArray())
+        foreach (JsonElement rule in ActiveRules(root, mode))
         {
             bool matchesName = Matches(rule, "process_name", Path.GetFileName(path));
             bool matchesPath = rule.TryGetProperty("process_path_regex", out JsonElement patterns)

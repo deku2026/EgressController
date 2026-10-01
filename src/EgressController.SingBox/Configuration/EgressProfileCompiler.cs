@@ -85,9 +85,8 @@ public sealed class EgressProfileCompiler
             throw Failure("controller.port.conflict", "Clash API 端口不能与上游 SOCKS5 端口相同。");
         string tunName = NormalizeTunName(input.TunInterfaceName);
         DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
-        ValidateDohRouting(dohRouting, input.Environment.IsDnsReady);
-        bool failClosed = dohRouting.FailClosed || !input.Environment.IsDnsReady
-            || !input.Environment.DefaultAdapter.IsReady || !input.Environment.ProxyAdapter.IsReady
+        ValidateDohRouting(dohRouting, input.Environment.DefaultAdapter.IsReady);
+        bool failClosed = dohRouting.FailClosed || !input.Environment.DefaultAdapter.IsReady
             || profile.AdapterConfigurationError is not null;
 
         var rules = new List<SingBoxRouteRuleDocument>
@@ -107,11 +106,20 @@ public sealed class EgressProfileCompiler
             });
         if (self.Length > 0)
             rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = RecoveryDirectTag });
+        // Mode changes update this rule in place; no core/TUN restart is needed.
+        if (applicationTargets.Count > 0)
+            rules.Add(new()
+            {
+                ClashMode = EgressDohConfiguration.ProtectedMode,
+                ProcessPathRegex = applicationTargets.Keys.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .Select(ProcessPathPattern).ToArray(),
+                Action = "reject",
+            });
         foreach (var group in applicationTargets
             .GroupBy(route => route.Value)
             .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
         {
-            AddProcessRules(group.Select(route => route.Key), failClosed ? new() { Action = "reject" } : RouteTo(group.Key));
+            AddProcessRules(group.Select(route => route.Key), RouteTo(group.Key));
         }
 
         void AddProcessRules(IEnumerable<string> executablePaths, SingBoxRouteRuleDocument action)
@@ -159,7 +167,7 @@ public sealed class EgressProfileCompiler
         }
 
         var dnsRules = new List<SingBoxDnsRuleDocument>();
-        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsDnsReady))
+        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.DefaultAdapter.IsReady))
         {
             dnsRules.Add(new SingBoxDnsRuleDocument
             {
@@ -168,6 +176,16 @@ public sealed class EgressProfileCompiler
                 Server = endpoint.Tag,
             });
         }
+        // Probe suffixes above bypass the active mode, so a failed resolver can recover.
+        // Rules also register all three custom modes in sing-box's Clash API mode-list.
+        foreach (var (mode, tag) in new[]
+        {
+            (EgressDohConfiguration.CloudflareMode, EgressDohConfiguration.CloudflareTag),
+            (EgressDohConfiguration.DnsPodMode, EgressDohConfiguration.DnsPodTag),
+            (EgressDohConfiguration.ProtectedMode, EgressDohConfiguration.CloudflareTag),
+        })
+            dnsRules.Add(new() { ClashMode = mode, Action = "route",
+                Server = input.Environment.DefaultAdapter.IsReady ? tag : DohBootstrapTag });
         var dnsServers = new List<SingBoxDnsServerDocument>
         {
             new()
@@ -176,7 +194,7 @@ public sealed class EgressProfileCompiler
                 Tag = DohBootstrapTag,
             },
         };
-        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsDnsReady))
+        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.DefaultAdapter.IsReady))
         {
             dnsServers.Add(new SingBoxDnsServerDocument
             {
@@ -192,8 +210,8 @@ public sealed class EgressProfileCompiler
         }
 
         var outbounds = new List<SingBoxOutboundDocument>();
-        if (input.Environment.IsDnsReady)
-            outbounds.Add(CreateDirect(DnsDirectTag, input.Environment.DnsAdapter));
+        if (input.Environment.DefaultAdapter.IsReady)
+            outbounds.Add(CreateDirect(DnsDirectTag, input.Environment.DefaultAdapter));
         if (input.Environment.ProxyAdapter.IsReady)
             outbounds.Add(CreateDirect(ProxyDirectTag, input.Environment.ProxyAdapter));
         // Recovery has its own route; proxy processes must never use its unbound fallback.
@@ -228,7 +246,7 @@ public sealed class EgressProfileCompiler
             {
                 Servers = dnsServers,
                 Rules = dnsRules.Count == 0 ? null : dnsRules,
-                Final = input.Environment.IsDnsReady ? dohRouting.DnsTag : DohBootstrapTag,
+                Final = input.Environment.DefaultAdapter.IsReady ? EgressDohConfiguration.CloudflareTag : DohBootstrapTag,
                 Strategy = "ipv4_only",
                 ReverseMapping = true,
             },
@@ -267,6 +285,7 @@ public sealed class EgressProfileCompiler
                 {
                     ExternalController = $"{ControllerHost}:{input.ControllerPort}",
                     Secret = input.ControllerSecret.Trim(),
+                    DefaultMode = EgressDohConfiguration.ModeFor(dohRouting with { FailClosed = failClosed }),
                 },
             },
         };

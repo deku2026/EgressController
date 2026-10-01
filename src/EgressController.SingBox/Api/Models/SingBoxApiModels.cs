@@ -201,6 +201,8 @@ public sealed record SingBoxApiErrorResponse
     public string Error { get; init; } = string.Empty;
 }
 
+public sealed record SingBoxModePatch([property: JsonPropertyName("mode")] string Mode);
+
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Default,
     PropertyNameCaseInsensitive = true,
@@ -208,6 +210,7 @@ public sealed record SingBoxApiErrorResponse
 [JsonSerializable(typeof(SingBoxDelayResponse))]
 [JsonSerializable(typeof(SingBoxVersionResponse))]
 [JsonSerializable(typeof(SingBoxConfigResponse))]
+[JsonSerializable(typeof(SingBoxModePatch))]
 [JsonSerializable(typeof(SingBoxRulesResponse))]
 [JsonSerializable(typeof(SingBoxConnectionsResponse))]
 [JsonSerializable(typeof(SingBoxTrafficEvent))]

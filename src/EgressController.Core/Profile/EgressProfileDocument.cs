@@ -39,7 +39,8 @@ public sealed record EgressProfileDocument
     public const string ProxyAdapterName = "Proxy-代理";
     public string? DefaultAdapterId { get; init; }
     public string? ProxyAdapterId { get; init; }
-    // null follows DefaultAdapterId, independently from the default SOCKS5 port.
+    // Legacy override is read for migration; DNS and health checks now always use ESIM-家宽.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DnsAdapterId { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PrimaryAdapterId { get; init; }
@@ -92,7 +93,6 @@ public sealed record EgressProfileDocument
             if (adapters.All(adapter => adapter.Id != legacyId))
                 adapters.Add(new() { Id = legacyId, Name = $"网卡{adapters.Count + 1}" });
         string? defaultAdapter = NormalizeAdapterId(DefaultAdapterId, nameof(DefaultAdapterId)) ?? esim ?? primary;
-        string? dnsAdapter = NormalizeAdapterId(DnsAdapterId, nameof(DnsAdapterId));
         string? proxyAdapter = NormalizeAdapterId(ProxyAdapterId, nameof(ProxyAdapterId));
         if (SchemaVersion < 4)
         {
@@ -105,7 +105,7 @@ public sealed record EgressProfileDocument
         }
         if (defaultAdapter is not null && defaultAdapter == proxyAdapter)
             throw new ArgumentException("ESIM-家宽 和 Proxy-代理 必须选择两张不同的网卡。");
-        // Unknown legacy rule/DNS IDs remain explicit and block readiness until reassigned.
+        // Unknown legacy rule IDs remain explicit and block readiness until reassigned.
         // This preserves selections without silently routing them through a different card.
         adapters = new[]
         {
@@ -135,7 +135,7 @@ public sealed record EgressProfileDocument
             Adapters = adapters.ToArray(),
             DefaultAdapterId = defaultAdapter,
             ProxyAdapterId = proxyAdapter,
-            DnsAdapterId = dnsAdapter,
+            DnsAdapterId = null,
             SchemaVersion = EgressProfileSchema.CurrentVersion,
             Core = core,
             UpstreamPorts = ports,
@@ -151,7 +151,7 @@ public sealed record EgressProfileDocument
     }
 
     [JsonIgnore]
-    public string? EffectiveDnsAdapterId => DnsAdapterId ?? DefaultAdapterId;
+    public string? EffectiveDnsAdapterId => DefaultAdapterId;
 
     [JsonIgnore]
     public string? AdapterConfigurationError
@@ -161,7 +161,6 @@ public sealed record EgressProfileDocument
             if (DefaultAdapterId is null) return "请选择 ESIM-家宽 的实际网卡。";
             if (ProxyAdapterId is null) return "请选择 Proxy-代理 的实际网卡。";
             bool Selected(string? id) => id is null || id == DefaultAdapterId || id == ProxyAdapterId;
-            if (!Selected(DnsAdapterId)) return "DNS 仍绑定旧网卡，请重新选择 ESIM-家宽 或 Proxy-代理。";
             if (Applications.Select(item => item.Target).Concat(RuleSets.Select(item => item.Target))
                 .Concat(Domains.Select(item => item.Target)).Any(target => target.IsAdapter && !Selected(target.AdapterId)))
                 return "部分规则仍绑定旧网卡，请在应用或域名规则中重新选择两个网卡出口。";
@@ -169,7 +168,7 @@ public sealed record EgressProfileDocument
         }
     }
 
-    /// <summary>Replace either role atomically and carry its explicit application/DNS references with it.</summary>
+    /// <summary>Replace either role atomically and carry its explicit application references with it.</summary>
     public EgressProfileDocument SetAdapterRoles(string? directId, string? proxyId)
     {
         directId = NormalizeAdapterId(directId, nameof(directId));
@@ -182,7 +181,7 @@ public sealed record EgressProfileDocument
             ? EgressRouteTarget.ForAdapter(id) : target;
         return (this with
         {
-            DefaultAdapterId = directId, ProxyAdapterId = proxyId, DnsAdapterId = Replace(DnsAdapterId),
+            DefaultAdapterId = directId, ProxyAdapterId = proxyId, DnsAdapterId = null,
             Applications = Applications.Select(item => item with { Target = Route(item.Target) }).ToArray(),
             RuleSets = RuleSets.Select(item => item with { Target = Route(item.Target) }).ToArray(),
             Domains = Domains.Select(item => item with { Target = Route(item.Target) }).ToArray(),

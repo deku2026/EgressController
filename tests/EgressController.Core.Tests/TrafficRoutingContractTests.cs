@@ -42,9 +42,10 @@ public sealed class TrafficRoutingContractTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
 
-        Assert.Equal(6, rules.GetArrayLength());
-        Assert.Equal("adapter-22222222222222222222222222222222", rules[4].GetProperty("outbound").GetString());
+        Assert.Equal(7, rules.GetArrayLength());
+        Assert.Equal(EgressDohConfiguration.ProtectedMode, rules[4].GetProperty("clash_mode").GetString());
         Assert.Equal("adapter-22222222222222222222222222222222", rules[5].GetProperty("outbound").GetString());
+        Assert.Equal("adapter-22222222222222222222222222222222", rules[6].GetProperty("outbound").GetString());
     }
 
     private static EgressProfileCompileInput Input()

@@ -88,10 +88,8 @@
                                 <StackPanel Spacing="10">
                                     <TextBlock Classes="eyebrow" Text="DNS 网卡" />
                                     <TextBlock Classes="card-title" Text="Cloudflare DoH" />
-                                    <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.DnsOptions}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedDns}" IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}" HorizontalAlignment="Stretch">
-                                        <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:DnsAdapterOption"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                    <TextBlock Classes="muted" Text="DNS 默认跟随 ESIM-家宽，也可以选择 Proxy-代理。默认端口单独管理。两张网卡、两个 DoH 和所用出口全部正常后，才允许所选应用运行。" TextWrapping="Wrap" />
+                                    <TextBlock Text="ESIM-家宽 · 直连网卡" />
+                                    <TextBlock Classes="muted" Text="Cloudflare 优先，失败时使用 DNSPod。任一个 DoH 正常即可运行所选应用；复检期间保留上次结果，两个都失败或超时后才恢复保护。代理端口单独管理。" TextWrapping="Wrap" />
                                     <TextBlock Classes="section-title" Text="进程保护" />
                                     <TextBlock Text="{Binding Overview.ProtectionStatus}" TextWrapping="Wrap" />
                                 </StackPanel>
@@ -173,7 +171,7 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="检测状态" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.MonitorStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="持续检测两个 DoH 和所用出口；超时期间进程保护独立运行。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="并行检测 ESIM-家宽 的两个 DoH；复检不重启 TUN，首次检测完成前保持保护。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="2">
@@ -191,7 +189,7 @@
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="14,12">
                                     <TextBlock Classes="section-title" Text="DoH 配置与连接状态" />
-                                    <TextBlock Classes="muted" Text="普通 DNS 使用指定 DNS 网卡，默认服务为 Cloudflare；网卡和端口分别管理。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="普通 DNS 与健康检测固定走 ESIM-家宽；Cloudflare 优先，DNSPod 备用。网卡和代理端口分别管理。" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding Network.DohStatuses}">

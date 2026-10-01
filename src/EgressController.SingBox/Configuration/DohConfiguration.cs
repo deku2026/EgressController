@@ -11,7 +11,7 @@ public sealed record SingBoxDohEndpointDefinition(
     string Detour,
     string ProbeSuffix)
 {
-    public string RoutePlaneLabel => "全局 DNS · 指定网卡";
+    public string RoutePlaneLabel => "全局 DNS · ESIM-家宽";
 
     public string CreateProbeHost(string nonce)
     {
@@ -38,6 +38,13 @@ public sealed record DohRoutingDecision
 
 public static class EgressDohConfiguration
 {
+    public const string ProtectedMode = "egress-protected";
+    public const string CloudflareMode = "egress-cloudflare";
+    public const string DnsPodMode = "egress-dnspod";
+
+    public static string ModeFor(DohRoutingDecision decision)
+        => decision.FailClosed ? ProtectedMode : decision.DnsTag == DnsPodTag ? DnsPodMode : CloudflareMode;
+
     public const string CloudflareTag = "dns-global";
     public const string DnsPodTag = "dns-global-backup";
 
@@ -73,8 +80,10 @@ public static class EgressDohConfiguration
         ArgumentNullException.ThrowIfNull(probes);
         ArgumentNullException.ThrowIfNull(current);
 
-        string dnsTag = CloudflareTag;
-        bool hasHealthyEndpoint = dnsReady && HasHealthy(probes);
+        bool cloudflare = probes.Any(probe => probe.Tag == CloudflareTag && probe.IsHealthy);
+        bool dnspod = probes.Any(probe => probe.Tag == DnsPodTag && probe.IsHealthy);
+        string dnsTag = cloudflare ? CloudflareTag : dnspod ? DnsPodTag : current.DnsTag;
+        bool hasHealthyEndpoint = dnsReady && (cloudflare || dnspod);
 
         return new DohRoutingDecision
         {
@@ -90,11 +99,5 @@ public static class EgressDohConfiguration
 
     public static SingBoxDohEndpointDefinition? Find(string tag)
         => Endpoints.FirstOrDefault(endpoint => string.Equals(endpoint.Tag, tag, StringComparison.Ordinal));
-
-    private static bool HasHealthy(IReadOnlyList<DohProbeResult> probes)
-        => Endpoints
-            .All(endpoint => probes.Any(probe =>
-                string.Equals(probe.Tag, endpoint.Tag, StringComparison.Ordinal)
-                && probe.IsHealthy));
 
 }

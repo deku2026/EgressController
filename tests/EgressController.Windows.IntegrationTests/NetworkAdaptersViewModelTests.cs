@@ -39,7 +39,7 @@ public sealed class NetworkAdaptersViewModelTests
     }
 
     [Fact]
-    public async Task Two_role_save_is_explicit_atomic_and_moves_dns_and_rule_references()
+    public async Task Two_role_save_is_explicit_atomic_and_dns_follows_direct_role()
     {
         var fixture = new Fixture { Profile = new EgressProfileDocument().SetAdapterRoles(A, B) with
         { DnsAdapterId = B, Domains = [new() { Name = "example.com", Target = EgressRouteTarget.ForAdapter(A) }] } };
@@ -53,7 +53,8 @@ public sealed class NetworkAdaptersViewModelTests
         Assert.Equal(1, fixture.Writes);
         Assert.Equal(B, fixture.Profile.DefaultAdapterId);
         Assert.Equal(A, fixture.Profile.ProxyAdapterId);
-        Assert.Equal(A, fixture.Profile.DnsAdapterId);
+        Assert.Null(fixture.Profile.DnsAdapterId);
+        Assert.Equal(B, fixture.Profile.EffectiveDnsAdapterId);
         Assert.Equal(B, Assert.Single(fixture.Profile.Domains).Target.AdapterId);
         Assert.Equal(7890, fixture.Profile.UpstreamPort);
     }
@@ -83,14 +84,14 @@ public sealed class NetworkAdaptersViewModelTests
     }
 
     [Fact]
-    public void Cancel_restores_roles_and_dns_offers_only_the_selected_pair()
+    public void Cancel_restores_roles_without_changing_dns_or_ports()
     {
         var fixture = new Fixture { Profile = new EgressProfileDocument().SetAdapterRoles(A, B) };
         var vm = fixture.Create();
         vm.SelectedDirect = vm.Available.Single(option => option.Id == C);
         vm.CancelCommand.Execute(null);
         Assert.Equal(A, vm.SelectedDirect!.Id);
-        Assert.Equal(new string?[] { null, A, B }, vm.DnsOptions.Select(option => option.Id));
+        Assert.Equal(A, fixture.Profile.EffectiveDnsAdapterId);
         Assert.Equal(0, fixture.Writes);
     }
 
@@ -121,10 +122,6 @@ public sealed class NetworkAdaptersViewModelTests
             Writes++;
             if (Failure is not null) return Task.FromResult(ControllerOperationResult.Failure(Failure));
             Profile = Profile.SetAdapterRoles(direct, proxy);
-            return Task.FromResult(ControllerOperationResult.Success());
-        }, id =>
-        {
-            Writes++; Profile = Profile with { DnsAdapterId = id };
             return Task.FromResult(ControllerOperationResult.Success());
         });
     }

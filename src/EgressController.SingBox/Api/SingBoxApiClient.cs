@@ -65,6 +65,26 @@ public sealed class SingBoxApiClient : IDisposable
     public Task<SingBoxConfigResponse> GetConfigAsync(CancellationToken cancellationToken = default)
         => GetJsonAsync("configs", SingBoxApiJsonContext.Default.SingBoxConfigResponse, cancellationToken);
 
+    public async Task SetModeAsync(string mode, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(mode) || mode.Length > 64)
+            throw new ArgumentException("A valid mode is required.", nameof(mode));
+        using var request = CreateRequest(HttpMethod.Patch, "configs");
+        request.Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(
+            new SingBoxModePatch(mode), SingBoxApiJsonContext.Default.SingBoxModePatch));
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        using HttpResponseMessage response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            byte[] body = await ReadResponseBodyAsync(response, "configs", cancellationToken, validateStatus: false).ConfigureAwait(false);
+            throw CreateStatusException(response.StatusCode, "configs", body);
+        }
+        // sing-box returns 204 even for unknown modes. Read back before allowing apps.
+        SingBoxConfigResponse config = await GetConfigAsync(cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(config.Mode, mode, StringComparison.Ordinal))
+            throw new SingBoxApiException($"sing-box 未确认 DoH 模式：{mode}（当前：{config.Mode}）。");
+    }
+
     public Task<SingBoxRulesResponse> GetRulesAsync(CancellationToken cancellationToken = default)
         => GetJsonAsync("rules", SingBoxApiJsonContext.Default.SingBoxRulesResponse, cancellationToken);
 

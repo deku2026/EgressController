@@ -70,9 +70,7 @@ public sealed class MainViewModel : ObservableObject
         Connections.Refresh();
         Traffic.Refresh();
         Network.Refresh();
-        Status = string.IsNullOrWhiteSpace(Controller.LastMessage)
-            ? $"TUN：{Controller.TunStatus}"
-            : Controller.LastMessage;
+        Status = Network.ProtectionStatus;
     }
 }
 
