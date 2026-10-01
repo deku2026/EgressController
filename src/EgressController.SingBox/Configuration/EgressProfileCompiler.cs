@@ -42,7 +42,8 @@ public sealed class EgressProfileCompiler
 {
     public const string TunTag = "tun-in";
     public const string PrimaryDirectTag = "primary-direct";
-    public const string EsimDirectTag = "esim-direct";
+    public const string DnsDirectTag = "dns-direct";
+    public static string AdapterTag(Guid id) => "adapter-" + id.ToString("N");
     public const string UpstreamSocksTag = "clash-7890";
     public const string DohBootstrapTag = "doh-bootstrap";
     public const string DnsTag = EgressDohConfiguration.CloudflareTag;
@@ -53,8 +54,6 @@ public sealed class EgressProfileCompiler
         ArgumentNullException.ThrowIfNull(input);
         EgressProfileDocument profile = input.Profile.NormalizeAndValidate();
         string[] owners = NormalizePaths(input.UpstreamOwnerPaths, "upstream.owner");
-        if (owners.Length == 0)
-            throw Failure("upstream.owner", "未解析到上游 SOCKS5 owner executable path。");
         string[] self = NormalizePaths(input.SelfExecutablePaths, "self.path");
         if (self.Any(path => owners.Contains(path, StringComparer.OrdinalIgnoreCase)))
             throw Failure("upstream.owner.self", "上游 SOCKS5 owner 是 EgressController/sing-box 自身，拒绝生成配置。");
@@ -84,8 +83,8 @@ public sealed class EgressProfileCompiler
             throw Failure("controller.port.conflict", "Clash API 端口不能与上游 SOCKS5 端口相同。");
         string tunName = NormalizeTunName(input.TunInterfaceName);
         DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
-        ValidateDohRouting(dohRouting, input.Environment.IsEsimReady);
-        bool failClosed = dohRouting.FailClosed || !input.Environment.IsEsimReady;
+        ValidateDohRouting(dohRouting, input.Environment.IsDnsReady);
+        bool failClosed = dohRouting.FailClosed || !input.Environment.IsDnsReady;
 
         var rules = new List<SingBoxRouteRuleDocument>
         {
@@ -94,19 +93,13 @@ public sealed class EgressProfileCompiler
             new() { IpVersion = 6, Action = "reject" },
         };
         AddProcessRules(owners, new() { Action = "route", Outbound = PrimaryDirectTag });
-        if (failClosed)
-        {
-            rules.Insert(0, new SingBoxRouteRuleDocument
-            {
-                Inbound = [TunTag],
-                Action = "reject",
-            });
-        }
+        if (self.Length > 0)
+            rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = PrimaryDirectTag });
         foreach (var group in applicationTargets
             .GroupBy(route => route.Value)
             .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
         {
-            AddProcessRules(group.Select(route => route.Key), RouteTo(group.Key));
+            AddProcessRules(group.Select(route => route.Key), failClosed ? new() { Action = "reject" } : RouteTo(group.Key));
         }
 
         void AddProcessRules(IEnumerable<string> executablePaths, SingBoxRouteRuleDocument action)
@@ -136,13 +129,18 @@ public sealed class EgressProfileCompiler
         }
 
         SingBoxRouteRuleDocument RouteTo(EgressRouteTarget target)
-            => target.Kind == "esim"
-                ? new() { Action = input.Environment.IsEsimReady ? "route" : "reject",
-                    Outbound = input.Environment.IsEsimReady ? EsimDirectTag : null }
-                : new() { Action = "route", Outbound = SocksTag(target.Port ?? profile.UpstreamPort) };
+        {
+            if (!target.IsAdapter)
+                return new() { Action = "route", Outbound = SocksTag(target.Port ?? profile.UpstreamPort) };
+            string? id = target.AdapterId ?? profile.DefaultAdapterId;
+            AdapterSelection? adapter = input.Environment.Find(id);
+            return adapter?.IsReady == true
+                ? new() { Action = "route", Outbound = AdapterTag(adapter.AdapterId) }
+                : new() { Action = "reject" };
+        }
 
         var dnsRules = new List<SingBoxDnsRuleDocument>();
-        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsEsimReady))
+        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsDnsReady))
         {
             dnsRules.Add(new SingBoxDnsRuleDocument
             {
@@ -159,7 +157,7 @@ public sealed class EgressProfileCompiler
                 Tag = DohBootstrapTag,
             },
         };
-        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsEsimReady))
+        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.IsDnsReady))
         {
             dnsServers.Add(new SingBoxDnsServerDocument
             {
@@ -169,15 +167,20 @@ public sealed class EgressProfileCompiler
                 ServerPort = endpoint.ServerPort,
                 Path = endpoint.Path,
                 Tls = new SingBoxTlsDocument { ServerName = endpoint.ServerName },
-                Detour = endpoint.Detour,
+                Detour = DnsDirectTag,
                 DomainResolver = DohBootstrapTag,
             });
         }
 
         var outbounds = new List<SingBoxOutboundDocument>();
-        if (input.Environment.IsEsimReady)
-            outbounds.Add(CreateDirect(EsimDirectTag, input.Environment.Esim));
-        outbounds.Add(CreateDirect(PrimaryDirectTag, input.Environment.Primary));
+        if (input.Environment.IsDnsReady)
+            outbounds.Add(CreateDirect(DnsDirectTag, input.Environment.DnsAdapter));
+        // Recovery downloads remain possible even when a configured interface is absent.
+        outbounds.Add(input.Environment.DefaultAdapter.IsReady
+            ? CreateDirect(PrimaryDirectTag, input.Environment.DefaultAdapter)
+            : new SingBoxOutboundDocument { Type = "direct", Tag = PrimaryDirectTag });
+        foreach (AdapterSelection adapter in input.Environment.AllAdapters.Where(adapter => adapter.IsReady))
+            outbounds.Add(CreateDirect(AdapterTag(adapter.AdapterId), adapter));
         foreach (int port in profile.UpstreamPorts)
         {
             outbounds.Add(new SingBoxOutboundDocument
@@ -197,7 +200,7 @@ public sealed class EgressProfileCompiler
             {
                 Servers = dnsServers,
                 Rules = dnsRules.Count == 0 ? null : dnsRules,
-                Final = input.Environment.IsEsimReady ? dohRouting.DnsTag : DohBootstrapTag,
+                Final = input.Environment.IsDnsReady ? dohRouting.DnsTag : DohBootstrapTag,
                 Strategy = "ipv4_only",
                 ReverseMapping = true,
             },
@@ -224,7 +227,7 @@ public sealed class EgressProfileCompiler
                     Type = "local",
                     Format = "binary",
                 }).ToArray(),
-                Final = SocksTag(profile.UpstreamPort),
+                Final = profile.UpstreamPorts.Count > 0 ? SocksTag(profile.UpstreamPort) : PrimaryDirectTag,
                 DefaultDomainResolver = DohBootstrapTag,
                 AutoDetectInterface = true,
                 FindProcess = true,
@@ -288,12 +291,12 @@ public sealed class EgressProfileCompiler
             Inet6BindAddress = adapter.Ipv6BindAddress?.ToString(),
         };
 
-    private static IEnumerable<SingBoxDohEndpointDefinition> AvailableDohEndpoints(bool esimReady)
-        => EgressDohConfiguration.Endpoints.Where(endpoint => EgressDohConfiguration.IsAvailable(endpoint, esimReady));
+    private static IEnumerable<SingBoxDohEndpointDefinition> AvailableDohEndpoints(bool dnsReady)
+        => EgressDohConfiguration.Endpoints.Where(endpoint => EgressDohConfiguration.IsAvailable(endpoint, dnsReady));
 
-    private static void ValidateDohRouting(DohRoutingDecision routing, bool esimReady)
+    private static void ValidateDohRouting(DohRoutingDecision routing, bool dnsReady)
     {
-        if (esimReady && EgressDohConfiguration.Find(routing.DnsTag) is null)
+        if (dnsReady && EgressDohConfiguration.Find(routing.DnsTag) is null)
             throw Failure("doh.routing", "全局 DoH 路由选择无效。");
     }
 
@@ -381,14 +384,8 @@ public sealed class EgressProfileCompiler
     {
         if (environment is null)
             throw Failure("adapter.environment", "网络环境为空。");
-        ValidateAdapter(environment.Primary, "primary", requireAddress: true);
-        if (environment.Esim.AdapterId != Guid.Empty)
-            ValidateAdapter(environment.Esim, "esim", requireAddress: false);
-        if (environment.Primary.AdapterId == Guid.Empty)
-            throw Failure("adapter.id", "网卡稳定 ID 为空。");
-        if (environment.Esim.AdapterId != Guid.Empty
-            && environment.Primary.AdapterId == environment.Esim.AdapterId)
-            throw Failure("adapter.same", "主网卡和 eSIM 网卡不能相同。");
+        foreach (AdapterSelection adapter in environment.AllAdapters)
+            ValidateAdapter(adapter, "网卡", requireAddress: false);
     }
 
     private static void ValidateControllerEndpoint(int port, string secret)

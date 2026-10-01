@@ -205,6 +205,7 @@ public sealed record SingBoxApiErrorResponse
     GenerationMode = JsonSourceGenerationMode.Default,
     PropertyNameCaseInsensitive = true,
     WriteIndented = false)]
+[JsonSerializable(typeof(SingBoxDelayResponse))]
 [JsonSerializable(typeof(SingBoxVersionResponse))]
 [JsonSerializable(typeof(SingBoxConfigResponse))]
 [JsonSerializable(typeof(SingBoxRulesResponse))]
@@ -214,3 +215,8 @@ public sealed record SingBoxApiErrorResponse
 [JsonSerializable(typeof(SingBoxDnsResponse))]
 [JsonSerializable(typeof(SingBoxApiErrorResponse))]
 internal sealed partial class SingBoxApiJsonContext : JsonSerializerContext;
+
+public sealed record SingBoxDelayResponse
+{
+    [JsonPropertyName("delay")] public int Delay { get; init; }
+}

@@ -11,7 +11,7 @@ public sealed record SingBoxDohEndpointDefinition(
     string Detour,
     string ProbeSuffix)
 {
-    public string RoutePlaneLabel => "全局 DNS · eSIM 出口";
+    public string RoutePlaneLabel => "全局 DNS · 指定网卡";
 
     public string CreateProbeHost(string nonce)
     {
@@ -51,7 +51,7 @@ public static class EgressDohConfiguration
             443,
             "/dns-query",
             "cloudflare-dns.com",
-            EgressProfileCompiler.EsimDirectTag,
+            EgressProfileCompiler.DnsDirectTag,
             "doh-global-cloudflare.egresscontroller.invalid"),
         new(
             DnsPodTag,
@@ -61,20 +61,20 @@ public static class EgressDohConfiguration
             443,
             "/dns-query",
             "doh.pub",
-            EgressProfileCompiler.EsimDirectTag,
+            EgressProfileCompiler.DnsDirectTag,
             "doh-global-dnspod.egresscontroller.invalid"),
     ];
 
     public static DohRoutingDecision Decide(
         IReadOnlyList<DohProbeResult> probes,
-        bool esimReady,
+        bool dnsReady,
         DohRoutingDecision current)
     {
         ArgumentNullException.ThrowIfNull(probes);
         ArgumentNullException.ThrowIfNull(current);
 
-        string dnsTag = SelectTag(probes, current.DnsTag);
-        bool hasHealthyEndpoint = esimReady && HasHealthy(probes);
+        string dnsTag = CloudflareTag;
+        bool hasHealthyEndpoint = dnsReady && HasHealthy(probes);
 
         return new DohRoutingDecision
         {
@@ -85,30 +85,16 @@ public static class EgressDohConfiguration
 
     public static bool IsAvailable(
         SingBoxDohEndpointDefinition endpoint,
-        bool esimReady)
-        => esimReady;
+        bool dnsReady)
+        => dnsReady;
 
     public static SingBoxDohEndpointDefinition? Find(string tag)
         => Endpoints.FirstOrDefault(endpoint => string.Equals(endpoint.Tag, tag, StringComparison.Ordinal));
 
     private static bool HasHealthy(IReadOnlyList<DohProbeResult> probes)
         => Endpoints
-            .Any(endpoint => probes.Any(probe =>
+            .All(endpoint => probes.Any(probe =>
                 string.Equals(probe.Tag, endpoint.Tag, StringComparison.Ordinal)
                 && probe.IsHealthy));
 
-    private static string SelectTag(
-        IReadOnlyList<DohProbeResult> probes,
-        string currentTag)
-    {
-        // Endpoint order is priority order: return to Cloudflare automatically after recovery.
-        return Endpoints.FirstOrDefault(endpoint => IsHealthy(probes, endpoint.Tag))?.Tag
-            ?? Find(currentTag)?.Tag
-            ?? CloudflareTag;
-    }
-
-    private static bool IsHealthy(IReadOnlyList<DohProbeResult> probes, string tag)
-        => probes.Any(probe =>
-            string.Equals(probe.Tag, tag, StringComparison.Ordinal)
-            && probe.IsHealthy);
 }

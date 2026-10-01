@@ -66,6 +66,7 @@ public sealed partial class SingBoxCli : ISingBoxCli
             throw new FileNotFoundException("sing-box executable does not exist", executablePath);
         ArgumentNullException.ThrowIfNull(arguments);
 
+        EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo

@@ -62,11 +62,11 @@ public sealed class EgressProfileDocumentTests
             EsimDomains = ["Example.com"],
         }.NormalizeAndValidate();
 
-        Assert.Equal(2, profile.SchemaVersion);
+        Assert.Equal(3, profile.SchemaVersion);
         Assert.Equal([1080], profile.UpstreamPorts);
         Assert.Equal(1080, profile.UpstreamPort);
-        Assert.Equal(EgressRouteTarget.Esim, Assert.Single(profile.Applications).Target);
-        Assert.Equal(EgressRouteTarget.Esim, Assert.Single(profile.RuleSets).Target);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, Assert.Single(profile.Applications).Target);
+        Assert.Equal(EgressRouteTarget.DefaultAdapter, Assert.Single(profile.RuleSets).Target);
         Assert.Equal("example.com", Assert.Single(profile.Domains).Name);
         Assert.Null(profile.EsimApplications);
         Assert.Null(profile.EsimRuleSets);
@@ -81,7 +81,7 @@ public sealed class EgressProfileDocumentTests
         var profile = new EgressProfileDocument { UpstreamPorts = [7892, 7890, 7892] }.NormalizeAndValidate();
         Assert.Equal([7890, 7892], profile.UpstreamPorts);
         Assert.Throws<ArgumentException>(() => profile.SetDefaultPort(7891));
-        Assert.Throws<ArgumentException>(() => (profile with { UpstreamPorts = [] }).NormalizeAndValidate());
+        Assert.Empty((profile with { UpstreamPorts = [] }).NormalizeAndValidate().UpstreamPorts);
         Assert.Throws<ArgumentException>(() => profile.AddPort(65536));
         Assert.Throws<ArgumentException>(() => profile.AddPort(0));
     }

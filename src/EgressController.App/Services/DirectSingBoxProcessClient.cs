@@ -43,6 +43,7 @@ public sealed class DirectSingBoxProcessClient : ISingBoxProcessClient
         bool restart,
         CancellationToken cancellationToken = default)
     {
+        EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
         ArgumentNullException.ThrowIfNull(candidate);
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

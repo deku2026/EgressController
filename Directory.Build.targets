@@ -1,0 +1,10 @@
+<Project>
+  <!-- Default builds cannot contain tests that start real cores/apps or inspect live Windows state.
+       Opting into live tests requires a separate explicit build; CI stays mock-only. -->
+  <PropertyGroup>
+    <EgressMockOnly Condition="'$(EgressMockOnly)' == ''">true</EgressMockOnly>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsTestProject)' == 'true' and '$(EgressMockOnly)' == 'true'">
+    <Compile Remove="**/*LiveTests.cs;**/DirectSingBoxProcessClientTests.cs;**/ProcessIdentityTests.cs;**/ProcessLauncherTests.cs;**/WindowsNetworkAdapterServiceTests.cs;**/WindowsLaunchTargetScannerTests.cs" />
+  </ItemGroup>
+</Project>

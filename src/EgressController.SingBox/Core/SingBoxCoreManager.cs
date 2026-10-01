@@ -60,7 +60,7 @@ public sealed class SingBoxCoreManager
             {
                 release = await _releaseClient.GetLatestStableAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 SingBoxCoreCandidate? cached = await TryUseCachedCurrentAsync(cancellationToken).ConfigureAwait(false);
                 if (cached is not null)

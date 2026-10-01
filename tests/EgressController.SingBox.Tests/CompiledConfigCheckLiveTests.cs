@@ -47,7 +47,7 @@ public sealed class CompiledConfigCheckLiveTests
                     EsimDomains = new[] { "openai.com" },
                 },
                 Environment = MakeEnvironment(),
-                ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.Esim)],
+                ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.DefaultAdapter)],
                 UpstreamOwnerPaths = new[] { @"C:\Apps\Mihomo\mihomo.exe" },
                 RuleSets = new[] { new SingBoxRuleSetInput("google", artifact.Path!) },
                 ControllerPort = 19091,
@@ -87,7 +87,7 @@ public sealed class CompiledConfigCheckLiveTests
     private static NetworkEnvironmentSnapshot MakeEnvironment()
         => new()
         {
-            Primary = new AdapterSelection
+            DefaultAdapter = new AdapterSelection
             {
                 AdapterId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
                 Alias = "Ethernet",
@@ -99,7 +99,7 @@ public sealed class CompiledConfigCheckLiveTests
                 Ipv4BindAddress = IPAddress.Parse("192.0.2.10"),
                 Ipv6BindAddress = IPAddress.Parse("2001:db8::10"),
             },
-            Esim = new AdapterSelection
+            DnsAdapter = new AdapterSelection
             {
                 AdapterId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
                 Alias = "Cellular",

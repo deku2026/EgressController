@@ -6,7 +6,7 @@ namespace EgressController.Core.Profile;
 
 public static class EgressProfileSchema
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const string ManagedCore = "managed";
 }
 
@@ -18,7 +18,9 @@ public sealed record EgressCoreSelection
 public sealed record EgressApplicationSelection
 {
     public required string DiscoveryKey { get; init; }
-    public EgressRouteTarget Target { get; init; } = EgressRouteTarget.Esim;
+    public string? DisplayName { get; init; }
+    public IReadOnlyList<string> ExecutablePaths { get; init; } = [];
+    public EgressRouteTarget Target { get; init; } = EgressRouteTarget.DefaultAdapter;
 }
 
 /// <summary>
@@ -32,14 +34,19 @@ public sealed record EgressProfileDocument
     public EgressCoreSelection Core { get; init; } = new();
     public int UpstreamPort { get; init; } = 7890;
     public IReadOnlyList<int> UpstreamPorts { get; init; } = [7890];
+    public IReadOnlyList<EgressAdapterDefinition> Adapters { get; init; } = [];
+    public string? DefaultAdapterId { get; init; }
+    // null follows DefaultAdapterId, independently from the default SOCKS5 port.
+    public string? DnsAdapterId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PrimaryAdapterId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EsimAdapterId { get; init; }
     public IReadOnlyList<EgressApplicationSelection> Applications { get; init; } = [];
     public IReadOnlyList<EgressNamedRoute> RuleSets { get; init; } = [];
     public IReadOnlyList<EgressNamedRoute> Domains { get; init; } = [];
 
-    // Read version 1 profiles without losing their existing eSIM selections. Normalized
-    // documents clear these fields, so subsequent saves contain only the version 2 model.
+    // Legacy fields are consumed during migration and omitted from schema 3 saves.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<EgressApplicationSelection>? EsimApplications { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -51,7 +58,7 @@ public sealed record EgressProfileDocument
 
     public EgressProfileDocument NormalizeAndValidate()
     {
-        if (SchemaVersion is not (1 or EgressProfileSchema.CurrentVersion))
+        if (SchemaVersion is not (1 or 2 or EgressProfileSchema.CurrentVersion))
         {
             throw new ProfileSchemaException(
                 $"不支持的 Profile schemaVersion={SchemaVersion}；需要升级 EgressController 后再打开。",
@@ -63,37 +70,62 @@ public sealed record EgressProfileDocument
 
         int[] ports = (SchemaVersion == 1 ? [UpstreamPort] : UpstreamPorts ?? [])
             .Distinct().Order().ToArray();
-        if (ports.Length == 0 || ports.Any(port => port is < 1 or > ushort.MaxValue))
-            throw new ArgumentException("请至少添加一个 1-65535 的 SOCKS5 端口。", nameof(UpstreamPorts));
-        if (!ports.Contains(UpstreamPort))
+        if (ports.Any(port => port is < 1 or > ushort.MaxValue))
+            throw new ArgumentException("SOCKS5 端口必须在 1-65535。", nameof(UpstreamPorts));
+        if (ports.Length > 0 && !ports.Contains(UpstreamPort))
             throw new ArgumentException("默认端口必须在首页端口列表中。", nameof(UpstreamPort));
 
         EgressCoreSelection core = NormalizeCore(Core);
         string? primary = NormalizeAdapterId(PrimaryAdapterId, nameof(PrimaryAdapterId));
         string? esim = NormalizeAdapterId(EsimAdapterId, nameof(EsimAdapterId));
-        if (primary is not null && esim is not null
-            && string.Equals(primary, esim, StringComparison.OrdinalIgnoreCase))
+        var adapters = (Adapters ?? []).Select(adapter => new EgressAdapterDefinition
         {
-            throw new ArgumentException("主网卡和 eSIM 网卡不能是同一个接口。", nameof(EsimAdapterId));
+            Id = NormalizeAdapterId(adapter.Id, nameof(Adapters)) ?? throw new ArgumentException("网卡 ID 不能为空。"),
+            Name = string.IsNullOrWhiteSpace(adapter.Name) ? "网卡" : adapter.Name.Trim(),
+        }).ToList();
+        if (adapters.GroupBy(adapter => adapter.Id).Any(group => group.Count() > 1))
+            throw new ArgumentException("不能重复添加同一张网卡。");
+        foreach (string legacyId in new[] { esim, primary }.OfType<string>().Distinct())
+            if (adapters.All(adapter => adapter.Id != legacyId))
+                adapters.Add(new() { Id = legacyId, Name = $"网卡{adapters.Count + 1}" });
+        string? defaultAdapter = NormalizeAdapterId(DefaultAdapterId, nameof(DefaultAdapterId)) ?? esim ?? primary;
+        string? dnsAdapter = NormalizeAdapterId(DnsAdapterId, nameof(DnsAdapterId));
+        foreach (string id in new[] { defaultAdapter, dnsAdapter }.OfType<string>())
+            if (adapters.All(adapter => adapter.Id != id))
+                throw new ArgumentException("默认网卡或 DNS 网卡不在网卡列表中。");
+        EgressRouteTarget Migrate(EgressRouteTarget target)
+        {
+            if (target.Kind == "esim" && (target.Port is not null || target.AdapterId is not null))
+                throw new ArgumentException("旧版 eSIM 出口包含无效字段。");
+            return target.Kind == "esim" || (SchemaVersion < 3 && target == EgressRouteTarget.DefaultAdapter)
+                ? (esim is null ? EgressRouteTarget.DefaultAdapter : EgressRouteTarget.ForAdapter(esim)) : target;
         }
 
-        var applications = (Applications ?? []).Concat(EsimApplications ?? [])
-            .Select(value => NormalizeApplication(value, ports))
+        var applications = (Applications ?? []).Concat((EsimApplications ?? []).Select(value => value with { Target = esim is null ? EgressRouteTarget.DefaultAdapter : EgressRouteTarget.ForAdapter(esim) }))
+            .Select(value => NormalizeApplication(value with { Target = Migrate(value.Target) }, ports))
             .GroupBy(x => x.DiscoveryKey, StringComparer.Ordinal)
             .Select(group => UniqueRoute(group, value => value.Target))
             .OrderBy(x => x.DiscoveryKey, StringComparer.Ordinal)
             .ToArray();
 
-        EgressNamedRoute[] ruleSets = NormalizeRoutes(RuleSets, EsimRuleSets, NormalizeRuleSetName, ports);
-        EgressNamedRoute[] domains = NormalizeRoutes(Domains, EsimDomains, NormalizeDomain, ports);
+        EgressNamedRoute[] ruleSets = NormalizeRoutes(RuleSets?.Select(route => route with { Target = Migrate(route.Target) }).ToArray(), EsimRuleSets, NormalizeRuleSetName, ports, esim);
+        EgressNamedRoute[] domains = NormalizeRoutes(Domains?.Select(route => route with { Target = Migrate(route.Target) }).ToArray(), EsimDomains, NormalizeDomain, ports, esim);
+
+        foreach (EgressRouteTarget target in applications.Select(item => item.Target)
+            .Concat(ruleSets.Select(item => item.Target)).Concat(domains.Select(item => item.Target)))
+            if (target.Kind == "adapter" && adapters.All(adapter => adapter.Id != target.AdapterId))
+                throw new ArgumentException("分流指定的网卡不在网卡列表中。");
 
         return this with
         {
+            Adapters = adapters.ToArray(),
+            DefaultAdapterId = defaultAdapter,
+            DnsAdapterId = dnsAdapter,
             SchemaVersion = EgressProfileSchema.CurrentVersion,
             Core = core,
             UpstreamPorts = ports,
-            PrimaryAdapterId = primary,
-            EsimAdapterId = esim,
+            PrimaryAdapterId = null,
+            EsimAdapterId = null,
             Applications = applications,
             RuleSets = ruleSets,
             Domains = domains,
@@ -103,20 +135,49 @@ public sealed record EgressProfileDocument
         };
     }
 
+    [JsonIgnore]
+    public string? EffectiveDnsAdapterId => DnsAdapterId ?? DefaultAdapterId;
+
+    public EgressProfileDocument AddAdapter(string id, string name)
+        => (this with { Adapters = Adapters.Append(new EgressAdapterDefinition { Id = id, Name = name }).ToArray(),
+            DefaultAdapterId = DefaultAdapterId ?? id }).NormalizeAndValidate();
+
+    public EgressProfileDocument SetDefaultAdapter(string id)
+        => (this with { DefaultAdapterId = id }).NormalizeAndValidate();
+
+    public string? AdapterRemovalError(string id)
+    {
+        if (id == DefaultAdapterId) return "这是默认网卡，请先设置其他默认网卡。";
+        if (id == DnsAdapterId) return "DNS 正在使用这张网卡。";
+        if (Applications.Select(item => item.Target).Concat(RuleSets.Select(item => item.Target))
+            .Concat(Domains.Select(item => item.Target)).Any(target => target.AdapterId == id))
+            return "这张网卡仍被分流规则使用。";
+        return null;
+    }
+
+    public EgressProfileDocument RemoveAdapter(string id)
+    {
+        if (AdapterRemovalError(id) is string error) throw new ArgumentException(error);
+        return (this with { Adapters = Adapters.Where(adapter => adapter.Id != id).ToArray() }).NormalizeAndValidate();
+    }
+
     public EgressProfileDocument AddPort(int port)
-        => (this with { UpstreamPorts = UpstreamPorts.Append(port).ToArray() }).NormalizeAndValidate();
+        => (this with { UpstreamPorts = UpstreamPorts.Append(port).ToArray(), UpstreamPort = UpstreamPorts.Count == 0 ? port : UpstreamPort }).NormalizeAndValidate();
 
     public EgressProfileDocument SetDefaultPort(int port)
-        => (this with { UpstreamPort = port }).NormalizeAndValidate();
+    {
+        if (!UpstreamPorts.Contains(port)) throw new ArgumentException("默认端口必须在端口列表中。");
+        return (this with { UpstreamPort = port }).NormalizeAndValidate();
+    }
 
     public string? PortRemovalError(int port)
     {
-        if (port == UpstreamPort)
+        if (port == UpstreamPort && UpstreamPorts.Count > 1)
             return "这是默认端口，请先将其他端口设为默认。";
         if (Applications.Select(route => route.Target)
             .Concat(RuleSets.Select(route => route.Target))
             .Concat(Domains.Select(route => route.Target))
-            .Any(target => target.Port == port))
+            .Any(target => target.Port == port || (target.Kind == "default" && port == UpstreamPort)))
             return "这个端口仍被分流规则使用，请先修改相应规则的出口。";
         return null;
     }
@@ -133,9 +194,9 @@ public sealed record EgressProfileDocument
         IReadOnlyList<EgressNamedRoute>? routes,
         IReadOnlyList<string>? legacy,
         Func<string, string> normalizeName,
-        IReadOnlyList<int> ports)
+        IReadOnlyList<int> ports, string? legacyAdapterId)
         => (routes ?? []).Concat((legacy ?? []).Where(value => !string.IsNullOrWhiteSpace(value))
-                .Select(value => new EgressNamedRoute { Name = value }))
+                .Select(value => new EgressNamedRoute { Name = value, Target = legacyAdapterId is null ? EgressRouteTarget.DefaultAdapter : EgressRouteTarget.ForAdapter(legacyAdapterId) }))
             .Select(route => new EgressNamedRoute
             {
                 Name = normalizeName(route?.Name ?? throw new ArgumentException("分流规则不能为空。")),
@@ -212,6 +273,10 @@ public sealed record EgressProfileDocument
         return new EgressApplicationSelection
         {
             DiscoveryKey = value.DiscoveryKey.Trim(),
+            DisplayName = value.DisplayName,
+            ExecutablePaths = (value.ExecutablePaths ?? []).Where(path => Path.IsPathFullyQualified(path)
+                && Path.GetExtension(path).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+                .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             Target = (value.Target ?? throw new ArgumentException("应用分流出口不能为空。"))
                 .NormalizeAndValidate(ports),
         };
@@ -221,7 +286,7 @@ public sealed record EgressProfileDocument
     {
         if (string.IsNullOrWhiteSpace(value))
             return null;
-        if (!Guid.TryParse(value.Trim(), out Guid guid))
+        if (!Guid.TryParse(value.Trim(), out Guid guid) || guid == Guid.Empty)
             throw new ArgumentException("网卡 ID 必须是稳定 GUID。", parameterName);
         return guid.ToString("D", CultureInfo.InvariantCulture);
     }

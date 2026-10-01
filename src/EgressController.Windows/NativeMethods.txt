@@ -18,3 +18,10 @@ QueryFullProcessImageName
 GetProcessTimes
 GetFinalPathNameByHandle
 CloseHandle
+
+CreateToolhelp32Snapshot
+Process32FirstW
+Process32NextW
+TerminateProcess
+
+WaitForSingleObject

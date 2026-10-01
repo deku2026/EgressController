@@ -92,8 +92,10 @@ public sealed class SingBoxCoreManagerTests : IDisposable
         Assert.Equal("core.mode", exception.Code);
     }
 
-    [Fact]
-    public async Task Verified_cached_core_survives_release_rate_limit()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Verified_cached_core_survives_release_failure_or_timeout(bool timeout)
     {
         string executable = Path.Combine(_directory, "core", "1.13.19", "sing-box.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
@@ -107,7 +109,7 @@ public sealed class SingBoxCoreManagerTests : IDisposable
             VerifiedAtUtc = DateTimeOffset.UtcNow,
         });
 
-        var manager = new SingBoxCoreManager(_directory, new RateLimitedReleaseClient(), new FakeCli());
+        var manager = new SingBoxCoreManager(_directory, new RateLimitedReleaseClient(timeout), new FakeCli());
         SingBoxCoreCandidate candidate = await manager.PrepareManagedAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(executable, candidate.ExecutablePath);
@@ -182,10 +184,10 @@ public sealed class SingBoxCoreManagerTests : IDisposable
             });
     }
 
-    private sealed class RateLimitedReleaseClient : ISingBoxReleaseClient
+    private sealed class RateLimitedReleaseClient(bool timeout) : ISingBoxReleaseClient
     {
         public Task<SingBoxRelease> GetLatestStableAsync(CancellationToken cancellationToken = default)
-            => Task.FromException<SingBoxRelease>(new HttpRequestException("403 (rate limit exceeded)"));
+            => Task.FromException<SingBoxRelease>(timeout ? new TaskCanceledException("HTTP timeout") : new HttpRequestException("403 (rate limit exceeded)"));
 
         public Task DownloadAsync(SingBoxReleaseAsset asset, Stream destination, CancellationToken cancellationToken = default)
             => Task.FromException(new HttpRequestException("download must not be attempted"));

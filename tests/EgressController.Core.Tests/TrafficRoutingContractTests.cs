@@ -28,7 +28,7 @@ public sealed class TrafficRoutingContractTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input()).JsonBytes);
 
         Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
-        Assert.Equal("clash-7890", json.RootElement.GetProperty("outbounds")[2].GetProperty("tag").GetString());
+        Assert.Equal("clash-7890", json.RootElement.GetProperty("outbounds").EnumerateArray().Single(item => item.GetProperty("type").GetString() == "socks").GetProperty("tag").GetString());
     }
 
     [Fact]
@@ -36,15 +36,15 @@ public sealed class TrafficRoutingContractTests
     {
         EgressProfileCompileInput input = Input() with
         {
-            ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.Esim)],
-            Profile = new EgressProfileDocument { EsimDomains = new[] { "openai.com" } },
+            ApplicationRoutes = [new([@"C:\Apps\Chrome\chrome.exe"], EgressRouteTarget.DefaultAdapter)],
+            Profile = new EgressProfileDocument { EsimAdapterId = "22222222-2222-2222-2222-222222222222", EsimDomains = new[] { "openai.com" } },
         };
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement rules = json.RootElement.GetProperty("route").GetProperty("rules");
 
         Assert.Equal(6, rules.GetArrayLength());
-        Assert.Equal("esim-direct", rules[4].GetProperty("outbound").GetString());
-        Assert.Equal("esim-direct", rules[5].GetProperty("outbound").GetString());
+        Assert.Equal("adapter-22222222222222222222222222222222", rules[4].GetProperty("outbound").GetString());
+        Assert.Equal("adapter-22222222222222222222222222222222", rules[5].GetProperty("outbound").GetString());
     }
 
     private static EgressProfileCompileInput Input()
@@ -53,8 +53,8 @@ public sealed class TrafficRoutingContractTests
             Profile = new EgressProfileDocument(),
             Environment = new NetworkEnvironmentSnapshot
             {
-                Primary = Adapter(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Ethernet", "192.0.2.10"),
-                Esim = Adapter(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cellular", "198.51.100.10"),
+                DefaultAdapter = Adapter(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Ethernet", "192.0.2.10"),
+                DnsAdapter = Adapter(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cellular", "198.51.100.10"),
             },
             ApplicationRoutes = [],
             UpstreamOwnerPaths = new[] { @"C:\Apps\Mihomo\mihomo.exe" },
