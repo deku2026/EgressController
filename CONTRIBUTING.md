@@ -1,12 +1,15 @@
 # Contributing
 
 EgressController is a Windows-only .NET application. Keep selected applications guarded until
-TUN takeover and the selected routing configuration are confirmed. DNS health and physical exit
-reachability must not gate process protection. Check DoH once a minute (or manually); keep the
-current resolver when both fail. Only an actual resolver selection change prepares and validates
-a replacement configuration, guards selected processes before stopping the old TUN, and restarts.
-Keep explicit adapter/port bindings and proxy loop prevention. Recovery downloads must remain
-possible while application protection is active. Do not change system network state during tests.
+TUN takeover, the selected configuration, both live adapter bindings, Cloudflare DoH and the
+proxy adapter's Internet probe are healthy. Check Cloudflare once a minute (or manually), and
+probe the bound proxy-direct outbound every ten seconds after each completed round. Keep the
+last completed result during rechecks: failures close selected processes, success permits them
+only when all other conditions pass. Canceled or stale results cannot change health. Adapter
+outages must be detected from live snapshots, never the cached configuration bindings.
+DNS uses only Cloudflare; probes never reload TUN or change resolvers. Keep explicit adapter/port
+bindings and proxy loop prevention. Recovery downloads must remain possible while application
+protection is active. Do not change system network state during tests.
 
 ## Development setup
 

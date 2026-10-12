@@ -7,8 +7,8 @@ public static class DohHealthProbe
 {
     public static readonly TimeSpan EndpointTimeout = TimeSpan.FromSeconds(8);
 
-    // Both queries run through sing-box's dns-direct on ESIM-家宽. Await the complete
-    // round before publishing failure: one failed endpoint cannot veto a healthy one.
+    // Query Cloudflare through sing-box's dns-direct on ESIM-家宽.
+    // A fresh nonce bypasses cached results on every check.
     public static Task<DohProbeResult[]> RunAsync(
         Func<string, CancellationToken, Task<SingBoxDnsResponse>> query,
         CancellationToken cancellationToken, TimeSpan? endpointTimeout = null)
@@ -24,6 +24,7 @@ public static class DohHealthProbe
             {
                 SingBoxDnsResponse response = await query(endpoint.CreateProbeHost(nonce), timeout.Token)
                     .WaitAsync(budget, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 bool healthy = response.Status is 0 or 3;
                 return new DohProbeResult(endpoint.Tag, healthy,
                     response.Status switch { 0 => "NOERROR", 3 => "NXDOMAIN（上游已返回）", _ => $"DNS 返回状态 {response.Status}" },

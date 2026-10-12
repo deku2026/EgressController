@@ -79,6 +79,7 @@ public sealed class NetworkViewModel : ObservableObject
     private readonly AppController _controller;
     private string _monitorStatus = "未启动";
     private string _protectionStatus = "TUN 未运行";
+    private string _proxyInternetStatus = "等待非家宽联网检测";
     private string _lastChecked = "尚未检测";
     private string _status = string.Empty;
 
@@ -95,6 +96,7 @@ public sealed class NetworkViewModel : ObservableObject
     public ObservableCollection<DohEndpointViewModel> DohStatuses { get; } = new();
     public string MonitorStatus { get => _monitorStatus; private set => SetProperty(ref _monitorStatus, value); }
     public string ProtectionStatus { get => _protectionStatus; private set => SetProperty(ref _protectionStatus, value); }
+    public string ProxyInternetStatus { get => _proxyInternetStatus; private set => SetProperty(ref _proxyInternetStatus, value); }
     public string LastChecked { get => _lastChecked; private set => SetProperty(ref _lastChecked, value); }
     public string Status
     {
@@ -114,6 +116,7 @@ public sealed class NetworkViewModel : ObservableObject
     {
         MonitorStatus = _controller.DohMonitorStatus;
         ProtectionStatus = _controller.ProtectionStatus;
+        ProxyInternetStatus = _controller.ProxyInternetStatus;
         LastChecked = _controller.DohLastCheckedAtUtc is { } checkedAt
             ? checkedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
             : "尚未检测";

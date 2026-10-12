@@ -10,7 +10,7 @@ follow that role. Interface enumeration never chooses a substitute. The default 
 offline, unaddressed and common internal virtual interfaces, with an expanded view available.
 Saved unavailable choices remain visible. No name or enumeration order is persisted as identity.
 
-`dnsAdapterId` null follows the direct role; an explicit value must be one of the selected pair.
+`dnsAdapterId` is a migration-only field; DNS and Cloudflare health checks always use the direct role.
 SOCKS5 `upstreamPorts` and `upstreamPort` remain separate. Routes use `adapter-default`,
 `adapter` plus `adapterId`, `default` (port), or `port` plus `port`.
 
@@ -43,19 +43,28 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
    do not require a SOCKS listener. Their explicit self route precedes TUN DNS interception.
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
 4. Confirm the authenticated local API and owned core are running; verify the named TUN has
-   its expected IPv4/IPv6 addresses and both default routes. Only then allow selected apps.
-   The one-second guard keeps checking the owned process, local interface and routes. These
-   checks do not send Internet traffic or require a physical exit to be online.
-5. Independently probe both DoHs in parallel, at most eight seconds each, once per minute or
-   manually. Cloudflare is preferred; DNSPod is the fallback. In-progress, canceled, failed or
-   timed-out checks cannot revoke TUN readiness. If both fail, keep the current resolver.
-6. Only a changed resolver prepares a new immutable checked config. Keep the old core while
-   preparing. Before stopping it, enter protection and terminate selected processes. A failed
-   termination cancels the transition. Start with the new DNS final and confirm takeover again.
-   Configuration generations reject stale results; rollback also requires takeover confirmation.
-7. Keep a previously bound physical interface/address through an outage. No fallback and no
-   restart just for link loss; actual address/alias changes on recovery require a config update.
-   Newly selected or initially absent adapters emit rejects until bindings are available.
+   its expected IPv4/IPv6 addresses and both default routes. Also require both live physical
+   adapters, a completed healthy Cloudflare query and a healthy proxy Internet probe before
+   allowing selected apps. The guard checks takeover and live adapters every second.
+5. Query only Cloudflare through dns-direct on the direct role, at most eight seconds per check,
+   once per minute after completion or manually. A unique nonce avoids cached answers; NOERROR
+   and NXDOMAIN count as responses. Timeout, transport errors, missing status and other DNS
+   status codes are failures. There is no DNSPod resolver, probe or fallback selection.
+6. Independently probe proxy-direct via the authenticated sing-box delay API and HTTPS
+   https://www.cloudflare.com/cdn-cgi/trace, at most eight seconds, with ten seconds between
+   completed rounds. This checks Internet reachability even when the proxy NIC still has an IP.
+   Never probe recovery-direct, a SOCKS outbound or an unbound HTTP client as a substitute.
+7. During rechecks retain the last completed verdict. A previously healthy check keeps apps
+   running; a failed check keeps terminating selected instances every second until recovery.
+   Startup or configuration changes require fresh successful results. Observed adapter changes
+   invalidate pending results and clear affected health, including reconnects with the same IP.
+   Cancellation never becomes a network failure or a success. Generation checks reject results
+   from older configurations or adapter observations. The monitors promptly recheck after a change.
+8. A completed network failure activates process protection on the next guard tick without
+   restarting TUN or changing DNS. Keep the original interface/address binding through outages
+   so it cannot silently select another exit. The guard uses uncached live adapter snapshots.
+   Actual address/alias changes on recovery require a checked configuration update; terminate
+   selected processes before stopping the old core. Recovery routes remain available throughout.
 
 The guard expands exact executable membership, identifies instances by PID and creation time,
 and tracks descendants while healthy as well as protected. Windows verifies the creation time
@@ -76,8 +85,10 @@ ends protection and stops the owned core. There is no persistent firewall or bac
   detached descendants, PID reuse, dependency exclusions, access failures and deduplication.
 - Readiness/supervisor tests: failed TUN, missing takeover routes, unapplied configuration,
   recovery, one pending startup, retry, and no startup while already running or busy.
-- Resolver/lifecycle tests: unchanged and failed probes never reload, stale/canceled results,
-  changed DNS final, preparation preserving TUN, protection before restart, and checked rollback.
+- Network health tests: successful/failed rechecks, no-IP/link loss for both roles, cached versus live
+  adapter state, Internet failures with an online NIC, timeouts, malformed responses, cancellation,
+  stale generations and reconnects. Fake process control verifies termination and recovery.
+- Lifecycle tests: preparation preserving TUN, protection before restart, and checked rollback.
 - History tests: pruning while healthy, count limits, clear preserving descendants and retries.
 - Profile/resolver/compiler tests: independent defaults, legacy migration, exactly two independent bindings,
   no fallback when absent, direct-only configuration and recovery route precedence.

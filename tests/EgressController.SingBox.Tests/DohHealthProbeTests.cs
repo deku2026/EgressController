@@ -6,44 +6,63 @@ namespace EgressController.SingBox.Tests;
 public sealed class DohHealthProbeTests
 {
     [Theory]
-    [InlineData(0, 0, EgressDohConfiguration.CloudflareTag)]
-    [InlineData(3, 2, EgressDohConfiguration.CloudflareTag)]
-    [InlineData(2, 0, EgressDohConfiguration.DnsPodTag)]
-    [InlineData(2, 2, EgressDohConfiguration.CloudflareTag)]
-    public async Task Both_queries_start_together_and_only_a_complete_round_is_published(int cf, int pod, string tag)
+    [InlineData(0, true)]
+    [InlineData(3, true)]
+    [InlineData(2, false)]
+    [InlineData(5, false)]
+    [InlineData(-1, false)]
+    public async Task Only_cloudflare_is_queried_and_a_completed_response_decides_health(int status, bool healthy)
     {
-        var cloudflare = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var dnspod = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         var requested = new List<string>();
         var pending = DohHealthProbe.RunAsync((host, _) =>
         {
             requested.Add(host);
-            return host.Contains("cloudflare") ? cloudflare.Task : dnspod.Task;
+            return completion.Task;
         }, TestContext.Current.CancellationToken);
-        Assert.Equal(2, requested.Count);
-        cloudflare.SetResult(new() { Status = cf });
-        Assert.False(pending.IsCompleted); // No failure result while the other DoH is pending.
-        dnspod.SetResult(new() { Status = pod });
-        var probes = await pending;
-        var decision = EgressDohConfiguration.Decide(probes, true, DohRoutingDecision.Default);
-        Assert.Equal(tag, decision.DnsTag);
+        Assert.EndsWith(".doh-global-cloudflare.egresscontroller.invalid", Assert.Single(requested));
+        Assert.False(pending.IsCompleted);
+        completion.SetResult(new() { Status = status });
+        var probe = Assert.Single(await pending);
+        Assert.Equal(EgressDohConfiguration.CloudflareTag, probe.Tag);
+        Assert.Equal(healthy, probe.IsHealthy);
     }
 
     [Fact]
-    public async Task An_unresponsive_endpoint_times_out_even_if_it_ignores_cancellation()
+    public async Task Each_check_uses_a_new_uncached_hostname()
+    {
+        var requested = new List<string>();
+        Task<SingBoxDnsResponse> Query(string host, CancellationToken _)
+        {
+            requested.Add(host);
+            return Task.FromResult(new SingBoxDnsResponse { Status = 3 });
+        }
+        await DohHealthProbe.RunAsync(Query, TestContext.Current.CancellationToken);
+        await DohHealthProbe.RunAsync(Query, TestContext.Current.CancellationToken);
+        Assert.Equal(2, requested.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Unresponsive_cloudflare_times_out_even_if_it_ignores_cancellation()
     {
         var never = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var probes = await DohHealthProbe.RunAsync((host, _) => host.Contains("cloudflare")
-            ? never.Task : Task.FromResult(new SingBoxDnsResponse { Status = 0 }),
-            TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(25));
-        Assert.False(probes[0].IsHealthy);
-        Assert.Contains("超时", probes[0].Detail);
-        Assert.True(probes[1].IsHealthy);
-        Assert.Equal(EgressDohConfiguration.DnsPodTag, EgressDohConfiguration.Decide(probes, true, DohRoutingDecision.Default).DnsTag);
+        var probe = Assert.Single(await DohHealthProbe.RunAsync((_, _) => never.Task,
+            TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(25)));
+        Assert.False(probe.IsHealthy);
+        Assert.Contains("超时", probe.Detail);
     }
 
     [Fact]
-    public async Task Cancellation_is_not_converted_into_two_network_failures()
+    public async Task Transport_errors_are_failed_results()
+    {
+        var probe = Assert.Single(await DohHealthProbe.RunAsync((_, _) => throw new HttpRequestException("offline"),
+            TestContext.Current.CancellationToken));
+        Assert.False(probe.IsHealthy);
+        Assert.Equal("offline", probe.Detail);
+    }
+
+    [Fact]
+    public async Task Cancellation_is_not_converted_into_a_network_failure()
     {
         using var canceled = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var never = new TaskCompletionSource<SingBoxDnsResponse>(TaskCreationOptions.RunContinuationsAsynchronously);

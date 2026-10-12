@@ -24,7 +24,6 @@ public sealed record EgressProfileCompileInput
     public string ControllerSecret { get; init; } = string.Empty;
     public string? LogPath { get; init; }
     public string TunInterfaceName { get; init; } = "sing-box";
-    public DohRoutingDecision DohRouting { get; init; } = DohRoutingDecision.Default;
 }
 
 public sealed record EgressProfileCompilationResult(
@@ -84,8 +83,6 @@ public sealed class EgressProfileCompiler
         if (profile.UpstreamPorts.Contains(input.ControllerPort))
             throw Failure("controller.port.conflict", "Clash API 端口不能与上游 SOCKS5 端口相同。");
         string tunName = NormalizeTunName(input.TunInterfaceName);
-        DohRoutingDecision dohRouting = input.DohRouting ?? throw Failure("doh.routing", "DoH 路由选择为空。");
-        ValidateDohRouting(dohRouting, input.Environment.DefaultAdapter.IsReady);
 
         var rules = new List<SingBoxRouteRuleDocument>
         {
@@ -225,7 +222,7 @@ public sealed class EgressProfileCompiler
             {
                 Servers = dnsServers,
                 Rules = dnsRules.Count == 0 ? null : dnsRules,
-                Final = input.Environment.DefaultAdapter.IsReady ? dohRouting.DnsTag : DohBootstrapTag,
+                Final = input.Environment.DefaultAdapter.IsReady ? DnsTag : DohBootstrapTag,
                 Strategy = "ipv4_only",
                 ReverseMapping = true,
             },
@@ -320,12 +317,6 @@ public sealed class EgressProfileCompiler
 
     private static IEnumerable<SingBoxDohEndpointDefinition> AvailableDohEndpoints(bool dnsReady)
         => EgressDohConfiguration.Endpoints.Where(endpoint => EgressDohConfiguration.IsAvailable(endpoint, dnsReady));
-
-    private static void ValidateDohRouting(DohRoutingDecision routing, bool dnsReady)
-    {
-        if (dnsReady && EgressDohConfiguration.Find(routing.DnsTag) is null)
-            throw Failure("doh.routing", "全局 DoH 路由选择无效。");
-    }
 
     private static string[] NormalizeProcessNames(IEnumerable<string> paths)
     {

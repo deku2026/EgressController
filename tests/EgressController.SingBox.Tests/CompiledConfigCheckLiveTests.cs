@@ -65,17 +65,6 @@ public sealed class CompiledConfigCheckLiveTests
 
             Assert.True(check.Succeeded, check.StandardError + check.StandardOutput);
 
-            EgressProfileCompilationResult fallback = compiler.Compile(input with
-            {
-                DohRouting = new DohRoutingDecision { DnsTag = EgressDohConfiguration.DnsPodTag },
-            });
-            string fallbackPath = Path.Combine(root, "config.fallback.json");
-            EgressProfileCompiler.WriteNext(fallbackPath, fallback);
-            SingBoxCommandResult fallbackCheck = await new SingBoxCli().CheckAsync(
-                executable,
-                fallbackPath,
-                TestContext.Current.CancellationToken);
-            Assert.True(fallbackCheck.Succeeded, fallbackCheck.StandardError + fallbackCheck.StandardOutput);
         }
         finally
         {
