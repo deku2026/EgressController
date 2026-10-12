@@ -114,19 +114,19 @@ public sealed class ProcessProtectionTests
     [InlineData(true, false, null, null, "配置")]
     [InlineData(true, true, "配置冲突", null, "配置冲突")]
     [InlineData(true, true, null, "TUN IPv4 接管路由缺失", "IPv4")]
-    public void Only_tun_or_unapplied_configuration_blocks_apps(bool tun, bool applied, string? config, string? takeover, string expected)
+    public void Tun_and_configuration_failures_block_apps_even_with_healthy_network(bool tun, bool applied, string? config, string? takeover, string expected)
     {
-        var state = ProtectionReadiness.Evaluate(tun, null, applied, config, takeover);
+        var state = ProtectionReadiness.Evaluate(tun, null, applied, config, takeover, new(true, "healthy network"));
         Assert.False(state.Ready);
         Assert.Contains(expected, state.Reason);
     }
 
     [Fact]
-    public void Confirmed_tun_allows_apps_without_any_dns_or_internet_input()
+    public void Confirmed_tun_and_healthy_network_allow_apps()
     {
         var fake = new FakeProcesses([P(1, @"C:\a.exe")]);
         var guard = new ProcessProtection(fake);
-        var ready = ProtectionReadiness.Evaluate(true, null, true, null, null);
+        var ready = ProtectionReadiness.Evaluate(true, null, true, null, null, new(true, "healthy network"));
         Assert.True(ready.Ready);
         guard.Sweep([new(@"C:\a.exe", "A")], NoExclusions, ready.Ready, ready.Reason);
         Assert.Empty(fake.Killed);

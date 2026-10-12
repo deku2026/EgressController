@@ -77,13 +77,15 @@ public sealed partial class AppController
 
     private void InvalidateReadiness(string reason)
     {
-        _dohSelection.Invalidate();
+        _networkHealth.Reset();
         _profileApplied = false;
         _protectionStatus = "保护中：" + reason;
     }
 
     private void BeforeTunChange()
     {
+        // Results from the old core must not release protection after a restart or rollback.
+        _networkHealth.Reset();
         _profileApplied = false;
         int failures = SweepProtection(new(false, "TUN 即将启动或重启，先终止所选应用"));
         if (failures > 0)
@@ -115,6 +117,8 @@ public sealed partial class AppController
             {
                 RefreshAdapters();
                 EgressProfileDocument profile = _profile;
+                // Use fresh link/address state, never AdapterBindingCache's retained bindings.
+                _networkHealth.ObserveAdapters(_environmentResolver.Resolve(profile, _adapters));
                 try
                 {
                     ValidateProtectionConflicts(profile, ResolveProxyBindings(profile, token).OwnerPaths);
@@ -131,7 +135,7 @@ public sealed partial class AppController
                 }
                 var readiness = ProtectionReadiness.Evaluate(IsTunRunning,
                     _singBox.Status.ErrorMessage ?? _tunSupervisor.LastError,
-                    _profileApplied, _protectionError, _takeoverError);
+                    _profileApplied, _protectionError, _takeoverError, _networkHealth.Readiness);
                 SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)
                     _tunSupervisor.Tick(IsTunRunning, IsUpdatingProfile, token);
@@ -139,7 +143,7 @@ public sealed partial class AppController
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
-                try { SweepProtection(new(false, "无法确认 TUN 接管状态：" + exception.Message)); }
+                try { SweepProtection(new(false, "无法确认 TUN 或出口网络状态：" + exception.Message)); }
                 catch (Exception failure) { _protectionStatus = "保护未完成：" + failure.Message; }
             }
             try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }

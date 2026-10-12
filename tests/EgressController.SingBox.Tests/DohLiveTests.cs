@@ -96,7 +96,6 @@ public sealed class DohLiveTests
 
     [Theory]
     [InlineData("Cloudflare", "dns-cloudflare-live", "cloudflare-dns.com", "doh-live-cloudflare.egresscontroller.invalid")]
-    [InlineData("DNSPod", "dns-dnspod-live", "doh.pub", "doh-live-dnspod.egresscontroller.invalid")]
     public async Task Domain_doh_endpoint_can_be_resolved_before_proxy_dial(
         string provider,
         string tag,

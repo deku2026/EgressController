@@ -10,7 +10,8 @@
 | eSIM 不可用 | eSIM 命中项由 sing-box `reject`，不回退其他出口 |
 | 未命中流量 | `route.final` 指向首页默认 SOCKS5 端口，初始为 7890 |
 | 多端口 | 每个端口一个 `clash-<port>` 出口，全部监听 owner 优先走主网卡；离线端口不回退 |
-| DNS | sing-box 劫持普通 DNS，统一经 eSIM 使用 Cloudflare/腾讯 DoH；未匹配业务流量走默认端口；全局 DoH 故障时拒绝外部流量 |
+| DNS | sing-box 劫持普通 DNS，统一经 eSIM 使用 Cloudflare DoH；未匹配业务流量走默认端口；DoH 故障时持续关闭所选应用 |
+| 网络保护 | 每秒检查两张网卡，非家宽定期 HTTPS 探测；掉线或联网失败时关闭全部所选应用 |
 | 规则 | MetaCubeX `sing` 分支的 SRS，commit/blob 校验后原子缓存 |
 | 诊断 | sing-box controller API REST/WebSocket：connections、traffic、logs、DNS |
 | 普通启动 | `WindowsLaunchService.StartPlain`，无环境变量或浏览器代理参数注入 |

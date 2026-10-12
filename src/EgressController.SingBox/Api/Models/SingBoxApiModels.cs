@@ -161,8 +161,8 @@ public sealed record SingBoxLogEvent
 
 public sealed record SingBoxDnsResponse
 {
-    [JsonPropertyName("Status")]
-    public int Status { get; init; }
+    [JsonRequired, JsonPropertyName("Status")]
+    public int Status { get; init; } = -1;
 
     [JsonPropertyName("Question")]
     public JsonElement Question { get; init; }
@@ -219,5 +219,5 @@ internal sealed partial class SingBoxApiJsonContext : JsonSerializerContext;
 
 public sealed record SingBoxDelayResponse
 {
-    [JsonPropertyName("delay")] public int Delay { get; init; }
+    [JsonRequired, JsonPropertyName("delay")] public int Delay { get; init; } = -1;
 }
