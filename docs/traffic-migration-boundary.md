@@ -17,7 +17,7 @@ C# 不转发业务流量。
   暂未启动的可选端口仍保留独立出口，运行时监视器在发现监听进程后补充防回流规则。
 - 主网卡和 eSIM 网卡分别绑定到对应 direct 出口；TUN 使用 IPv4/IPv6、auto route、strict route。
 - sing-box 管理 DNS hijack、经 eSIM 的全局 Cloudflare DoH、IPv4-only DNS 策略及 IPv6 reject；
-  DNS 出口不改变业务规则；DoH 失败、任一网卡掉线或非家宽联网失败时，进程守护持续关闭所选应用。
+  DNS 配置固定 Cloudflare，不做 DoH 健康检测；两张网卡各每分钟访问 generate_204，网卡掉线或上次联网结果失败时持续关闭所选应用。
 - 控制面下载使用独立直接 HTTP 客户端和恢复路由，不读取 Windows 全局代理，也不向普通应用注入代理参数。
 - 规则来自 MetaCubeX `sing` 分支的 commit-pinned SRS；完整配置先执行目标 core 的 `check`。
 - App manifest 要求管理员权限，直接启动受管理的 sing-box；不再存在 System core、ElevatedHost

@@ -10,7 +10,7 @@ follow that role. Interface enumeration never chooses a substitute. The default 
 offline, unaddressed and common internal virtual interfaces, with an expanded view available.
 Saved unavailable choices remain visible. No name or enumeration order is persisted as identity.
 
-`dnsAdapterId` is a migration-only field; DNS and Cloudflare health checks always use the direct role.
+`dnsAdapterId` is a migration-only field; DNS always uses the direct role; Internet probes use each role independently.
 SOCKS5 `upstreamPorts` and `upstreamPort` remain separate. Routes use `adapter-default`,
 `adapter` plus `adapterId`, `default` (port), or `port` plus `port`.
 
@@ -44,22 +44,24 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
 4. Confirm the authenticated local API and owned core are running; verify the named TUN has
    its expected IPv4/IPv6 addresses and both default routes. Also require both live physical
-   adapters, a completed healthy Cloudflare query and a healthy proxy Internet probe before
-   allowing selected apps. The guard checks takeover and live adapters every second.
-5. Query only Cloudflare through dns-direct on the direct role, at most eight seconds per check,
-   once per minute after completion or manually. A unique nonce avoids cached answers; NOERROR
-   and NXDOMAIN count as responses. Timeout, transport errors, missing status and other DNS
-   status codes are failures. There is no DNSPod resolver, probe or fallback selection.
-6. Independently probe proxy-direct via the authenticated sing-box delay API and HTTPS
-   https://www.cloudflare.com/cdn-cgi/trace, at most eight seconds, with ten seconds between
-   completed rounds. This checks Internet reachability even when the proxy NIC still has an IP.
-   Never probe recovery-direct, a SOCKS outbound or an unbound HTTP client as a substitute.
-7. During rechecks retain the last completed verdict. A previously healthy check keeps apps
-   running; a failed check keeps terminating selected instances every second until recovery.
-   Startup or configuration changes require fresh successful results. Observed adapter changes
-   invalidate pending results and clear affected health, including reconnects with the same IP.
-   Cancellation never becomes a network failure or a success. Generation checks reject results
-   from older configurations or adapter observations. The monitors promptly recheck after a change.
+   adapters and completed healthy Internet probes for both exits before allowing selected apps.
+   The guard checks takeover and live adapters every second.
+5. DNS is fixed to Cloudflare DoH through the direct role. There are no DoH health queries,
+   generated probe hostnames, DNS health rules, provider selection or DNS status protection gates.
+   The bootstrap resolver is retained for resolving the fixed server and preparing an offline exit.
+6. Probe https://cp.cloudflare.com/generate_204 through the authenticated sing-box delay API,
+   once through dns-direct (residential NIC) and once through proxy-direct (non-residential NIC).
+   Both run in parallel on a shared one-minute cadence measured from the start of each round;
+   startup checks immediately, and a manual check uses the same probes. Each probe is bounded
+   to eight seconds, and each completed result takes effect independently. An online NIC with
+   no Internet access still fails. Never substitute recovery-direct, a SOCKS outbound, another NIC
+   or an unbound HTTP client. This uses sing-box's HTTPS reachability verdict, not DNS responses.
+7. During rechecks retain the last completed verdict for each adapter. A previously healthy check
+   keeps apps running; a failed check keeps terminating selected instances every second until
+   recovery. Startup or configuration changes require fresh successful results. Observed adapter
+   changes invalidate pending results and clear affected health, including same-IP reconnects;
+   a reconnect waits for the next scheduled or manual check. Cancellation never becomes a
+   network failure or success. Generation checks reject older configuration/adapter results.
 8. A completed network failure activates process protection on the next guard tick without
    restarting TUN or changing DNS. Keep the original interface/address binding through outages
    so it cannot silently select another exit. The guard uses uncached live adapter snapshots.
@@ -86,7 +88,7 @@ ends protection and stops the owned core. There is no persistent firewall or bac
 - Readiness/supervisor tests: failed TUN, missing takeover routes, unapplied configuration,
   recovery, one pending startup, retry, and no startup while already running or busy.
 - Network health tests: successful/failed rechecks, no-IP/link loss for both roles, cached versus live
-  adapter state, Internet failures with an online NIC, timeouts, malformed responses, cancellation,
+  adapter state, both bound probes using generate_204, Internet failures with an online NIC, timeouts, malformed responses, cancellation,
   stale generations and reconnects. Fake process control verifies termination and recovery.
 - Lifecycle tests: preparation preserving TUN, protection before restart, and checked rollback.
 - History tests: pruning while healthy, count limits, clear preserving descendants and retries.

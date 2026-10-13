@@ -9,8 +9,8 @@ namespace EgressController.SingBox.Tests;
 public sealed class NetworkRecheckTests
 {
     [Theory]
-    [InlineData(NetworkHealthCheck.CloudflareDoh, true, false)]
-    [InlineData(NetworkHealthCheck.CloudflareDoh, false, true)]
+    [InlineData(NetworkHealthCheck.DirectInternet, true, false)]
+    [InlineData(NetworkHealthCheck.DirectInternet, false, true)]
     [InlineData(NetworkHealthCheck.ProxyInternet, true, false)]
     [InlineData(NetworkHealthCheck.ProxyInternet, false, true)]
     public async Task Pending_recheck_retains_previous_process_decision_then_applies_the_completed_result(
@@ -24,16 +24,8 @@ public sealed class NetworkRecheckTests
         int generation = state.Generation;
         async Task Recheck()
         {
-            NetworkHealthResult result;
-            if (check == NetworkHealthCheck.CloudflareDoh)
-            {
-                var probe = Assert.Single(await DohHealthProbe.RunAsync(async (_, _) =>
-                    new SingBoxDnsResponse { Status = await completion.Task ? 3 : 2 }, TestContext.Current.CancellationToken));
-                result = new(probe.IsHealthy, probe.Detail!);
-            }
-            else
-                result = await ProxyInternetProbe.RunAsync(async (_, _) =>
-                    new SingBoxDelayResponse { Delay = await completion.Task ? 12 : -1 }, TestContext.Current.CancellationToken);
+            NetworkHealthResult result = await InternetHealthProbe.RunAsync(check, async (_, _) =>
+                new SingBoxDelayResponse { Delay = await completion.Task ? 12 : -1 }, TestContext.Current.CancellationToken);
             Assert.True(state.Complete(generation, check, result, TestContext.Current.CancellationToken));
         }
         void Sweep()
@@ -64,7 +56,7 @@ public sealed class NetworkRecheckTests
         var state = new NetworkHealthState();
         state.ObserveAdapters(new() { DefaultAdapter = direct, DnsAdapter = direct,
             ProxyAdapter = direct with { AdapterId = Guid.NewGuid(), Alias = "Proxy", Ipv4BindAddress = IPAddress.Parse("198.51.100.10") } });
-        state.Complete(state.Generation, NetworkHealthCheck.CloudflareDoh, new(true, "healthy"), CancellationToken.None);
+        state.Complete(state.Generation, NetworkHealthCheck.DirectInternet, new(true, "healthy"), CancellationToken.None);
         state.Complete(state.Generation, NetworkHealthCheck.ProxyInternet, new(true, "healthy"), CancellationToken.None);
         return state;
     }

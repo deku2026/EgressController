@@ -120,8 +120,7 @@ public sealed class EgressProfileCompilerTests
         JsonElement dns = root.GetProperty("dns");
         Assert.Equal(EgressDohConfiguration.CloudflareTag, dns.GetProperty("final").GetString());
         Assert.Equal("rule", root.GetProperty("experimental").GetProperty("clash_api").GetProperty("default_mode").GetString());
-        Assert.DoesNotContain(dns.GetProperty("rules").EnumerateArray(), rule =>
-            rule.TryGetProperty("process_name", out _));
+        Assert.False(dns.TryGetProperty("rules", out _));
         Assert.Equal(EgressProfileCompiler.UpstreamSocksTag, root.GetProperty("route").GetProperty("final").GetString());
         Assert.Equal(EgressProfileCompiler.DohBootstrapTag, root.GetProperty("route")
             .GetProperty("default_domain_resolver").GetString());
@@ -210,8 +209,7 @@ public sealed class EgressProfileCompilerTests
         Assert.Contains("claude.exe", routeNames);
         Assert.Equal(4, routeNames.Distinct(StringComparer.Ordinal).Count());
         Assert.DoesNotContain(routeNames, name => name == "CLAUDE.EXE");
-        Assert.DoesNotContain(json.RootElement.GetProperty("dns").GetProperty("rules").EnumerateArray(), rule =>
-            rule.TryGetProperty("process_name", out _));
+        Assert.False(json.RootElement.GetProperty("dns").TryGetProperty("rules", out _));
     }
 
     [Fact]
@@ -655,7 +653,7 @@ public sealed class EgressProfileCompilerTests
     }
 
     [Fact]
-    public void Cloudflare_probe_rules_preserve_loop_exemptions()
+    public void Fixed_cloudflare_has_no_health_probe_rules_and_preserves_loop_exemptions()
     {
         const string app = @"C:\Apps\a.exe", owner = @"C:\Proxy\core.exe", self = @"C:\Controller\app.exe";
         var input = Input(new(), [app], [owner], [self]);
@@ -667,9 +665,9 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal("proxy-direct", RouteForProcess(root, owner));
         Assert.Equal("recovery-direct", RouteForProcess(root, self));
         Assert.DoesNotContain("clash_mode", root.GetRawText());
-        var dnsRules = root.GetProperty("dns").GetProperty("rules").EnumerateArray().ToArray();
-        foreach (var endpoint in EgressDohConfiguration.Endpoints)
-            Assert.Equal(endpoint.Tag, dnsRules.Single(rule => Matches(rule, "domain_suffix", endpoint.ProbeSuffix)).GetProperty("server").GetString());
+        Assert.False(root.GetProperty("dns").TryGetProperty("rules", out _));
+        Assert.DoesNotContain("egresscontroller.invalid", root.GetRawText());
+        Assert.DoesNotContain("generate_204", root.GetProperty("dns").GetRawText());
     }
 
     [Fact]

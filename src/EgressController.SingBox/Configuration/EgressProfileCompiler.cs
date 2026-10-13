@@ -152,16 +152,6 @@ public sealed class EgressProfileCompiler
                 : new() { Action = "reject" };
         }
 
-        var dnsRules = new List<SingBoxDnsRuleDocument>();
-        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.DefaultAdapter.IsReady))
-        {
-            dnsRules.Add(new SingBoxDnsRuleDocument
-            {
-                DomainSuffix = [endpoint.ProbeSuffix],
-                Action = "route",
-                Server = endpoint.Tag,
-            });
-        }
         var dnsServers = new List<SingBoxDnsServerDocument>
         {
             new()
@@ -170,16 +160,16 @@ public sealed class EgressProfileCompiler
                 Tag = DohBootstrapTag,
             },
         };
-        foreach (SingBoxDohEndpointDefinition endpoint in AvailableDohEndpoints(input.Environment.DefaultAdapter.IsReady))
+        if (input.Environment.DefaultAdapter.IsReady)
         {
             dnsServers.Add(new SingBoxDnsServerDocument
             {
                 Type = "https",
-                Tag = endpoint.Tag,
-                Server = endpoint.Server,
-                ServerPort = endpoint.ServerPort,
-                Path = endpoint.Path,
-                Tls = new SingBoxTlsDocument { ServerName = endpoint.ServerName },
+                Tag = DnsTag,
+                Server = EgressDohConfiguration.Server,
+                ServerPort = EgressDohConfiguration.ServerPort,
+                Path = EgressDohConfiguration.Path,
+                Tls = new SingBoxTlsDocument { ServerName = EgressDohConfiguration.ServerName },
                 Detour = DnsDirectTag,
                 DomainResolver = DohBootstrapTag,
             });
@@ -221,7 +211,6 @@ public sealed class EgressProfileCompiler
             Dns = new SingBoxDnsDocument
             {
                 Servers = dnsServers,
-                Rules = dnsRules.Count == 0 ? null : dnsRules,
                 Final = input.Environment.DefaultAdapter.IsReady ? DnsTag : DohBootstrapTag,
                 Strategy = "ipv4_only",
                 ReverseMapping = true,
@@ -314,9 +303,6 @@ public sealed class EgressProfileCompiler
             Inet4BindAddress = adapter.Ipv4BindAddress?.ToString(),
             Inet6BindAddress = adapter.Ipv6BindAddress?.ToString(),
         };
-
-    private static IEnumerable<SingBoxDohEndpointDefinition> AvailableDohEndpoints(bool dnsReady)
-        => EgressDohConfiguration.Endpoints.Where(endpoint => EgressDohConfiguration.IsAvailable(endpoint, dnsReady));
 
     private static string[] NormalizeProcessNames(IEnumerable<string> paths)
     {

@@ -39,7 +39,7 @@ public sealed record EgressProfileDocument
     public const string ProxyAdapterName = "Proxy-代理";
     public string? DefaultAdapterId { get; init; }
     public string? ProxyAdapterId { get; init; }
-    // Legacy override is read for migration; DNS and health checks now always use ESIM-家宽.
+    // Legacy override is read for migration; DNS always uses ESIM-家宽; Internet probes independently use both roles.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DnsAdapterId { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

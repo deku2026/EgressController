@@ -15,6 +15,8 @@ namespace EgressController.SingBox.Api;
 /// </summary>
 public sealed class SingBoxApiClient : IDisposable
 {
+    public const string InternetProbeUrl = "https://cp.cloudflare.com/generate_204";
+
     public const int MaxRestResponseBytes = 8 * 1024 * 1024;
     public const int MaxWebSocketMessageBytes = 1 * 1024 * 1024;
 
@@ -96,7 +98,7 @@ public sealed class SingBoxApiClient : IDisposable
     }
 
     public Task<SingBoxDelayResponse> ProbeOutboundAsync(string tag, CancellationToken cancellationToken = default)
-        => GetJsonAsync($"proxies/{Uri.EscapeDataString(tag)}/delay?timeout=5000&url={Uri.EscapeDataString("https://www.cloudflare.com/cdn-cgi/trace")}",
+        => GetJsonAsync($"proxies/{Uri.EscapeDataString(tag)}/delay?timeout=5000&url={Uri.EscapeDataString(InternetProbeUrl)}",
             SingBoxApiJsonContext.Default.SingBoxDelayResponse, cancellationToken);
 
     public Task FlushDnsCacheAsync(CancellationToken cancellationToken = default)
