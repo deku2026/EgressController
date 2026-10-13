@@ -10,8 +10,10 @@ follow that role. Interface enumeration never chooses a substitute. The default 
 offline, unaddressed and common internal virtual interfaces, with an expanded view available.
 Saved unavailable choices remain visible. No name or enumeration order is persisted as identity.
 
-`dnsAdapterId` is a migration-only field; DNS always uses the direct role; Internet probes use each role independently.
-SOCKS5 `upstreamPorts` and `upstreamPort` remain separate. Routes use `adapter-default`,
+`dnsAdapterId` is a migration-only field; DNS always uses the direct role. Website probes use
+the residential direct exit and the configured default SOCKS5 exit independently.
+SOCKS5 `upstreamPorts` and `upstreamPort` remain separate. Generated SOCKS tags are
+`upstream-<port>`; the prefix identifies an internal exit, not a proxy software brand. Routes use `adapter-default`,
 `adapter` plus `adapterId`, `default` (port), or `port` plus `port`.
 
 Schema 1/2 uses the old primary for proxy and eSIM for direct. Schema 3 preserves its saved
@@ -44,24 +46,34 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
 4. Confirm the authenticated local API and owned core are running; verify the named TUN has
    its expected IPv4/IPv6 addresses and both default routes. Also require both live physical
-   adapters and completed healthy Internet probes for both exits before allowing selected apps.
+   adapters and completed healthy website probes for the residential exit and configured default
+   proxy before allowing selected apps. Without configured proxy ports, only the residential
+   website probe is required; the UI explicitly reports that proxy checking is not configured.
    The guard checks takeover and live adapters every second.
 5. DNS is fixed to Cloudflare DoH through the direct role. There are no DoH health queries,
    generated probe hostnames, DNS health rules, provider selection or DNS status protection gates.
    The bootstrap resolver is retained for resolving the fixed server and preparing an offline exit.
 6. Probe https://cp.cloudflare.com/generate_204 through the authenticated sing-box delay API,
-   once through dns-direct (residential NIC) and once through proxy-direct (non-residential NIC).
+   once through dns-direct (residential NIC) and once through `upstream-<upstreamPort>`
+   (the current default loopback SOCKS5 endpoint). Its proxy core's external connections remain
+   bound to the non-residential NIC through the higher-priority `proxy-direct` process route.
+   The test must traverse the default proxy instead of requiring direct access to the website.
    Both run in parallel on a shared one-minute cadence measured from the start of each round;
    startup checks immediately, and a manual check uses the same probes. Each probe is bounded
    to eight seconds, and each completed result takes effect independently. An online NIC with
-   no Internet access still fails. Never substitute recovery-direct, a SOCKS outbound, another NIC
-   or an unbound HTTP client. This uses sing-box's HTTPS reachability verdict, not DNS responses.
+   an unavailable default proxy still fails. Never fall back to another SOCKS port, a direct exit,
+   recovery-direct or an unbound HTTP client. This uses sing-box's HTTPS reachability verdict,
+   not DNS responses. With no proxy ports configured, do not issue a proxy probe or synthesize
+   a successful proxy result. Explicit non-default application/domain proxy ports are not tested
+   by this default-proxy health check.
 7. During rechecks retain the last completed verdict for each adapter. A previously healthy check
    keeps apps running; a failed check keeps terminating selected instances every second until
    recovery. Startup or configuration changes require fresh successful results. Observed adapter
    changes invalidate pending results and clear affected health, including same-IP reconnects;
    a reconnect waits for the next scheduled or manual check. Cancellation never becomes a
-   network failure or success. Generation checks reject older configuration/adapter results.
+   network failure or success. Changing the default proxy invalidates its previous result;
+   applying the new configuration starts fresh checks. Generation checks reject older
+   configuration, adapter and default-port results, including remove/re-add of the same port.
 8. A completed network failure activates process protection on the next guard tick without
    restarting TUN or changing DNS. Keep the original interface/address binding through outages
    so it cannot silently select another exit. The guard uses uncached live adapter snapshots.
@@ -88,8 +100,10 @@ ends protection and stops the owned core. There is no persistent firewall or bac
 - Readiness/supervisor tests: failed TUN, missing takeover routes, unapplied configuration,
   recovery, one pending startup, retry, and no startup while already running or busy.
 - Network health tests: successful/failed rechecks, no-IP/link loss for both roles, cached versus live
-  adapter state, both bound probes using generate_204, Internet failures with an online NIC, timeouts, malformed responses, cancellation,
-  stale generations and reconnects. Fake process control verifies termination and recovery.
+  adapter state, residential/default-proxy probes using generate_204, arbitrary default ports,
+  no direct fallback on proxy failure, direct-only mode, Internet failures with an online NIC,
+  timeouts, malformed responses, cancellation, stale generations, port changes and reconnects.
+  Fake process control verifies termination and recovery.
 - Lifecycle tests: preparation preserving TUN, protection before restart, and checked rollback.
 - History tests: pruning while healthy, count limits, clear preserving descendants and retries.
 - Profile/resolver/compiler tests: independent defaults, legacy migration, exactly two independent bindings,

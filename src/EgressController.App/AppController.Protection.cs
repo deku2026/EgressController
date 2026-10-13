@@ -118,7 +118,8 @@ public sealed partial class AppController
                 RefreshAdapters();
                 EgressProfileDocument profile = _profile;
                 // Use fresh link/address state, never AdapterBindingCache's retained bindings.
-                _networkHealth.ObserveAdapters(_environmentResolver.Resolve(profile, _adapters));
+                _networkHealth.ObserveEnvironment(_environmentResolver.Resolve(profile, _adapters),
+                    profile.UpstreamPorts.Count > 0 ? profile.UpstreamPort : null);
                 try
                 {
                     ValidateProtectionConflicts(profile, ResolveProxyBindings(profile, token).OwnerPaths);

@@ -24,7 +24,7 @@ public sealed class NetworkRecheckTests
         int generation = state.Generation;
         async Task Recheck()
         {
-            NetworkHealthResult result = await InternetHealthProbe.RunAsync(check, async (_, _) =>
+            NetworkHealthResult result = await InternetHealthProbe.RunAsync(check, 1080, async (_, _) =>
                 new SingBoxDelayResponse { Delay = await completion.Task ? 12 : -1 }, TestContext.Current.CancellationToken);
             Assert.True(state.Complete(generation, check, result, TestContext.Current.CancellationToken));
         }
@@ -54,8 +54,8 @@ public sealed class NetworkRecheckTests
             IsUp = true, AddressState = AdapterAddressState.Ipv4Only, Ipv4BindAddress = IPAddress.Parse("192.0.2.10"),
         };
         var state = new NetworkHealthState();
-        state.ObserveAdapters(new() { DefaultAdapter = direct, DnsAdapter = direct,
-            ProxyAdapter = direct with { AdapterId = Guid.NewGuid(), Alias = "Proxy", Ipv4BindAddress = IPAddress.Parse("198.51.100.10") } });
+        state.ObserveEnvironment(new() { DefaultAdapter = direct, DnsAdapter = direct,
+            ProxyAdapter = direct with { AdapterId = Guid.NewGuid(), Alias = "Proxy", Ipv4BindAddress = IPAddress.Parse("198.51.100.10") } }, 1080);
         state.Complete(state.Generation, NetworkHealthCheck.DirectInternet, new(true, "healthy"), CancellationToken.None);
         state.Complete(state.Generation, NetworkHealthCheck.ProxyInternet, new(true, "healthy"), CancellationToken.None);
         return state;

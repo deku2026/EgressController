@@ -1,6 +1,8 @@
 using System.Net;
 using EgressController.Core.Models;
 using EgressController.Core.Protection;
+using EgressController.SingBox.Api.Models;
+using EgressController.SingBox.Configuration;
 
 namespace EgressController.Core.Tests;
 
@@ -10,7 +12,7 @@ public sealed class NetworkHealthStateTests
     public void Startup_requires_both_completed_checks_even_with_confirmed_tun()
     {
         var state = new NetworkHealthState();
-        int generation = state.ObserveAdapters(Environment());
+        int generation = state.ObserveEnvironment(Environment(), 7890);
         Assert.False(Ready(state).Ready);
         Assert.True(state.Complete(generation, NetworkHealthCheck.DirectInternet, new(true, "HTTPS OK"), CancellationToken.None));
         Assert.False(Ready(state).Ready);
@@ -72,12 +74,12 @@ public sealed class NetworkHealthStateTests
         Assert.True(retained.ProxyAdapter.IsReady);
         Assert.True(retained.DefaultAdapter.IsReady);
         int stale = state.Generation;
-        state.ObserveAdapters(live);
+        state.ObserveEnvironment(live, 7890);
         Assert.False(Ready(state).Ready);
         Assert.Contains(proxy ? "非家宽" : "家宽", Ready(state).Reason);
         Assert.False(state.Complete(stale, proxy ? NetworkHealthCheck.ProxyInternet : NetworkHealthCheck.DirectInternet,
             new(true, "late success"), CancellationToken.None));
-        state.ObserveAdapters(environment); // Same IP on reconnect still needs a new completed result.
+        state.ObserveEnvironment(environment, 7890); // Same IP on reconnect still needs a new completed result.
         Assert.False(Ready(state).Ready);
         state.Complete(state.Generation, proxy ? NetworkHealthCheck.ProxyInternet : NetworkHealthCheck.DirectInternet,
             new(true, "reconnected"), CancellationToken.None);
@@ -116,11 +118,73 @@ public sealed class NetworkHealthStateTests
         var state = Healthy();
         var environment = Environment();
         var replaced = environment with { ProxyAdapter = environment.ProxyAdapter with { AdapterId = Guid.NewGuid() } };
-        state.ObserveAdapters(replaced);
+        state.ObserveEnvironment(replaced, 7890);
         Assert.False(Ready(state).Ready);
         CompleteHealthy(state);
-        state.ObserveAdapters(replaced with { ProxyAdapter = replaced.ProxyAdapter with { Ipv4BindAddress = IPAddress.Parse("198.51.100.22") } });
+        state.ObserveEnvironment(replaced with { ProxyAdapter = replaced.ProxyAdapter with { Ipv4BindAddress = IPAddress.Parse("198.51.100.22") } }, 7890);
         Assert.False(Ready(state).Ready);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Changing_default_proxy_discards_old_port_results_and_requires_new_proxy_success(bool oldHealthy)
+    {
+        var state = Healthy();
+        int oldGeneration = state.Generation;
+        var completion = new TaskCompletionSource<SingBoxDelayResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pending = InternetHealthProbe.RunAsync(NetworkHealthCheck.ProxyInternet, 7890, (outbound, _) =>
+        {
+            Assert.Equal("upstream-7890", outbound);
+            return completion.Task;
+        }, TestContext.Current.CancellationToken);
+
+        state.ObserveEnvironment(Environment(), 1080);
+        Assert.False(Ready(state).Ready);
+        Assert.Contains("1080", state.ProxyStatus);
+        Assert.Contains("通过", state.DirectStatus); // Unchanged residential result remains valid.
+        completion.SetResult(new() { Delay = oldHealthy ? 12 : -1 });
+        Assert.False(state.Complete(oldGeneration, NetworkHealthCheck.ProxyInternet, await pending, CancellationToken.None));
+        Assert.False(Ready(state).Ready);
+
+        NetworkHealthResult fresh = await InternetHealthProbe.RunAsync(NetworkHealthCheck.ProxyInternet, 1080, (outbound, _) =>
+        {
+            Assert.Equal("upstream-1080", outbound);
+            return Task.FromResult(new SingBoxDelayResponse { Delay = 20 });
+        }, TestContext.Current.CancellationToken);
+        Assert.True(state.Complete(state.Generation, NetworkHealthCheck.ProxyInternet, fresh, CancellationToken.None));
+        Assert.True(Ready(state).Ready);
+    }
+
+    [Fact]
+    public void Direct_only_mode_requires_residential_health_and_both_live_adapters_without_a_proxy_result()
+    {
+        var state = new NetworkHealthState();
+        var environment = Environment();
+        state.ObserveEnvironment(environment, null);
+        Assert.False(Ready(state).Ready);
+        state.Complete(state.Generation, NetworkHealthCheck.DirectInternet, new(true, "HTTPS OK"), CancellationToken.None);
+        Assert.True(Ready(state).Ready);
+        Assert.Contains("未配置代理端口", state.ProxyStatus);
+        Assert.False(state.Complete(state.Generation, NetworkHealthCheck.ProxyInternet, new(false, "unused"), CancellationToken.None));
+        Assert.True(Ready(state).Ready);
+
+        state.ObserveEnvironment(environment with { ProxyAdapter = environment.ProxyAdapter with { IsUp = false } }, null);
+        Assert.False(Ready(state).Ready);
+    }
+
+    [Fact]
+    public void Removing_and_readding_default_proxy_cannot_reuse_its_old_health()
+    {
+        var state = Healthy();
+        int oldGeneration = state.Generation;
+        state.ObserveEnvironment(Environment(), null);
+        Assert.True(Ready(state).Ready);
+        state.ObserveEnvironment(Environment(), 7890);
+        Assert.False(Ready(state).Ready);
+        Assert.False(state.Complete(oldGeneration, NetworkHealthCheck.ProxyInternet, new(true, "old result"), CancellationToken.None));
+        state.Complete(state.Generation, NetworkHealthCheck.ProxyInternet, new(true, "new result"), CancellationToken.None);
+        Assert.True(Ready(state).Ready);
     }
 
     private static ProtectionReadiness Ready(NetworkHealthState state)
@@ -128,7 +192,7 @@ public sealed class NetworkHealthStateTests
     private static NetworkHealthState Healthy()
     {
         var state = new NetworkHealthState();
-        state.ObserveAdapters(Environment());
+        state.ObserveEnvironment(Environment(), 7890);
         CompleteHealthy(state);
         return state;
     }
