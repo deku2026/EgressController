@@ -45,7 +45,6 @@ public sealed class EgressProfileCompiler
     public const string ProxyDirectTag = "proxy-direct";
     public const string DnsDirectTag = "dns-direct";
     public static string AdapterTag(Guid id) => "adapter-" + id.ToString("N");
-    public const string UpstreamSocksTag = "clash-7890";
     public const string DohBootstrapTag = "doh-bootstrap";
     public const string DnsTag = EgressDohConfiguration.CloudflareTag;
     public const string ControllerHost = "127.0.0.1";
@@ -263,7 +262,7 @@ public sealed class EgressProfileCompiler
     public static string CreateControllerSecret()
         => Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
 
-    public static string SocksTag(int port) => $"clash-{port}";
+    public static string SocksTag(int port) => $"upstream-{port}";
 
     public static void WriteNext(string path, EgressProfileCompilationResult result)
     {

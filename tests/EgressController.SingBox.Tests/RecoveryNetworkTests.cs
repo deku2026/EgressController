@@ -24,7 +24,7 @@ public sealed class RecoveryNetworkTests
     {
         using var http = new HttpClient(new StubHandler("{\"error\":\"timeout\"}") { Status = HttpStatusCode.GatewayTimeout });
         using var api = new SingBoxApiClient(new("http://127.0.0.1:19090"), "test-secret", http);
-        await Assert.ThrowsAsync<SingBoxApiException>(() => api.ProbeOutboundAsync("clash-7890", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<SingBoxApiException>(() => api.ProbeOutboundAsync("upstream-7890", TestContext.Current.CancellationToken));
     }
 
     [Fact]

@@ -27,8 +27,8 @@ public sealed class TrafficRoutingContractTests
     {
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(Input()).JsonBytes);
 
-        Assert.Equal("clash-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
-        Assert.Equal("clash-7890", json.RootElement.GetProperty("outbounds").EnumerateArray().Single(item => item.GetProperty("type").GetString() == "socks").GetProperty("tag").GetString());
+        Assert.Equal("upstream-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
+        Assert.Equal("upstream-7890", json.RootElement.GetProperty("outbounds").EnumerateArray().Single(item => item.GetProperty("type").GetString() == "socks").GetProperty("tag").GetString());
     }
 
     [Fact]

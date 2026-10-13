@@ -10,13 +10,18 @@ public static class InternetHealthProbe
 
     public static async Task<NetworkHealthResult> RunAsync(
         NetworkHealthCheck check,
+        int? defaultUpstreamPort,
         Func<string, CancellationToken, Task<SingBoxDelayResponse>> probe,
         CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (check == NetworkHealthCheck.ProxyInternet && defaultUpstreamPort is not (>= 1 and <= ushort.MaxValue))
+            return new(false, "未配置有效的默认代理端口");
+
         string outbound = check switch
         {
             NetworkHealthCheck.DirectInternet => EgressProfileCompiler.DnsDirectTag,
-            NetworkHealthCheck.ProxyInternet => EgressProfileCompiler.ProxyDirectTag,
+            NetworkHealthCheck.ProxyInternet => EgressProfileCompiler.SocksTag(defaultUpstreamPort!.Value),
             _ => throw new ArgumentOutOfRangeException(nameof(check)),
         };
         TimeSpan budget = timeout ?? Timeout;
@@ -24,8 +29,8 @@ public static class InternetHealthProbe
         deadline.CancelAfter(budget);
         try
         {
-            // sing-box owns this socket and binds it to the selected NIC, independently of DNS health.
-            // Never substitute recovery-direct, the system route or a local SOCKS port.
+            // Residential traffic uses its bound direct exit; proxy traffic must traverse the
+            // configured default SOCKS endpoint. A failed proxy probe must never fall back to direct.
             SingBoxDelayResponse response = await probe(outbound, deadline.Token)
                 .WaitAsync(budget, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
