@@ -67,8 +67,8 @@ public sealed partial class AppController : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
     private readonly object _runtimeStateGate = new();
-    private readonly object _dohStateGate = new();
-    private readonly SemaphoreSlim _dohProbeGate = new(1, 1);
+    private readonly object _networkStateGate = new();
+    private readonly SemaphoreSlim _networkProbeGate = new(1, 1);
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
 
     private HttpRemoteFetcher _remoteFetcher = null!;
@@ -80,8 +80,8 @@ public sealed partial class AppController : IAsyncDisposable
     private CancellationTokenSource? _diagnosticsCts;
     private Task? _runtimeMonitorTask;
     private CancellationTokenSource? _runtimeMonitorCts;
-    private Task? _dohMonitorTask;
-    private CancellationTokenSource? _dohMonitorCts;
+    private Task? _networkMonitorTask;
+    private CancellationTokenSource? _networkMonitorCts;
     private string _runtimeFingerprint = string.Empty;
     private EgressProfileDocument _profile;
     private IReadOnlyList<NetworkAdapterInfo> _adapters = Array.Empty<NetworkAdapterInfo>();
@@ -98,9 +98,8 @@ public sealed partial class AppController : IAsyncDisposable
     private string? _lastTrafficMonitorError;
     private int _diagnosticsGeneration;
     private readonly NetworkHealthState _networkHealth = new();
-    private IReadOnlyList<DohStatusSnapshot> _dohStatuses = CreateStoppedDohStatuses();
-    private string _dohMonitorStatus = "未启动";
-    private DateTimeOffset? _dohLastCheckedAtUtc;
+    private string _networkMonitorStatus = "未启动";
+    private DateTimeOffset? _networkLastCheckedAtUtc;
 
     public AppController(string? dataRoot = null, string? rulesetRoot = null)
     {
@@ -183,30 +182,21 @@ public sealed partial class AppController : IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<DohStatusSnapshot> DohStatuses
+    public string NetworkMonitorStatus
     {
         get
         {
-            lock (_dohStateGate)
-                return _dohStatuses;
+            lock (_networkStateGate)
+                return _networkMonitorStatus;
         }
     }
 
-    public string DohMonitorStatus
+    public DateTimeOffset? NetworkLastCheckedAtUtc
     {
         get
         {
-            lock (_dohStateGate)
-                return _dohMonitorStatus;
-        }
-    }
-
-    public DateTimeOffset? DohLastCheckedAtUtc
-    {
-        get
-        {
-            lock (_dohStateGate)
-                return _dohLastCheckedAtUtc;
+            lock (_networkStateGate)
+                return _networkLastCheckedAtUtc;
         }
     }
 
@@ -495,7 +485,7 @@ public sealed partial class AppController : IAsyncDisposable
                 {
                     StartDiagnostics(LoadControllerEndpoint());
                     StartRuntimeMonitor();
-                    StartDohMonitor();
+                    StartNetworkMonitor();
                 }
                 SetMessage("TUN 启动失败：" + result.ErrorMessage);
                 return ControllerOperationResult.Failure(result.ErrorMessage ?? "TUN 启动失败。");
@@ -503,7 +493,7 @@ public sealed partial class AppController : IAsyncDisposable
 
             StartDiagnostics(LoadControllerEndpoint());
             StartRuntimeMonitor();
-            StartDohMonitor();
+            StartNetworkMonitor();
             _profileApplied = true;
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
@@ -519,7 +509,7 @@ public sealed partial class AppController : IAsyncDisposable
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            StopDohMonitor();
+            StopNetworkMonitor();
             await _singBox.StopAsync(cancellationToken).ConfigureAwait(false);
             StopRuntimeMonitor();
             StopDiagnostics();
@@ -584,30 +574,30 @@ public sealed partial class AppController : IAsyncDisposable
         return await api.QueryDnsAsync(host, recordType, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<ControllerOperationResult> CheckDohHealthAsync(
+    public async Task<ControllerOperationResult> CheckInternetHealthAsync(
         CancellationToken cancellationToken = default)
     {
         if (!IsTunRunning)
-            return ControllerOperationResult.Failure("TUN 未运行，暂不能检测 DoH。");
-        if (!await _dohProbeGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
-            return ControllerOperationResult.Failure("DoH 检测正在进行中。");
+            return ControllerOperationResult.Failure("TUN 未运行，暂不能检测联网。");
+        if (!await _networkProbeGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            return ControllerOperationResult.Failure("联网检测正在进行中。");
 
         try
         {
-            return await RunDohHealthCheckAsync(cancellationToken, announce: true).ConfigureAwait(false);
+            return await RunInternetHealthCheckAsync(cancellationToken, announce: true).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return ControllerOperationResult.Failure("DoH 检测已取消。");
+            return ControllerOperationResult.Failure("联网检测已取消。");
         }
         catch (Exception exception)
         {
-            SetMessage("DoH 检测失败：" + DescribeDiagnosticsFailure(exception));
-            return ControllerOperationResult.Failure("DoH 检测失败：" + DescribeDiagnosticsFailure(exception));
+            SetMessage("联网检测失败：" + DescribeDiagnosticsFailure(exception));
+            return ControllerOperationResult.Failure("联网检测失败：" + DescribeDiagnosticsFailure(exception));
         }
         finally
         {
-            _dohProbeGate.Release();
+            _networkProbeGate.Release();
         }
     }
 
@@ -629,10 +619,10 @@ public sealed partial class AppController : IAsyncDisposable
     {
         _shuttingDown = true;
         _lifetimeCts.Cancel();
-        Task[] background = new[] { _dohMonitorTask, _runtimeMonitorTask, _diagnosticsTask }.OfType<Task>().ToArray();
+        Task[] background = new[] { _networkMonitorTask, _runtimeMonitorTask, _diagnosticsTask }.OfType<Task>().ToArray();
         if (_protectionTask is not null) { try { await _protectionTask.ConfigureAwait(false); } catch (OperationCanceledException) { } }
         if (_tunSupervisor is not null) { try { await _tunSupervisor.Pending.ConfigureAwait(false); } catch (OperationCanceledException) { } }
-        StopDohMonitor();
+        StopNetworkMonitor();
         StopRuntimeMonitor();
         StopDiagnostics();
         try { await Task.WhenAll(background).ConfigureAwait(false); } catch (OperationCanceledException) { }
@@ -822,7 +812,7 @@ public sealed partial class AppController : IAsyncDisposable
             {
                 _profileApplied = true;
                 StartDiagnostics(LoadControllerEndpoint());
-                StartDohMonitor();
+                StartNetworkMonitor();
                 SetMessage("配置已校验并应用。");
                 return ControllerOperationResult.Success();
             }
@@ -1023,7 +1013,7 @@ public sealed partial class AppController : IAsyncDisposable
             {
                 _profileApplied = true;
                 StartDiagnostics(LoadControllerEndpoint());
-                StartDohMonitor();
+                StartNetworkMonitor();
                 SetMessage("检测到网卡或上游代理进程变化，配置已重新校验并应用。");
             }
             else

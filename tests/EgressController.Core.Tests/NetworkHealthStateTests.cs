@@ -12,14 +12,14 @@ public sealed class NetworkHealthStateTests
         var state = new NetworkHealthState();
         int generation = state.ObserveAdapters(Environment());
         Assert.False(Ready(state).Ready);
-        Assert.True(state.Complete(generation, NetworkHealthCheck.CloudflareDoh, new(true, "NXDOMAIN"), CancellationToken.None));
+        Assert.True(state.Complete(generation, NetworkHealthCheck.DirectInternet, new(true, "HTTPS OK"), CancellationToken.None));
         Assert.False(Ready(state).Ready);
         Assert.True(state.Complete(generation, NetworkHealthCheck.ProxyInternet, new(true, "HTTPS OK"), CancellationToken.None));
         Assert.True(Ready(state).Ready);
     }
 
     [Theory]
-    [InlineData(NetworkHealthCheck.CloudflareDoh)]
+    [InlineData(NetworkHealthCheck.DirectInternet)]
     [InlineData(NetworkHealthCheck.ProxyInternet)]
     public void Completed_failure_closes_every_selected_instance_and_recovery_stops_termination(NetworkHealthCheck check)
     {
@@ -75,11 +75,11 @@ public sealed class NetworkHealthStateTests
         state.ObserveAdapters(live);
         Assert.False(Ready(state).Ready);
         Assert.Contains(proxy ? "非家宽" : "家宽", Ready(state).Reason);
-        Assert.False(state.Complete(stale, proxy ? NetworkHealthCheck.ProxyInternet : NetworkHealthCheck.CloudflareDoh,
+        Assert.False(state.Complete(stale, proxy ? NetworkHealthCheck.ProxyInternet : NetworkHealthCheck.DirectInternet,
             new(true, "late success"), CancellationToken.None));
         state.ObserveAdapters(environment); // Same IP on reconnect still needs a new completed result.
         Assert.False(Ready(state).Ready);
-        state.Complete(state.Generation, proxy ? NetworkHealthCheck.ProxyInternet : NetworkHealthCheck.CloudflareDoh,
+        state.Complete(state.Generation, proxy ? NetworkHealthCheck.ProxyInternet : NetworkHealthCheck.DirectInternet,
             new(true, "reconnected"), CancellationToken.None);
         Assert.True(Ready(state).Ready);
     }
@@ -90,10 +90,10 @@ public sealed class NetworkHealthStateTests
     public void Canceled_results_do_not_replace_the_last_completed_result(bool healthy)
     {
         var state = Healthy();
-        state.Complete(state.Generation, NetworkHealthCheck.CloudflareDoh, new(healthy, "previous"), CancellationToken.None);
+        state.Complete(state.Generation, NetworkHealthCheck.DirectInternet, new(healthy, "previous"), CancellationToken.None);
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
-        Assert.False(state.Complete(state.Generation, NetworkHealthCheck.CloudflareDoh, new(!healthy, "canceled"), canceled.Token));
+        Assert.False(state.Complete(state.Generation, NetworkHealthCheck.DirectInternet, new(!healthy, "canceled"), canceled.Token));
         Assert.Equal(healthy, Ready(state).Ready);
     }
 
@@ -103,7 +103,7 @@ public sealed class NetworkHealthStateTests
         var state = Healthy();
         int stale = state.Generation;
         state.Reset();
-        Assert.False(state.Complete(stale, NetworkHealthCheck.CloudflareDoh, new(true, "old success"), CancellationToken.None));
+        Assert.False(state.Complete(stale, NetworkHealthCheck.DirectInternet, new(true, "old success"), CancellationToken.None));
         Assert.False(state.Complete(stale, NetworkHealthCheck.ProxyInternet, new(false, "old failure"), CancellationToken.None));
         Assert.False(Ready(state).Ready);
         CompleteHealthy(state);
@@ -134,7 +134,7 @@ public sealed class NetworkHealthStateTests
     }
     private static void CompleteHealthy(NetworkHealthState state)
     {
-        state.Complete(state.Generation, NetworkHealthCheck.CloudflareDoh, new(true, "OK"), CancellationToken.None);
+        state.Complete(state.Generation, NetworkHealthCheck.DirectInternet, new(true, "OK"), CancellationToken.None);
         state.Complete(state.Generation, NetworkHealthCheck.ProxyInternet, new(true, "OK"), CancellationToken.None);
     }
     private static NetworkEnvironmentSnapshot Environment()

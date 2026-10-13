@@ -79,6 +79,7 @@ public sealed class NetworkViewModel : ObservableObject
     private readonly AppController _controller;
     private string _monitorStatus = "未启动";
     private string _protectionStatus = "TUN 未运行";
+    private string _directInternetStatus = "等待家宽联网检测";
     private string _proxyInternetStatus = "等待非家宽联网检测";
     private string _lastChecked = "尚未检测";
     private string _status = string.Empty;
@@ -93,9 +94,9 @@ public sealed class NetworkViewModel : ObservableObject
     public ObservableCollection<ProtectionEventViewModel> ProtectionEvents { get; } = new();
     private IReadOnlyList<EgressController.Core.Protection.ProtectionEvent>? _lastEvents;
 
-    public ObservableCollection<DohEndpointViewModel> DohStatuses { get; } = new();
     public string MonitorStatus { get => _monitorStatus; private set => SetProperty(ref _monitorStatus, value); }
     public string ProtectionStatus { get => _protectionStatus; private set => SetProperty(ref _protectionStatus, value); }
+    public string DirectInternetStatus { get => _directInternetStatus; private set => SetProperty(ref _directInternetStatus, value); }
     public string ProxyInternetStatus { get => _proxyInternetStatus; private set => SetProperty(ref _proxyInternetStatus, value); }
     public string LastChecked { get => _lastChecked; private set => SetProperty(ref _lastChecked, value); }
     public string Status
@@ -114,10 +115,11 @@ public sealed class NetworkViewModel : ObservableObject
 
     public void Refresh()
     {
-        MonitorStatus = _controller.DohMonitorStatus;
+        MonitorStatus = _controller.NetworkMonitorStatus;
         ProtectionStatus = _controller.ProtectionStatus;
+        DirectInternetStatus = _controller.DirectInternetStatus;
         ProxyInternetStatus = _controller.ProxyInternetStatus;
-        LastChecked = _controller.DohLastCheckedAtUtc is { } checkedAt
+        LastChecked = _controller.NetworkLastCheckedAtUtc is { } checkedAt
             ? checkedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
             : "尚未检测";
 
@@ -128,32 +130,14 @@ public sealed class NetworkViewModel : ObservableObject
             ProtectionEvents.Clear();
             foreach (var item in events) ProtectionEvents.Add(new(item));
         }
-        DohStatuses.Clear();
-        foreach (DohStatusSnapshot status in _controller.DohStatuses)
-            DohStatuses.Add(new DohEndpointViewModel(status));
     }
 
     private async Task CheckAsync()
     {
-        ControllerOperationResult result = await _controller.CheckDohHealthAsync();
-        Status = result.Succeeded ? "DoH 检测完成。" : result.Error ?? "DoH 检测失败。";
+        ControllerOperationResult result = await _controller.CheckInternetHealthAsync();
+        Status = result.Succeeded ? "联网检测完成。" : result.Error ?? "联网检测失败。";
         Refresh();
     }
-}
-
-public sealed class DohEndpointViewModel(DohStatusSnapshot status)
-{
-    public string Tag => status.Tag;
-    public string RoutePlane => status.RoutePlane;
-    public string Provider => status.Provider + (status.IsFallback ? " · 备用" : " · 默认");
-    public string Endpoint => $"https://{status.Server}:{status.ServerPort}{status.Path}";
-    public string ServerName => "TLS SNI · " + status.ServerName;
-    public string Detour => "detour · " + status.Detour;
-    public string State => status.State;
-    public string Detail => status.LatencyMilliseconds is { } latency
-        ? $"{status.Detail} · {latency} ms"
-        : status.Detail;
-    public string Marker => status.IsActive ? "当前路由" : status.IsAvailable ? "已配置" : "未启用";
 }
 
 public sealed class OverviewViewModel : ObservableObject
