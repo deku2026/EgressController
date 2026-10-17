@@ -1,6 +1,7 @@
 using System.Text.Json;
 using EgressController.Core.Protection;
 using EgressController.Core.Contracts;
+using EgressController.Diagnostics;
 
 namespace EgressController.Guardian;
 
@@ -19,15 +20,18 @@ public sealed class GuardRuntime
     private readonly GuardLease _lease;
     private readonly IExecutablePathCanonicalizer? _pathResolver;
     private readonly HashSet<string> _selfPaths;
+    private readonly DiagnosticJournal? _diagnostics;
     private GuardPolicy? _policy;
     private GuardPolicy? _storedPolicy;
     private string? _lastCheckpoint;
     private string? _infrastructureError;
     private GuardStatus _status = new(true, "主程序未运行", 0, 0, null, []);
     public GuardRuntime(IGuardStore store, IProcessControl processes, IGuardFacts facts,
-        IEnumerable<string> selfPaths, TimeProvider? clock = null, IExecutablePathCanonicalizer? pathResolver = null)
+        IEnumerable<string> selfPaths, TimeProvider? clock = null, IExecutablePathCanonicalizer? pathResolver = null,
+        DiagnosticJournal? diagnostics = null)
     {
         _store = store; _facts = facts;
+        _diagnostics = diagnostics;
         _pathResolver = pathResolver;
         _protection = new(processes, clock);
         _lease = new(clock);
@@ -44,7 +48,11 @@ public sealed class GuardRuntime
         lock (_gate)
         {
             _infrastructureError = error;
-            if (error is not null) _lease.Revoke();
+            if (error is not null)
+            {
+                _lease.Revoke();
+                _diagnostics?.Report("守护名单同步", "guard.synchronize", error);
+            }
         }
     }
     public void OpenSession(Guid session, ProcessKey main, string path, GuardPolicy policy)
@@ -131,12 +139,23 @@ public sealed class GuardRuntime
                 reason = readiness.Reason;
                 if (_infrastructureError is not null) { ready = false; reason = _infrastructureError; }
             }
-            catch (Exception exception) { reason = "无法核验主程序/TUN：" + exception.Message; }
+            catch (Exception exception)
+            {
+                reason = "无法核验主程序/TUN：" + exception.Message;
+                _diagnostics?.Report("守护接管检查", "guard.inspect", reason, exception);
+            }
             int failures;
             try
             {
                 var excluded = _selfPaths.Concat(_policy.Exclusions).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var previousEvents = _protection.Events;
                 failures = _protection.Sweep(_policy.Executables, excluded, ready, "独立守护：" + reason, _policy.Directories);
+                foreach (var item in _protection.Events.Except(previousEvents))
+                {
+                    string detail = $"{item.Application} · PID {item.Pid}\n{item.Path}\n{item.Reason}\n{item.Error}";
+                    if (item.Succeeded) _diagnostics?.Info("守护终止", detail);
+                    else _diagnostics?.Report("守护终止", "guard.terminate", detail);
+                }
                 Persist();
             }
             catch (Exception exception)
@@ -145,8 +164,11 @@ public sealed class GuardRuntime
                 ready = false;
                 _lease.Revoke();
                 reason = "保护未完成：" + exception.Message;
+                _diagnostics?.Report("守护保护", "guard.sweep", reason, exception);
             }
             if (failures > 0) reason = $"保护未完成：{failures} 项失败；{reason}";
+            if (_status.Reason != reason) _diagnostics?.Info("守护状态", reason);
+            if (_diagnostics?.WriteFailure is { } logFailure) reason += "\n守护日志写入失败：" + logFailure;
             return _status = new(!ready || failures > 0, reason, _policy.Executables.Length,
                 failures, _policy.Revision, _protection.Events.ToArray());
         }

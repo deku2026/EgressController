@@ -16,7 +16,7 @@ public sealed class TrayApp : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            var vm = new GuardManagementViewModel(new WindowsGuardManagementClient(Program.Paths));
+            var vm = new GuardManagementViewModel(new WindowsGuardManagementClient(Program.Paths), Program.Diagnostics, Program.Paths.LogDirectory);
             var window = new GuardWindow(vm);
             var menu = new NativeMenu();
             void Show() { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }

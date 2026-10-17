@@ -109,6 +109,8 @@ public sealed partial class AppController : IAsyncDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), WindowsPackageIdentity.IsPackaged());
         _dataRoot = Path.GetFullPath(dataRoot ?? storage.Data);
         _rulesetRoot = Path.GetFullPath(rulesetRoot ?? storage.Rulesets);
+        Diagnostics = new DiagnosticJournal(Path.Combine(_dataRoot, "logs", "controller.log"));
+        Diagnostics.Info("启动", "EgressController 启动；数据目录：" + _dataRoot);
         Directory.CreateDirectory(_dataRoot);
         Directory.CreateDirectory(Path.Combine(_dataRoot, "logs"));
         Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
@@ -127,6 +129,8 @@ public sealed partial class AppController : IAsyncDisposable
         _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync, BeforeTunChange,
             () => { if (!_shuttingDown) _guardTransition = false; });
         _singBox.Output += OnSingBoxOutput;
+        _singBox.FailureReported += (stage, error) => Diagnostics.Report("内核生命周期 · " + stage,
+            error is SingBoxServiceException service ? service.Code : "core." + stage, error.Message, error);
         InitializeProtection();
         InitializeGuardian();
     }
@@ -217,7 +221,7 @@ public sealed partial class AppController : IAsyncDisposable
         catch (Exception exception)
         {
             _adapters = Array.Empty<NetworkAdapterInfo>();
-            SetMessage("扫描网卡失败：" + exception.Message);
+            ReportFailure("网卡扫描", "adapter.enumerate", "扫描网卡失败：" + exception.Message, exception);
             return _adapters;
         }
     }
@@ -318,19 +322,19 @@ public sealed partial class AppController : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
-            return ControllerOperationResult.Failure("规则集名称不能为空。");
+            return Failure("规则集名称不能为空。");
         string normalized = name.Trim().ToLowerInvariant();
         if (enabled)
         {
             SingBoxRuleCatalog? catalog = Catalog;
             if (catalog is null || !catalog.TryGet(normalized, out _))
-                return ControllerOperationResult.Failure("规则 catalog 尚未就绪，请先更新规则。");
+                return Failure("规则 catalog 尚未就绪，请先更新规则。");
             RuleArtifactResult artifact = await _artifactStore.EnsureAsync(
                 catalog.Snapshot,
                 normalized,
                 cancellationToken).ConfigureAwait(false);
             if (!artifact.Succeeded)
-                return ControllerOperationResult.Failure(artifact.Error ?? "SRS 下载失败。");
+                return Failure(artifact.Error ?? "SRS 下载失败。");
         }
 
         return await UpdateProfileAsync(
@@ -361,13 +365,13 @@ public sealed partial class AppController : IAsyncDisposable
         {
             SingBoxRuleCatalog? catalog = Catalog;
             if (catalog is null)
-                return ControllerOperationResult.Failure("规则 catalog 尚未就绪，请先更新规则。");
+                return Failure("规则 catalog 尚未就绪，请先更新规则。");
 
             string[] missing = normalized
                 .Where(name => !catalog.TryGet(name, out _))
                 .ToArray();
             if (missing.Length > 0)
-                return ControllerOperationResult.Failure("规则 catalog 缺少：" + string.Join(", ", missing));
+                return Failure("规则 catalog 缺少：" + string.Join(", ", missing));
 
             RuleArtifactBatchResult artifacts = await _artifactStore.EnsureManyAsync(
                 catalog.Snapshot,
@@ -378,7 +382,7 @@ public sealed partial class AppController : IAsyncDisposable
                 string details = string.Join(
                     "; ",
                     artifacts.Failures.Select(item => item.Key + ": " + item.Value));
-                return ControllerOperationResult.Failure("SRS 批量下载失败：" + details);
+                return Failure("SRS 批量下载失败：" + details);
             }
         }
 
@@ -473,6 +477,7 @@ public sealed partial class AppController : IAsyncDisposable
         SetMessage(result.Succeeded
             ? $"已更新 MetaCubeX sing catalog：{result.Catalog!.Count} 个 SRS，commit {result.Catalog.Snapshot.CommitSha[..12]}。"
             : "规则更新失败：" + result.Error);
+        if (!result.Succeeded) Diagnostics.Report("规则更新", "catalog.update", result.Error ?? "规则更新失败");
         return result;
     }
 
@@ -495,8 +500,8 @@ public sealed partial class AppController : IAsyncDisposable
                     StartRuntimeMonitor();
                     StartNetworkMonitor();
                 }
-                SetMessage("TUN 启动失败：" + result.ErrorMessage);
-                return ControllerOperationResult.Failure(result.ErrorMessage ?? "TUN 启动失败。");
+                return ReportFailure("TUN 启动", result.ErrorCode ?? "tun.start",
+                    "TUN 启动失败：" + (result.ErrorMessage ?? "未知错误"));
             }
 
             StartDiagnostics(LoadControllerEndpoint());
@@ -508,6 +513,8 @@ public sealed partial class AppController : IAsyncDisposable
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error) { return ReportFailure("TUN 启动", "tun.start.unhandled", error.Message, error); }
         finally
         {
             _configurationGate.Release();
@@ -528,8 +535,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            SetMessage("停止 TUN 失败：" + exception.Message);
-            return ControllerOperationResult.Failure(exception.Message);
+            return Failure("停止 TUN 失败：" + exception.Message, exception);
         }
         finally
         {
@@ -548,7 +554,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            return ControllerOperationResult.Failure("关闭连接失败：" + exception.Message);
+            return Failure("关闭连接失败：" + exception.Message, exception);
         }
     }
 
@@ -565,7 +571,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            return ControllerOperationResult.Failure("关闭连接失败：" + exception.Message);
+            return Failure("关闭连接失败：" + exception.Message, exception);
         }
     }
 
@@ -588,9 +594,9 @@ public sealed partial class AppController : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         if (!IsTunRunning)
-            return ControllerOperationResult.Failure("TUN 未运行，暂不能检测联网。");
+            return Failure("TUN 未运行，暂不能检测联网。");
         if (!await _networkProbeGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
-            return ControllerOperationResult.Failure("联网检测正在进行中。");
+            return Failure("联网检测正在进行中。");
 
         try
         {
@@ -598,12 +604,11 @@ public sealed partial class AppController : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return ControllerOperationResult.Failure("联网检测已取消。");
+            return Failure("联网检测已取消。");
         }
         catch (Exception exception)
         {
-            SetMessage("联网检测失败：" + DescribeDiagnosticsFailure(exception));
-            return ControllerOperationResult.Failure("联网检测失败：" + DescribeDiagnosticsFailure(exception));
+            return Failure("联网检测失败：" + DescribeDiagnosticsFailure(exception), exception);
         }
         finally
         {
@@ -621,7 +626,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            return ControllerOperationResult.Failure("清理 DNS 缓存失败：" + exception.Message);
+            return Failure("清理 DNS 缓存失败：" + exception.Message, exception);
         }
     }
 
@@ -638,10 +643,11 @@ public sealed partial class AppController : IAsyncDisposable
         try { await Task.WhenAll(background).ConfigureAwait(false); } catch (OperationCanceledException) { }
         _singBox.Output -= OnSingBoxOutput;
         if (_guardAgent is not null) await _guardAgent.DisposeAsync().ConfigureAwait(false);
-        try { await _singBox.DisposeAsync().ConfigureAwait(false); } catch { }
+        try { await _singBox.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception error) { ReportFailure("退出清理", "core.dispose", error.Message, error); }
         _remoteFetcher.Dispose();
         _releaseHttpClient.Dispose();
-        _localLog.Append("lifecycle", "info", "EgressController stopped.");
+        Diagnostics.Info("退出", "EgressController stopped.");
         _lifetimeCts.Dispose();
         _configurationGate.Dispose();
     }
@@ -755,27 +761,25 @@ public sealed partial class AppController : IAsyncDisposable
     private async Task<bool> HealthCheckAsync(SingBoxRuntimeCandidate candidate, CancellationToken cancellationToken)
     {
         if (candidate.ControllerPort is < 1 or > ushort.MaxValue || string.IsNullOrWhiteSpace(candidate.ControllerSecret))
-            return false;
+            throw new SingBoxServiceException("controller.invalid", "控制 API 端口或凭据缺失，不能确认 TUN 接管。");
         using var api = new SingBoxApiClient(new Uri($"http://127.0.0.1:{candidate.ControllerPort}"), candidate.ControllerSecret);
-        DateTime deadline = DateTime.UtcNow.AddSeconds(8);
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            try
+            return await SingBoxStartupCheck.WaitAsync(async token =>
             {
-                SingBoxVersionResponse version = await api.GetVersionAsync(cancellationToken).ConfigureAwait(false);
-                if (version.Version.StartsWith("sing-box ", StringComparison.OrdinalIgnoreCase))
-                {
-                    _takeoverError = _tunInspector.GetError();
-                    if (_takeoverError is null) return true;
-                }
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-            }
-            catch (SingBoxApiException exception) when (exception.StatusCode is null)
-            {
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-            }
+                SingBoxVersionResponse version = await api.GetVersionAsync(token).ConfigureAwait(false);
+                _takeoverError = !version.Version.StartsWith("sing-box ", StringComparison.OrdinalIgnoreCase)
+                    ? $"控制端口 {candidate.ControllerPort} 返回的不是 sing-box，可能被其他程序占用。"
+                    : _tunInspector.GetError();
+                return _takeoverError;
+            }, cancellationToken).ConfigureAwait(false);
         }
-        return false;
+        catch (SingBoxServiceException error)
+        {
+            _takeoverError = error.Message;
+            ReportFailure("TUN 接管检查", error.Code, error.Message, error);
+            throw;
+        }
     }
 
     private async Task<ControllerOperationResult> UpdateProfileAsync(
@@ -795,7 +799,7 @@ public sealed partial class AppController : IAsyncDisposable
                 if (EgressProfileStore.HasSameContent(next, previous)) return ControllerOperationResult.Success();
                 ValidateProtectionConflicts(next, ResolveProxyBindings(next, cancellationToken).OwnerPaths, updateExclusions: false);
             }
-            catch (Exception exception) { return ControllerOperationResult.Failure(exception.Message); }
+            catch (Exception exception) { return Failure(exception.Message, exception); }
 
             void Commit(EgressProfileDocument profile)
             {
@@ -814,7 +818,7 @@ public sealed partial class AppController : IAsyncDisposable
                     SetMessage("配置已保存，正在等待 TUN 自动启动。");
                     return ControllerOperationResult.Success();
                 }
-                catch (Exception exception) { return ControllerOperationResult.Failure("保存配置或同步守护失败：" + exception.Message); }
+                catch (Exception exception) { return Failure("保存配置或同步守护失败：" + exception.Message, exception); }
             }
 
             string previousRuntimeFingerprint = GetRuntimeFingerprint();
@@ -854,9 +858,9 @@ public sealed partial class AppController : IAsyncDisposable
             {
                 if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception exception) { return ControllerOperationResult.Failure("守护同步失败：" + exception.Message); }
+            catch (Exception exception) { return Failure("守护同步失败：" + exception.Message, exception); }
             return applied.Succeeded ? ControllerOperationResult.Success()
-                : ControllerOperationResult.Failure(applied.ErrorMessage ?? "配置应用失败，已保留旧配置。");
+                : Failure(applied.ErrorMessage ?? "配置应用失败，已保留旧配置。");
         }
         finally { _configurationGate.Release(); }
     }
@@ -884,7 +888,7 @@ public sealed partial class AppController : IAsyncDisposable
     {
         _catalogService.LoadCached(out string? error);
         if (!string.IsNullOrWhiteSpace(error))
-            SetMessage(error);
+            ReportFailure("规则目录", "catalog.cache", error);
     }
 
     private EgressProfileDocument LoadProfile()
@@ -1020,7 +1024,7 @@ public sealed partial class AppController : IAsyncDisposable
             catch (Exception exception)
             {
                 string detail = DescribeDiagnosticsFailure(exception);
-                SetMessage("网络状态检测失败：" + detail);
+                ReportFailure("出口变化检测", "runtime.monitor", "网络状态检测失败：" + detail, exception);
             }
         }
     }
@@ -1053,7 +1057,8 @@ public sealed partial class AppController : IAsyncDisposable
                 SetRuntimeFingerprint(previousRuntimeFingerprint);
                 _profileApplied = IsTunRunning && previouslyApplied;
                 if (applied.CoreChanged && IsTunRunning) StartNetworkMonitor();
-                SetMessage("网络状态变化后的配置应用失败，已保留当前配置：" + (applied.ErrorMessage ?? "未知错误"));
+                ReportFailure("出口配置更新", applied.ErrorCode ?? "runtime.apply",
+                    "网络状态变化后的配置应用失败，已保留当前配置：" + (applied.ErrorMessage ?? "未知错误"));
             }
         }
         finally
@@ -1315,8 +1320,9 @@ public sealed partial class AppController : IAsyncDisposable
                 ? new ControllerEndpoint(runtime.ControllerPort, runtime.ControllerSecret)
                 : null;
         }
-        catch
+        catch (Exception error)
         {
+            ReportFailure("控制 API 配置", "controller.read", "无法读取内核控制接口配置：" + error.Message, error);
             return null;
         }
     }
@@ -1366,8 +1372,12 @@ public sealed partial class AppController : IAsyncDisposable
 
     private void OnSingBoxOutput(SingBoxOutputEvent output)
     {
-        _logs.Append(output.Source, CoreLogClassifier.Classify(output.Source, output.Line), output.Line);
-        _localLog.Append(output.Source, CoreLogClassifier.Classify(output.Source, output.Line), output.Line);
+        string level = CoreLogClassifier.Classify(output.Source, output.Line);
+        string message = DiagnosticJournal.Redact(output.Line);
+        _logs.Append(output.Source, level, message);
+        if (level is "error" or "fatal" or "warn") Diagnostics.Report("sing-box", "core." + level, message);
+        try { _localLog.Append(output.Source, level, message); }
+        catch (Exception error) { Diagnostics.Report("日志写入", "core.log.write", "无法写入：" + _localLog.LogPath, error); }
     }
 
     private void SetConnectionMonitorConnected(int generation)
@@ -1406,7 +1416,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
 
         if (shouldLog && generation == Volatile.Read(ref _diagnosticsGeneration))
-            _logs.Append("diagnostics", "warn", "连接监控中断：" + detail);
+            ReportFailure("连接监控", "monitor.connections", "连接监控中断：" + detail, exception);
     }
 
     private void ReportTrafficMonitorFailure(Exception exception, int generation)
@@ -1423,7 +1433,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
 
         if (shouldLog && generation == Volatile.Read(ref _diagnosticsGeneration))
-            _logs.Append("diagnostics", "warn", "流量监控中断：" + detail);
+            ReportFailure("流量监控", "monitor.traffic", "流量监控中断：" + detail, exception);
     }
 
     private static string DescribeDiagnosticsFailure(Exception exception)
@@ -1469,6 +1479,7 @@ public sealed partial class AppController : IAsyncDisposable
     {
         lock (_gate)
             _lastMessage = message;
+        Diagnostics.Info("主程序", message);
     }
 
 }
@@ -1481,7 +1492,4 @@ internal sealed record ConnectionRateSample(
     string? Outbound);
 
 internal sealed class ControllerPreparationException(string code, string message)
-    : InvalidOperationException(message)
-{
-    public string Code { get; } = code;
-}
+    : SingBoxServiceException(code, message);

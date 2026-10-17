@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -53,6 +54,44 @@ public partial class MainWindow : Window
 
     internal void AllowApplicationExit()
         => _applicationExitAllowed = true;
+
+    private void OnShowDiagnostics(object? sender, RoutedEventArgs e) => MainTabs.SelectedItem = DiagnosticsTab;
+
+    private void OnOpenLogDirectory(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        try
+        {
+            Directory.CreateDirectory(_vm.Diagnostics.DirectoryPath);
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                _vm.Diagnostics.DirectoryPath) { UseShellExecute = true });
+        }
+        catch (Exception error) { _vm.Controller.ReportFailure("日志目录", "logs.open", error.Message, error); _vm.Diagnostics.Refresh(); }
+    }
+
+    private async void OnCopyDiagnostics(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        try
+        {
+            _vm.Diagnostics.Refresh();
+            var clipboard = GetTopLevel(this)?.Clipboard ?? throw new InvalidOperationException("剪贴板不可用。");
+            await clipboard.SetTextAsync(_vm.Diagnostics.ExportText);
+        }
+        catch (Exception error) { _vm.Controller.ReportFailure("复制诊断", "logs.copy", error.Message, error); _vm.Diagnostics.Refresh(); }
+    }
+
+    private void OnOpenGuardLogDirectory(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        try
+        {
+            Directory.CreateDirectory(_vm.Guard.LogDirectory);
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                _vm.Guard.LogDirectory) { UseShellExecute = true });
+        }
+        catch (Exception error) { _vm.Controller.ReportFailure("守护日志目录", "guard.logs.open", error.Message, error); _vm.Diagnostics.Refresh(); }
+    }
 
     private async void OnConnectionDoubleTapped(object? sender, TappedEventArgs e)
     {

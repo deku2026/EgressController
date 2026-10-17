@@ -189,6 +189,33 @@ Profile schema 4 读取 schema 1/2/3，保留端口与规则。旧 PRIMARY 迁�
 曾配置超过两张网卡而无法确定角色时要求手动选择；指向第三张网卡的旧规则保留并显示待重新选择，
 完成调整前保持进程保护。后续保存清除旧字段；旧版程序不能编辑 schema 4。
 
+## 失败原因与日志目录
+
+主界面顶部始终显示 **打开日志目录** 按钮和可复制的完整目录路径，不需要先启动 TUN。
+“网络与内核”保留最近一次 TUN 失败的具体原因，自动重试不会把它替换成只有“正在启动”。
+“诊断与日志”显示本次运行最近 200 类失败：首次/最近发生时间、阶段、错误码、重复次数、异常详情，
+并提供复制诊断详情和主程序/sing-box 最近日志。顶部最近失败提示属于历史记录，成功恢复后保留；当前运行状态单独显示。
+
+| 日志 | 位置与内容 |
+| --- | --- |
+| 主程序 | 便携版 `data\logs\controller.log`；MSIX 版 `%LOCALAPPDATA%\EgressController\data\logs\controller.log`。记录准备/下载/校验、启动接管、配置与回滚、联网检测、进程保护、守护通信和界面操作失败。 |
+| sing-box | 与主程序日志同目录的 `sing-box.log`，保留内核 stdout/stderr。 |
+| 启动或未处理异常 | `%LOCALAPPDATA%\EgressController\logs\startup.log`。主程序初始化失败窗口显示完整原因、日志路径和打开目录按钮。 |
+| 守护服务 | `%ProgramData%\EgressController\Guard\<后缀>\logs\guard-service.log`。主程序“独立守护”页与小托盘均有打开目录按钮及完整路径。 |
+| 小托盘 | `%LOCALAPPDATA%\EgressController\Guard\<服务名>\logs\guard-tray.log`。小托盘管理窗口顶部提供独立目录入口。 |
+
+每个日志文件约 5 MB，保留一份 `.1` 轮转文件。同一失败在界面累计次数，重复错误最多每 30 秒写一次；
+日志记录中的控制 API 凭据会脱敏。磁盘满或没有写入权限时保留界面错误，明确显示日志写入失败，避免日志错误中断保护。
+服务启动和提权操作的兼容错误文件仍分别保留在守护数据目录的 `service-error.log` 和 `management-error.log`。
+
+TUN 接管检查允许 Windows 报告的实际网卡本地网段，包括公网 IPv6 `/64` 和公网 IPv4 网段。
+必须同时匹配网卡单播地址的前缀和无网关的 on-link 路由；带网关的公网路由、其他 TUN、`/1` 绕行路由、
+缺失的 TUN 路由、竞争的默认路由仍会阻止就绪。启动检查最多等待 8 秒，超时显示最后一次具体检查原因。
+
+已有守护服务安装在独立目录，替换主程序发布包不会自动替换服务/小托盘。升级时先退出旧小托盘，
+在主程序的“独立守护”页卸载后重新安装服务，再重新打开主程序启动新托盘；已保存的保护名单会保留。
+否则旧守护可能继续执行旧版接管检查，且不会产生新增的服务日志。
+
 ## 构建与 mock 测试
 
 需要 `global.json` 指定的 .NET SDK、Windows 10/11 x64，以及 NativeAOT 所需的 Visual Studio
@@ -224,7 +251,7 @@ dotnet build EgressController.slnx --configuration Release --no-restore -p:Egres
 - 不带 `-SkipMsix` 时，若安装 Windows SDK，还会生成未签名 MSIX。
 
 打包脚本还以 `EGRESS_MOCK_ONLY=1` 运行两个守护组件的 `--mock-smoke` 入口，检查原生程序中的
-源生成 JSON、SQLite 和假进程保护；入口在 Avalonia、服务、IPC 或系统操作初始化前返回。
+源生成 JSON、SQLite、诊断日志脱敏与假进程保护；入口在 Avalonia、服务、IPC 或系统操作初始化前返回。
 主程序管理员入口不会在打包测试中启动。检查 ZIP 中三个 EXE 及依赖完整、不含 `.pdb`。
 MSIX 不声明系统服务扩展：仍由主程序显式安装机器服务，卸载 MSIX 前应先在界面卸载守护服务。
 CI 的 PR 检查会执行 Release build/test、两个原生 mock smoke 和同一打包脚本；

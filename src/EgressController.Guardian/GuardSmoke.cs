@@ -1,5 +1,6 @@
 using System.Text.Json;
 using EgressController.Core.Protection;
+using EgressController.Diagnostics;
 
 namespace EgressController.Guardian;
 
@@ -26,6 +27,11 @@ public static class GuardSmoke
         string directory = Path.Combine(Path.GetTempPath(), "egress-guard-smoke-" + Guid.NewGuid().ToString("N"));
         try
         {
+            var diagnostics = new DiagnosticJournal(Path.Combine(directory, "mock.log"));
+            diagnostics.Report("mock", "mock.failure", "Authorization: Bearer aot-secret", new IOException("mock disk detail"));
+            diagnostics.Info("mock", "retrying");
+            if (diagnostics.Snapshot().Count != 1 || File.ReadAllText(diagnostics.LogPath).Contains("aot-secret", StringComparison.Ordinal))
+                throw new InvalidOperationException("AOT diagnostic persistence/redaction failed.");
             var database = new GuardStore(directory);
             database.SavePolicy(policy);
             database.SaveCheckpoint(new([], runtime.Status.Events));

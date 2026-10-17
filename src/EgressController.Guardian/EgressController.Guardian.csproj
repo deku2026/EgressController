@@ -2,6 +2,7 @@
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
+    <ProjectReference Include="..\EgressController.Diagnostics\EgressController.Diagnostics.csproj" />
     <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" />
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" />

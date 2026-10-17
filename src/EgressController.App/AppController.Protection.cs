@@ -130,6 +130,9 @@ public sealed partial class AppController
 
     private void OnTunStatusChanged(EgressController.SingBox.Runtime.SingBoxServiceStatus status)
     {
+        Diagnostics.Info("TUN 状态", $"{status.State} · PID {status.ProcessId}");
+        if (status.ErrorMessage is { } detail)
+            Diagnostics.Report("TUN 状态", status.ErrorCode ?? "tun.failed", detail);
         if (status.State is EgressController.SingBox.Runtime.SingBoxServiceState.Starting
             or EgressController.SingBox.Runtime.SingBoxServiceState.Applying
             or EgressController.SingBox.Runtime.SingBoxServiceState.Stopping
@@ -142,15 +145,26 @@ public sealed partial class AppController
         if (status.State != EgressController.SingBox.Runtime.SingBoxServiceState.Failed) return;
         InvalidateReadiness(status.ErrorMessage ?? "TUN 已退出");
         try { SweepProtection(new(false, status.ErrorMessage ?? "TUN 已退出")); }
-        catch (Exception exception) { _protectionStatus = "保护未完成：" + exception.Message; }
+        catch (Exception exception)
+        {
+            _protectionStatus = "保护未完成：" + exception.Message;
+            ReportFailure("进程保护", "protection.sweep", _protectionStatus, exception);
+        }
     }
 
     private int SweepProtection(ProtectionReadiness readiness)
     {
+        var previousEvents = _processProtection.Events;
         var directories = _profile.Applications.SelectMany(item => item.DirectoryRoots.Select(path =>
             new ProtectedDirectory(path, item.DisplayName ?? item.DiscoveryKey))).ToArray();
         int failures = _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready,
             "主程序网络保护：" + readiness.Reason, directories, Volatile.Read(ref _activeRouting).Coverage.Contains);
+        foreach (var item in _processProtection.Events.Except(previousEvents))
+        {
+            string detail = $"{item.Application} · PID {item.Pid}\n{item.Path}\n{item.Reason}\n{item.Error}";
+            if (!item.Succeeded) Diagnostics.Report("进程终止", "process.terminate", detail);
+            else Diagnostics.Info("进程终止", detail);
+        }
         if (InheritedRoutingKey(InheritedApplicationRoutes(_profile)) != Volatile.Read(ref _activeRouting).InheritedKey)
             _routingDirty = true;
         _protectionStatus = readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
@@ -177,7 +191,13 @@ public sealed partial class AppController
                     ValidateProtectionConflicts(profile, ResolveProxyBindings(profile, token).OwnerPaths);
                     _protectionError = profile.AdapterConfigurationError;
                 }
-                catch (Exception exception) { _protectionError = exception.Message; }
+                catch (Exception exception)
+                {
+                    _protectionError = exception.Message;
+                    Diagnostics.Report("保护配置检查", "protection.configuration", exception.Message, exception);
+                }
+                if (_protectionError is not null)
+                    Diagnostics.Report("保护配置检查", "protection.invalid", _protectionError);
                 var observed = _singBox.Status;
                 if (observed.State == EgressController.SingBox.Runtime.SingBoxServiceState.Running)
                 {
@@ -187,7 +207,7 @@ public sealed partial class AppController
                     if (error is not null) _singBox.ReportTakeoverFailure(error, observed);
                 }
                 // Independent from the companion's main/TUN lease and tray badge.
-                var readiness = ProtectionReadiness.Evaluate(IsTunRunning, _singBox.Status.ErrorMessage,
+                var readiness = ProtectionReadiness.Evaluate(IsTunRunning, LastTunFailure.Length == 0 ? null : LastTunFailure,
                     _profileApplied, _protectionError, _takeoverError, _networkHealth.Readiness);
                 SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)
@@ -196,8 +216,13 @@ public sealed partial class AppController
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
+                ReportFailure("保护监控", "protection.monitor", "无法确认 TUN 或出口网络状态：" + exception.Message, exception);
                 try { SweepProtection(new(false, "无法确认 TUN 或出口网络状态：" + exception.Message)); }
-                catch (Exception failure) { _protectionStatus = "保护未完成：" + failure.Message; }
+                catch (Exception failure)
+                {
+                    _protectionStatus = "保护未完成：" + failure.Message;
+                    ReportFailure("进程保护", "protection.sweep", _protectionStatus, failure);
+                }
             }
             try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
@@ -220,6 +245,7 @@ public sealed partial class AppController
         {
             _guardTransition = false;
             _protectionStatus = "退出已取消：" + exception.Message;
+            ReportFailure("退出保护交接", "shutdown.handoff", _protectionStatus, exception);
             throw;
         }
         _shuttingDown = true;
