@@ -148,7 +148,7 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Classes="eyebrow" Text="数据面" />
                                      <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                      <TextBlock Classes="muted" Text="优先级：代理进程固定出口 → 应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。TUN 未接管、出口掉线或联网检测失败时持续关闭所选应用，恢复后由你重新打开。" TextWrapping="Wrap" />
+                                      <TextBlock Classes="muted" Text="优先级：代理进程固定出口 → 应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。TUN 未接管、出口掉线或联网检测连续三次失败时持续关闭所选应用，恢复后由你重新打开。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -167,7 +167,7 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="TUN 与网络保护" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="TUN 未接管、任一网卡掉线、家宽或默认代理联网检测失败时，持续关闭所选应用。DoH 状态不参与判断；检测恢复后可手动重新打开。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="TUN 未接管、任一网卡掉线、家宽或默认代理联网检测连续三次失败时，持续关闭所选应用。DoH 状态不参与判断；检测恢复后可手动重新打开。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="1">
@@ -176,14 +176,14 @@
                                     <TextBlock Classes="card-title" Text="{Binding Network.MonitorStatus}" TextWrapping="Wrap" />
                                     <TextBlock Text="{Binding Network.DirectInternetStatus}" TextWrapping="Wrap" />
                                     <TextBlock Text="{Binding Network.ProxyInternetStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="家宽直连与默认代理分别每分钟检测联网，检测期间沿用上次完成的结果：通过继续运行，失败继续关闭。网卡连接与 IP 仍每秒检查。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="家宽直连与默认代理每 30 秒检测一轮。失败后间隔 5 秒复测两次，连续三次失败才确认故障；期间沿用上次结论。网卡连接与 IP 仍每秒检查。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Classes="card" Grid.Column="2">
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="eyebrow" Text="联网最后检测" />
                                     <TextBlock Classes="card-title" Text="{Binding Network.LastChecked}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="均访问 https://cp.cloudflare.com/generate_204：家宽直连，非家宽经过当前默认代理端口。单次最多等待 8 秒，不切换 DNS 或重启 TUN。未配置代理端口时只做家宽网站检测。" TextWrapping="Wrap" />
+                                    <TextBlock Classes="muted" Text="均访问 https://cp.cloudflare.com/generate_204：家宽直连，非家宽经过当前默认代理端口。每次最多等待 8 秒；复测任一次成功即结束重试，不切换 DNS 或重启 TUN。未配置代理端口时只做家宽网站检测。" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Button Grid.Column="3" Classes="primary" Content="检测联网"

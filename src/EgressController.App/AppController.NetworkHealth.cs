@@ -54,7 +54,8 @@ public sealed partial class AppController
                 if (IsTunRunning && !IsUpdatingProfile && DateTimeOffset.UtcNow >= nextCheck
                     && await _networkProbeGate.WaitAsync(0, token).ConfigureAwait(false))
                 {
-                    // Both exits share one one-minute cadence, measured from the start of a round.
+                    // Both exits share a 30-second cadence, measured from the start of a round.
+                    // The gate stays held through retries, so rounds never overlap.
                     nextCheck = DateTimeOffset.UtcNow + InternetHealthProbe.CheckInterval;
                     try { await RunInternetHealthCheckAsync(token, announce: false).ConfigureAwait(false); }
                     finally { _networkProbeGate.Release(); }
@@ -92,9 +93,10 @@ public sealed partial class AppController
             async Task<bool> CheckAsync(NetworkHealthCheck check, bool ready)
             {
                 NetworkHealthResult result = ready
-                    ? await InternetHealthProbe.RunAsync(check, defaultUpstreamPort, api.ProbeOutboundAsync, token).ConfigureAwait(false)
+                    ? await InternetHealthProbe.RunWithRetriesAsync(check, defaultUpstreamPort, api.ProbeOutboundAsync, token,
+                        detail => _networkHealth.ReportProgress(generation, check, detail, token)).ConfigureAwait(false)
                     : new(false, "网卡未连接或没有 IP");
-                // Each completed verdict takes effect without waiting for the other adapter.
+                // Publish only success or three consecutive failures, independently for each exit.
                 return _networkHealth.Complete(generation, check, result, token);
             }
             bool[] results = await Task.WhenAll(
@@ -112,12 +114,14 @@ public sealed partial class AppController
         }
         catch (Exception exception)
         {
-            var result = new NetworkHealthResult(false, DescribeDiagnosticsFailure(exception));
-            bool direct = _networkHealth.Complete(generation, NetworkHealthCheck.DirectInternet, result, token);
-            bool proxy = defaultUpstreamPort is null
-                || _networkHealth.Complete(generation, NetworkHealthCheck.ProxyInternet, result, token);
-            accepted = direct && proxy;
+            // Setup/coordination errors are not three measured failures. Preserve the last verdict.
+            string error = "联网检测未完成，沿用上次完成的结果：" + DescribeDiagnosticsFailure(exception);
+            lock (_networkStateGate)
+                if (generation == _networkHealth.Generation) _networkMonitorStatus = error;
+            return ControllerOperationResult.Failure(error);
         }
+
+        finally { _networkHealth.ClearProgress(generation); }
 
         ProtectionReadiness network;
         lock (_networkStateGate)

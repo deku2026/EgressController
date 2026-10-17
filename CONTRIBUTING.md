@@ -3,9 +3,11 @@
 EgressController is a Windows-only .NET application. Keep selected applications guarded until
 TUN takeover, the selected configuration, both live adapter bindings and both Internet probes
 are healthy. Probe https://cp.cloudflare.com/generate_204 through the bound direct and proxy
-outbounds once per minute, independently and in parallel. Keep the last completed result during
-rechecks: failures close selected processes, success permits them only when all other conditions
-pass. Canceled or stale results cannot change health. Adapter outages must be detected from live
+outbounds every 30 seconds, independently and in parallel. On failure wait five seconds before
+each of two retries. Only three consecutive failed attempts publish a failure; any success stops
+retrying. Keep the last completed verdict throughout retries, including existing protection.
+Success permits processes only when all other conditions pass. TUN loss and live adapter outages
+still protect immediately. Canceled or stale results cannot change health. Adapter outages must be detected from live
 snapshots, never the cached configuration bindings.
 DNS configuration is fixed to Cloudflare. Do not add DoH health queries or make DNS response status
 an application-protection condition. Internet probes never reload TUN or select DNS resolvers.

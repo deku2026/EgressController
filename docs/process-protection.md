@@ -58,7 +58,11 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
    (the current default loopback SOCKS5 endpoint). Its proxy core's external connections remain
    bound to the non-residential NIC through the higher-priority `proxy-direct` process route.
    The test must traverse the default proxy instead of requiring direct access to the website.
-   Both run in parallel on a shared one-minute cadence measured from the start of each round;
+   Both run in parallel on a shared 30-second cadence measured from the start of each round;
+   each failed attempt waits five seconds before retrying, up to three attempts per exit. Any
+   success ends that exit's retries. Only three consecutive failures publish an outage. The gate
+   spans retries so automatic/manual rounds cannot overlap; slower rounds delay the next check.
+   Progress and failure reasons are displayed without replacing the previous health verdict;
    startup checks immediately, and a manual check uses the same probes. Each probe is bounded
    to eight seconds, and each completed result takes effect independently. An online NIC with
    an unavailable default proxy still fails. Never fall back to another SOCKS port, a direct exit,
@@ -102,7 +106,8 @@ ends protection and stops the owned core. There is no persistent firewall or bac
 - Network health tests: successful/failed rechecks, no-IP/link loss for both roles, cached versus live
   adapter state, residential/default-proxy probes using generate_204, arbitrary default ports,
   no direct fallback on proxy failure, direct-only mode, Internet failures with an online NIC,
-  timeouts, malformed responses, cancellation, stale generations, port changes and reconnects.
+  timeouts, malformed responses, five-second retry spacing, early success, three-failure confirmation,
+  cancellation during retries, stale generations, port changes and reconnects.
   Fake process control verifies termination and recovery.
 - Lifecycle tests: preparation preserving TUN, protection before restart, and checked rollback.
 - History tests: pruning while healthy, count limits, clear preserving descendants and retries.

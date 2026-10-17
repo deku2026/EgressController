@@ -187,6 +187,26 @@ public sealed class NetworkHealthStateTests
         Assert.True(Ready(state).Ready);
     }
 
+    [Fact]
+    public void Retry_progress_and_clearing_it_never_override_health_or_a_new_generation()
+    {
+        var state = Healthy();
+        int generation = state.Generation;
+        Assert.True(state.ReportProgress(generation, NetworkHealthCheck.DirectInternet, "1/3 failure; retrying", CancellationToken.None));
+        Assert.True(Ready(state).Ready);
+        Assert.Contains("1/3", state.DirectStatus);
+        Assert.False(ProtectionReadiness.Evaluate(false, "TUN exited", true, null, null, state.Readiness).Ready);
+        state.ClearProgress(generation);
+        Assert.True(Ready(state).Ready);
+        Assert.DoesNotContain("1/3", state.DirectStatus);
+        state.Reset();
+        Assert.False(state.ReportProgress(generation, NetworkHealthCheck.DirectInternet, "stale", CancellationToken.None));
+        state.ReportProgress(state.Generation, NetworkHealthCheck.DirectInternet, "fresh", CancellationToken.None);
+        state.ClearProgress(generation);
+        Assert.Contains("fresh", state.DirectStatus);
+        Assert.False(Ready(state).Ready); // No success confirmed since reset.
+    }
+
     private static ProtectionReadiness Ready(NetworkHealthState state)
         => ProtectionReadiness.Evaluate(true, null, true, null, null, state.Readiness);
     private static NetworkHealthState Healthy()
