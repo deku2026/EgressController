@@ -54,6 +54,9 @@ clients and denies the network SID. It does not grant the ordinary owner pipe-in
 Windows supplies peer process IDs; both ends validate SID and full executable path. Status/history
 requests can come from the authorized owner's tray; only the registered main path can publish readiness.
 The client checks the installed service executable and LocalSystem identity before sending state.
+Client opens request the same individual access bits as the ACL and use identification-only SQOS.
+Using `GENERIC_WRITE` here would also request pipe-instance creation and deny the normal user's tray;
+see [Microsoft's pipe access documentation](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights).
 
 Messages are length-prefixed source-generated JSON, bounded to 4 MiB, with a protocol version,
 random session identifier and increasing sequence. Main connects with a full validated policy;

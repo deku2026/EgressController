@@ -28,8 +28,7 @@ public sealed class GuardPipeClient(GuardPaths paths, bool main = false) : IMain
         {
             if (_pipe is null)
             {
-                _pipe = new NamedPipeClientStream(".", paths.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-                await _pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
+                _pipe = await GuardPipeSecurity.ConnectAsync(paths, deadline.Token).ConfigureAwait(false);
                 GuardPipeSecurity.VerifyServer(_pipe, paths);
                 _session = Guid.NewGuid(); _sequence = 0; _revision = null;
                 if (main)

@@ -6,6 +6,16 @@ namespace EgressController.Guardian.Tests;
 public sealed class GuardSafetyTests
 {
     [Fact]
+    public void Ordinary_tray_access_matches_acl_without_pipe_creation_or_impersonation_rights()
+    {
+        const uint pipeCreateInstance = 4, genericReadWrite = 0xc0000000;
+        Assert.Equal(0u, GuardPipeAccess.ClientRights & (pipeCreateInstance | genericReadWrite));
+        Assert.Equal(3u, GuardPipeAccess.ClientRights & 3); // Both read-data and write-data.
+        Assert.Contains($"(A;;0x{GuardPipeAccess.ClientRights:x};;;owner)", GuardPipeAccess.Descriptor("owner"));
+        Assert.Contains("(D;;GA;;;NU)", GuardPipeAccess.Descriptor("owner"));
+        Assert.Equal(0x00110000u, GuardPipeAccess.ClientFlags & 0x001f0000); // SQOS + Identification, not Impersonation.
+    }
+    [Fact]
     public void Service_controls_are_fenced_in_mock_only_mode()
     {
         var paths = new GuardPaths("mock", "mock", "mock", @"C:\mock\data", @"C:\mock\install");

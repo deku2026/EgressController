@@ -14,6 +14,8 @@ internal static partial class GuardPipeSecurity
     private static partial int ConvertDescriptor(string sddl, uint revision, out nint descriptor, out uint size);
     [LibraryImport("kernel32.dll", EntryPoint = "CreateNamedPipeW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial nint CreatePipe(string name, uint mode, uint pipeMode, uint instances, uint output, uint input, uint timeout, ref SecurityAttributes security);
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint OpenPipe(string name, uint access, uint share, nint security, uint creation, uint flags, nint template);
     [LibraryImport("kernel32.dll")]
     private static partial nint LocalFree(nint pointer);
     [LibraryImport("kernel32.dll", SetLastError = true)]
@@ -24,7 +26,7 @@ internal static partial class GuardPipeSecurity
     public static NamedPipeServerStream CreateServer(GuardPaths paths)
     {
         RuntimeSafety.RequireLiveOperations();
-        string descriptor = $"D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;{paths.OwnerSid})";
+        string descriptor = GuardPipeAccess.Descriptor(paths.OwnerSid);
         GuardNative.Check(ConvertDescriptor(descriptor, 1, out nint security, out _));
         try
         {
@@ -37,6 +39,26 @@ internal static partial class GuardPipeSecurity
             catch { handle.Dispose(); throw; }
         }
         finally { LocalFree(security); }
+    }
+    public static async Task<NamedPipeClientStream> ConnectAsync(GuardPaths paths, CancellationToken token)
+    {
+        RuntimeSafety.RequireLiveOperations();
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            // Match the server's individual rights; prevent a spoofed server from
+            // impersonating the elevated main before VerifyServer has completed.
+            nint raw = OpenPipe(@"\\.\pipe\" + paths.PipeName, GuardPipeAccess.ClientRights, 0, 0, 3, GuardPipeAccess.ClientFlags, 0);
+            if (raw != -1)
+            {
+                var handle = new SafePipeHandle(raw, true);
+                try { return new NamedPipeClientStream(PipeDirection.InOut, true, true, handle); }
+                catch { handle.Dispose(); throw; }
+            }
+            int error = Marshal.GetLastPInvokeError();
+            if (error is not (2 or 231)) throw new System.ComponentModel.Win32Exception(error);
+            await Task.Delay(TimeSpan.FromMilliseconds(25), token).ConfigureAwait(false);
+        }
     }
     public static GuardProcess Client(NamedPipeServerStream pipe, GuardPaths paths)
     {
