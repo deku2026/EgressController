@@ -39,7 +39,7 @@ public sealed class WindowsGuardServiceControl(GuardPaths paths)
     {
         RuntimeSafety.RequireLiveOperations();
         using var scm = Handle.Scm(1 | 2);
-        string binary = $"\"{paths.ServiceExecutable}\" --owner {paths.OwnerSid}";
+        string binary = paths.ServiceCommandLine;
         using var service = new Handle(GuardNative.CreateService(scm.Value, paths.ServiceName,
             "EgressController 独立守护 (" + paths.OwnerSid + ")", 0xF01FF, 0x10, autoStart ? 2u : 3u,
             1, binary, null, 0, null, null, null));

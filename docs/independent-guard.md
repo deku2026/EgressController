@@ -53,7 +53,11 @@ The local asynchronous named pipe has an explicit SYSTEM/administrators/owner AC
 clients and denies the network SID. It does not grant the ordinary owner pipe-instance creation rights.
 Windows supplies peer process IDs; both ends validate SID and full executable path. Status/history
 requests can come from the authorized owner's tray; only the registered main path can publish readiness.
-The client checks the installed service executable and LocalSystem identity before sending state.
+The client matches the kernel-reported pipe server PID to the SCM's running/starting service PID,
+registered command line and LocalSystem account before sending state. It does not try to read a
+SYSTEM process token from the ordinary user's tray. SCM query rights are available to local users;
+cross-account token queries can require debug privilege ([service rights](https://learn.microsoft.com/en-us/windows/win32/services/service-security-and-access-rights),
+[process token rights](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken)).
 Client opens request the same individual access bits as the ACL and use identification-only SQOS.
 Using `GENERIC_WRITE` here would also request pipe-instance creation and deny the normal user's tray;
 see [Microsoft's pipe access documentation](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights).

@@ -73,10 +73,6 @@ internal static partial class GuardPipeSecurity
     public static void VerifyServer(NamedPipeClientStream pipe, GuardPaths paths)
     {
         GuardNative.Check(GetNamedPipeServerProcessId(pipe.SafePipeHandle, out uint pid));
-        if (GuardWindowsIdentity.ProcessSid(pid) != "S-1-5-18")
-            throw new UnauthorizedAccessException("守护服务身份无效。");
-        var identity = new WindowsProcessIdentityResolver(new ExecutablePathCanonicalizer()).Resolve(pid);
-        if (!string.Equals(identity?.ExePathFinal, paths.ServiceExecutable, StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("守护服务路径不匹配。");
+        GuardPipeAccess.ValidateServer(paths, pid, new WindowsGuardServiceControl(paths).Query());
     }
 }

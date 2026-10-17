@@ -6,6 +6,21 @@ namespace EgressController.Guardian.Tests;
 public sealed class GuardSafetyTests
 {
     [Fact]
+    public void Pipe_server_is_bound_to_scm_pid_command_and_system_account_without_debug_privilege()
+    {
+        var paths = new GuardPaths("owner", "guard", "guard", @"C:\mock\data", @"C:\mock\install");
+        var service = new GuardServiceInfo(paths.ServiceName, GuardServiceState.Running, true, 300,
+            paths.ServiceCommandLine, "LocalSystem");
+        GuardPipeAccess.ValidateServer(paths, 300, service);
+        GuardPipeAccess.ValidateServer(paths, 300, service with { State = GuardServiceState.Starting });
+        GuardServiceInfo[] invalid = [service with { Name = "other" }, service with { Pid = 301 },
+            service with { State = GuardServiceState.Stopped }, service with { Account = "owner" },
+            service with { BinaryPath = @"C:\mock\fake.exe" }];
+        foreach (var value in invalid)
+            Assert.Throws<UnauthorizedAccessException>(() => GuardPipeAccess.ValidateServer(paths, 300, value));
+        Assert.Throws<UnauthorizedAccessException>(() => GuardPipeAccess.ValidateServer(paths, 0, service));
+    }
+    [Fact]
     public void Ordinary_tray_access_matches_acl_without_pipe_creation_or_impersonation_rights()
     {
         const uint pipeCreateInstance = 4, genericReadWrite = 0xc0000000;
