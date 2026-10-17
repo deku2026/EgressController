@@ -39,6 +39,8 @@ public sealed class NetworkAdapterInfo
 
     /// <summary>Windows IF_TYPE value. It is runtime metadata, never persisted in Profile.</summary>
     public uint InterfaceType { get; init; }
+    public uint Ipv4Metric { get; init; }
+    public uint Ipv6Metric { get; init; }
 
     public AdapterAddressState AddressState
     {

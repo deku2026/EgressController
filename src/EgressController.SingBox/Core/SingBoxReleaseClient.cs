@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using EgressController.Transport.Upstream;
 
 namespace EgressController.SingBox.Core;
 
@@ -58,17 +59,17 @@ public sealed class SingBoxReleaseClient : ISingBoxReleaseClient
 
     public async Task<SingBoxRelease> GetLatestStableAsync(CancellationToken cancellationToken = default)
     {
+        using var deadline = HttpTransfer.Deadline(_client, cancellationToken);
+        cancellationToken = deadline.Token;
         using HttpResponseMessage response = await _client.GetAsync(
             LatestReleaseEndpoint,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        SingBoxRelease release = await JsonSerializer.DeserializeAsync(
-                stream,
-                SingBoxJsonContext.Default.SingBoxRelease,
-                cancellationToken)
-            .ConfigureAwait(false)
+        using var payload = new MemoryStream();
+        await HttpTransfer.CopyBoundedAsync(stream, payload, 4 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
+        SingBoxRelease release = JsonSerializer.Deserialize(payload.ToArray(), SingBoxJsonContext.Default.SingBoxRelease)
             ?? throw new SingBoxReleaseException("GitHub release JSON 为空。");
 
         if (release.Draft || release.Prerelease)
@@ -100,6 +101,8 @@ public sealed class SingBoxReleaseClient : ISingBoxReleaseClient
             throw new SingBoxReleaseException("release asset URL 不是受支持的 HTTP(S) 地址。");
         if (asset.Size is <= 0 or > 512L * 1024 * 1024)
             throw new SingBoxReleaseException("release asset 大小不在允许范围内。");
+        using var deadline = HttpTransfer.Deadline(_client, cancellationToken);
+        cancellationToken = deadline.Token;
 
         using HttpResponseMessage response = await _client.GetAsync(
             uri,
@@ -107,7 +110,8 @@ public sealed class SingBoxReleaseClient : ISingBoxReleaseClient
             cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         await using Stream source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await source.CopyToAsync(destination, 128 * 1024, cancellationToken).ConfigureAwait(false);
+        long copied = await HttpTransfer.CopyBoundedAsync(source, destination, asset.Size, cancellationToken).ConfigureAwait(false);
+        if (copied != asset.Size) throw new InvalidDataException("release asset 正文大小与声明不一致。");
     }
 
     public static bool TryParseSupportedVersion(string tag, out Version? version)

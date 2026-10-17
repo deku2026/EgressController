@@ -115,8 +115,10 @@ public sealed unsafe class TcpOwnerSnapshotResolver : IConnectionOwnerResolver
     {
         if (row.dwState != MIB_TCP_STATE.MIB_TCP_STATE_ESTAB)
             return false;
-        return ToPort(row.dwLocalPort) == clientLocal.Port && Bytes16(row.ucLocalAddr) == UnsafeBytes(clientLocal.Address)
-              && ToPort(row.dwRemotePort) == listenerLocal.Port && Bytes16(row.ucRemoteAddr) == UnsafeBytes(listenerLocal.Address);
+        return ToPort(row.dwLocalPort) == clientLocal.Port && row.dwLocalScopeId == clientLocal.Address.ScopeId
+              && Bytes16(row.ucLocalAddr).AsSpan().SequenceEqual(UnsafeBytes(clientLocal.Address))
+              && ToPort(row.dwRemotePort) == listenerLocal.Port && row.dwRemoteScopeId == listenerLocal.Address.ScopeId
+              && Bytes16(row.ucRemoteAddr).AsSpan().SequenceEqual(UnsafeBytes(listenerLocal.Address));
     }
 
     internal static ushort ToPort(uint mibPort)

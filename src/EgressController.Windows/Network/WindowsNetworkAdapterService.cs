@@ -113,6 +113,8 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
             Gateways = gateways,
             DnsServers = dnsServers,
             InterfaceType = cur->IfType,
+            Ipv4Metric = cur->Ipv4Metric,
+            Ipv6Metric = cur->Ipv6Metric,
         };
     }
 

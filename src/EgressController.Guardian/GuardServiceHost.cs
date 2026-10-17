@@ -92,7 +92,7 @@ public static class GuardServiceWorker
         var mailbox = new GuardPolicyMailbox(paths.DataDirectory);
         var runtime = new GuardRuntime(store,
             new UserScopedProcessControl(new WindowsProcessControl(), paths.OwnerSid), new WindowsGuardFacts(),
-            [paths.ServiceExecutable, paths.TrayExecutable]);
+            [paths.ServiceExecutable, paths.TrayExecutable], pathResolver: new ExecutablePathCanonicalizer());
         using var stopped = CancellationTokenSource.CreateLinkedTokenSource(token);
         using var pulse = new SemaphoreSlim(0, 1);
         void Wake() { try { pulse.Release(); } catch (SemaphoreFullException) { } }

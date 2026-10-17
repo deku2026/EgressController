@@ -105,8 +105,10 @@ public sealed partial class AppController : IAsyncDisposable
     {
         EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
         string applicationDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        _dataRoot = Path.GetFullPath(dataRoot ?? Path.Combine(applicationDirectory, "data"));
-        _rulesetRoot = Path.GetFullPath(rulesetRoot ?? Path.Combine(applicationDirectory, "ruleset"));
+        ApplicationStoragePaths storage = ApplicationStoragePaths.Resolve(applicationDirectory,
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), WindowsPackageIdentity.IsPackaged());
+        _dataRoot = Path.GetFullPath(dataRoot ?? storage.Data);
+        _rulesetRoot = Path.GetFullPath(rulesetRoot ?? storage.Rulesets);
         Directory.CreateDirectory(_dataRoot);
         Directory.CreateDirectory(Path.Combine(_dataRoot, "logs"));
         Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
@@ -116,13 +118,14 @@ public sealed partial class AppController : IAsyncDisposable
         _quotaStore = new EgressQuotaStore(_dataRoot);
         _stateStore = new SingBoxStateStore(_dataRoot);
         _adapterService = new WindowsNetworkAdapterService();
-        _profile = LoadProfile();
+        _profile = ApplicationPathAliases.Expand(LoadProfile(), new ExecutablePathCanonicalizer());
         ConfigureControlPlane();
         RefreshAdapters();
         _profile = _profile.NormalizeAndValidate();
         _profileStore.Save(_profile);
 
-        _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync, BeforeTunChange);
+        _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync, BeforeTunChange,
+            () => { if (!_shuttingDown) _guardTransition = false; });
         _singBox.Output += OnSingBoxOutput;
         InitializeProtection();
         InitializeGuardian();
@@ -240,7 +243,7 @@ public sealed partial class AppController : IAsyncDisposable
                     ResolutionUnsupported = true,
                 });
             }
-            string previousInventory = InventoryFingerprint(ApplicationInventorySnapshot.Create(_targets.All()));
+            string previousSelection = ApplicationRoutingKey(_profile);
             _targets.Clear();
             foreach (LaunchTarget target in discovered)
             {
@@ -256,10 +259,10 @@ public sealed partial class AppController : IAsyncDisposable
                             .Concat(selection.DirectoryRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() }
                     : selection).ToArray(),
             };
+            _profile = ApplicationPathAliases.Expand(_profile, new ExecutablePathCanonicalizer());
             _profileStore.Save(_profile);
             RefreshProtectedInventory();
-            if (previousInventory != InventoryFingerprint(inventory))
-                InvalidateReadiness("应用扫描已更新，正在应用规则");
+            if (previousSelection != ApplicationRoutingKey(_profile)) _routingDirty = true;
             _inventoryReady = true;
         }
         finally { _configurationGate.Release(); }
@@ -500,6 +503,8 @@ public sealed partial class AppController : IAsyncDisposable
             StartRuntimeMonitor();
             StartNetworkMonitor();
             _profileApplied = true;
+            _routingDirty = false;
+            ActivatePreparedRouting();
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -641,25 +646,25 @@ public sealed partial class AppController : IAsyncDisposable
         _configurationGate.Dispose();
     }
 
-    private async Task<SingBoxRuntimeCandidate> PrepareRuntimeAsync(CancellationToken cancellationToken)
+    private Task<SingBoxRuntimeCandidate> PrepareRuntimeAsync(CancellationToken cancellationToken)
+        => PrepareRuntimeAsync(_profile, cancellationToken);
+
+    private async Task<SingBoxRuntimeCandidate> PrepareRuntimeAsync(EgressProfileDocument desiredProfile, CancellationToken cancellationToken)
     {
-        EgressProfileDocument profile = _profile.NormalizeAndValidate();
+        EgressProfileDocument profile = desiredProfile.NormalizeAndValidate();
 
         RefreshAdapters();
         // Only migrate persisted intent. Interface discovery must never choose either role.
-        EgressProfileDocument normalizedProfile = profile.NormalizeAndValidate();
-        if (!Equals(normalizedProfile, _profile))
-        {
-            _profile = normalizedProfile;
-            _profileStore.Save(_profile);
-        }
-        profile = normalizedProfile;
+        string? conflict = _tunInspector.GetStartError(_directSingBox.Status.State == "running");
+        if (conflict is not null) throw new ControllerPreparationException("tun.conflict", conflict);
         NetworkEnvironmentSnapshot environment = _adapterBindings.Resolve(_environmentResolver.Resolve(profile, _adapters), _adapters);
         ProxyPortSnapshot proxyBindings = ResolveProxyBindings(profile, cancellationToken);
         IReadOnlyList<string> ownerPaths = proxyBindings.OwnerPaths;
-        ValidateProtectionConflicts(profile, ownerPaths);
+        ValidateProtectionConflicts(profile, ownerPaths, updateExclusions: false);
         ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(_targets.All());
-        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory);
+        SingBoxApplicationRouteInput[] inheritedRoutes = InheritedApplicationRoutes(profile);
+        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory)
+            .Concat(inheritedRoutes).ToArray();
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = _preparedCore ??= await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
         _coreExecutable = core.ExecutablePath;
@@ -667,7 +672,7 @@ public sealed partial class AppController : IAsyncDisposable
         environment = _adapterBindings.Resolve(_environmentResolver.Resolve(profile, _adapters), _adapters);
         proxyBindings = ResolveProxyBindings(profile, cancellationToken);
         ownerPaths = proxyBindings.OwnerPaths;
-        ValidateProtectionConflicts(profile, ownerPaths);
+        ValidateProtectionConflicts(profile, ownerPaths, updateExclusions: false);
         ControllerEndpoint? existingEndpoint = IsTunRunning ? LoadControllerEndpoint() : null;
         ControllerEndpoint endpoint = existingEndpoint is not null && !profile.UpstreamPorts.Contains(existingEndpoint.Port)
             ? existingEndpoint : CreateControllerEndpoint(profile.UpstreamPorts);
@@ -679,7 +684,6 @@ public sealed partial class AppController : IAsyncDisposable
             Profile = profile,
             Environment = environment,
             ApplicationRoutes = applicationRoutes,
-            KnownApplicationExecutablePaths = inventory.Entries.SelectMany(entry => entry.ExecutablePaths).ToArray(),
             UpstreamOwnerPaths = ownerPaths,
             UnreadyUpstreamPorts = proxyBindings.Ports.Where(binding => !binding.IsReady).Select(binding => binding.Port).ToArray(),
             SelfExecutablePaths = [Environment.ProcessPath ?? string.Empty, core.ExecutablePath],
@@ -693,6 +697,8 @@ public sealed partial class AppController : IAsyncDisposable
         string configPath = Path.Combine(runtimeDirectory, $"config-{compiled.Sha256}.json");
         EgressProfileCompiler.WriteNext(configPath, compiled);
         await _coreManager.CheckConfigAsync(core, configPath, cancellationToken).ConfigureAwait(false);
+        _preparedRouting = new(new ApplicationRoutingCoverage(applicationRoutes.SelectMany(route => route.ExecutablePaths),
+            applicationRoutes.SelectMany(route => route.DirectoryRoots ?? [])), InheritedRoutingKey(inheritedRoutes));
         SetRuntimeFingerprint(environment, proxyBindings);
         return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256, endpoint.Port, endpoint.Secret);
     }
@@ -723,9 +729,11 @@ public sealed partial class AppController : IAsyncDisposable
         return snapshot;
     }
 
-    private static string InventoryFingerprint(ApplicationInventorySnapshot inventory)
-        => string.Join("\n", inventory.Entries.Select(entry =>
-            entry.DiscoveryKey + ":" + entry.CanRoute + ":" + string.Join("|", entry.ExecutablePaths)));
+    private static string ApplicationRoutingKey(EgressProfileDocument profile)
+        => string.Join("\n", profile.Applications.OrderBy(item => item.DiscoveryKey, StringComparer.Ordinal)
+            .Select(item => item.DiscoveryKey + ":" + item.Target + ":"
+                + string.Join("|", item.ExecutablePaths.Order(StringComparer.OrdinalIgnoreCase)) + ":"
+                + string.Join("|", item.DirectoryRoots.Order(StringComparer.OrdinalIgnoreCase))));
 
     private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
         EgressProfileDocument profile, ApplicationInventorySnapshot inventory)
@@ -737,7 +745,9 @@ public sealed partial class AppController : IAsyncDisposable
                 throw new ControllerPreparationException("application.missing", $"找不到已选择的应用：{selection.DiscoveryKey}。");
             if (!target.CanRoute)
                 throw new ControllerPreparationException("application.unresolved", $"应用没有可用于分流匹配的 EXE：{target.DisplayName}。");
-            routes.Add(new SingBoxApplicationRouteInput(target.ExecutablePaths, selection.Target));
+            routes.Add(new SingBoxApplicationRouteInput(
+                target.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                selection.Target, selection.DirectoryRoots));
         }
         return routes;
     }
@@ -781,73 +791,74 @@ public sealed partial class AppController : IAsyncDisposable
             EgressProfileDocument next;
             try
             {
-                next = update(previous).NormalizeAndValidate();
+                next = ApplicationPathAliases.Expand(update(previous).NormalizeAndValidate(), new ExecutablePathCanonicalizer());
+                if (EgressProfileStore.HasSameContent(next, previous)) return ControllerOperationResult.Success();
+                ValidateProtectionConflicts(next, ResolveProxyBindings(next, cancellationToken).OwnerPaths, updateExclusions: false);
             }
-            catch (Exception exception)
-            {
-                return ControllerOperationResult.Failure(exception.Message);
-            }
-
-            if (EgressProfileStore.HasSameContent(next, previous))
-                return ControllerOperationResult.Success();
-            try { ValidateProtectionConflicts(next, ResolveProxyBindings(next, cancellationToken).OwnerPaths); }
             catch (Exception exception) { return ControllerOperationResult.Failure(exception.Message); }
-            InvalidateReadiness("配置已变更，等待 TUN 应用新规则");
-            _profileApplied = false;
-            try
+
+            void Commit(EgressProfileDocument profile)
             {
-                _profile = next;
-                _profileStore.Save(next);
+                _profileStore.Save(profile);
+                _profile = profile;
                 RefreshProtectedInventory();
-                if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                _profile = previous;
-                RefreshProtectedInventory();
-                try
-                {
-                    _profileStore.Save(previous);
-                    if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
-                }
-                catch { /* Retain the persisted desired state and report the failed handoff below. */ }
-                _profileApplied = IsTunRunning && previouslyApplied;
-                return ControllerOperationResult.Failure("保存 Profile 失败：" + exception.Message);
             }
 
             if (!IsTunRunning)
             {
-                SetMessage("配置已保存，正在等待 TUN 自动启动。");
-                return ControllerOperationResult.Success();
+                try
+                {
+                    Commit(next);
+                    _profileApplied = false;
+                    if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
+                    SetMessage("配置已保存，正在等待 TUN 自动启动。");
+                    return ControllerOperationResult.Success();
+                }
+                catch (Exception exception) { return ControllerOperationResult.Failure("保存配置或同步守护失败：" + exception.Message); }
             }
 
             string previousRuntimeFingerprint = GetRuntimeFingerprint();
-            SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
+            void RestorePrevious()
+            {
+                // Restore enforcement even if the settings disk has become unwritable.
+                _profile = previous;
+                RefreshProtectedInventory();
+                _profileStore.Save(previous);
+            }
+            SingBoxApplyResult applied = await PreparedRuntimeUpdate.ApplyAsync(_singBox,
+                token => PrepareRuntimeAsync(next, token), () => Commit(next), RestorePrevious,
+                cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
                 _profileApplied = true;
-                StartDiagnostics(LoadControllerEndpoint());
-                StartNetworkMonitor();
+                _routingDirty = false;
+                ActivatePreparedRouting();
+                if (applied.CoreChanged)
+                {
+                    StartDiagnostics(LoadControllerEndpoint());
+                    StartNetworkMonitor();
+                }
                 SetMessage("配置已校验并应用。");
-                return ControllerOperationResult.Success();
             }
-
-            SetRuntimeFingerprint(previousRuntimeFingerprint);
-            _profileApplied = IsTunRunning && previouslyApplied;
-            _profile = previous;
-            RefreshProtectedInventory();
+            else
+            {
+                SetRuntimeFingerprint(previousRuntimeFingerprint);
+                _profileApplied = IsTunRunning && previouslyApplied;
+                if (applied.CoreChanged && IsTunRunning)
+                {
+                    StartDiagnostics(LoadControllerEndpoint());
+                    StartNetworkMonitor();
+                }
+            }
             try
             {
-                _profileStore.Save(previous);
                 if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch { }
-            return ControllerOperationResult.Failure(applied.ErrorMessage ?? "配置应用失败，已回滚。");
+            catch (Exception exception) { return ControllerOperationResult.Failure("守护同步失败：" + exception.Message); }
+            return applied.Succeeded ? ControllerOperationResult.Success()
+                : ControllerOperationResult.Failure(applied.ErrorMessage ?? "配置应用失败，已保留旧配置。");
         }
-        finally
-        {
-            _configurationGate.Release();
-        }
+        finally { _configurationGate.Release(); }
     }
 
     private void ConfigureControlPlane()
@@ -997,7 +1008,7 @@ public sealed partial class AppController : IAsyncDisposable
                 bool changed;
                 lock (_runtimeStateGate)
                     changed = _runtimeFingerprint.Length > 0 && !string.Equals(_runtimeFingerprint, fingerprint, StringComparison.Ordinal);
-                if (!changed && _profileApplied)
+                if (!changed && _profileApplied && !_routingDirty)
                     continue;
 
                 await ApplyRuntimeChangeAsync(cancellationToken).ConfigureAwait(false);
@@ -1022,21 +1033,26 @@ public sealed partial class AppController : IAsyncDisposable
             if (!IsTunRunning)
                 return;
 
-            _networkHealth.Reset();
             bool previouslyApplied = _profileApplied;
             string previousRuntimeFingerprint = GetRuntimeFingerprint();
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
                 _profileApplied = true;
-                StartDiagnostics(LoadControllerEndpoint());
-                StartNetworkMonitor();
+                _routingDirty = false;
+                ActivatePreparedRouting();
+                if (applied.CoreChanged)
+                {
+                    StartDiagnostics(LoadControllerEndpoint());
+                    StartNetworkMonitor();
+                }
                 SetMessage("检测到网卡或上游代理进程变化，配置已重新校验并应用。");
             }
             else
             {
                 SetRuntimeFingerprint(previousRuntimeFingerprint);
                 _profileApplied = IsTunRunning && previouslyApplied;
+                if (applied.CoreChanged && IsTunRunning) StartNetworkMonitor();
                 SetMessage("网络状态变化后的配置应用失败，已保留当前配置：" + (applied.ErrorMessage ?? "未知错误"));
             }
         }

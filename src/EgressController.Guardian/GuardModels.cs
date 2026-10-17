@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using EgressController.Core.Protection;
+using EgressController.Core.Contracts;
 
 namespace EgressController.Guardian;
 
@@ -10,6 +11,14 @@ public sealed record GuardPolicy
     public ProtectedExecutable[] Executables { get; init; } = [];
     public ProtectedDirectory[] Directories { get; init; } = [];
     public string[] Exclusions { get; init; } = [];
+    public GuardPolicy WithPathAliases(IExecutablePathCanonicalizer resolver) => this with
+    {
+        Executables = Executables.SelectMany(item => ApplicationPathAliases.Expand([item.Path], resolver)
+            .Select(path => item with { Path = path })).DistinctBy(item => item.Path, StringComparer.OrdinalIgnoreCase).ToArray(),
+        Directories = Directories.SelectMany(item => ApplicationPathAliases.Expand([item.Path], resolver)
+            .Select(path => item with { Path = path })).DistinctBy(item => item.Path, StringComparer.OrdinalIgnoreCase).ToArray(),
+        Exclusions = ApplicationPathAliases.Expand(Exclusions, resolver),
+    };
 
     public GuardPolicy Validate()
     {
