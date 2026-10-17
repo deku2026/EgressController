@@ -73,6 +73,34 @@ public sealed class GuardPresentationTests
         Assert.Equal(GuardAction.DisableAutoStart, Assert.Single(client.Actions));
     }
 
+    [Fact]
+    public async Task Failed_service_operation_is_logged_and_not_erased_by_later_success()
+    {
+        var entries = new List<EgressController.Diagnostics.CoreLogEntry>();
+        var journal = new EgressController.Diagnostics.DiagnosticJournal(Path.GetFullPath("mock-guard.log"), entries.Add);
+        var client = new Client { Throw = true };
+        var vm = new GuardManagementViewModel(client, journal, @"C:\mock\logs");
+        await vm.StopCommand.ExecuteAsync(null);
+        Assert.Contains("mock UAC cancelled", vm.LastFailure);
+        client.Throw = false;
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.RefreshAsync();
+        Assert.Contains("mock UAC cancelled", vm.LastFailure);
+        Assert.Contains(entries, entry => entry.Level == "error" && entry.Message.Contains("mock UAC cancelled"));
+        Assert.Equal(@"C:\mock\logs", vm.LogDirectory);
+    }
+
+    [Fact]
+    public async Task Communication_failure_is_recorded_even_when_read_returns_without_throwing()
+    {
+        var journal = new EgressController.Diagnostics.DiagnosticJournal(Path.GetFullPath("mock-guard.log"), _ => { });
+        var client = new Client { Snapshot = Snapshot(false) with { Error = "mock pipe disconnected" } };
+        var vm = new GuardManagementViewModel(client, journal);
+        await vm.RefreshAsync();
+        Assert.Contains("mock pipe disconnected", vm.LastFailure);
+        Assert.Contains(journal.Snapshot(), issue => issue.Message.Contains("mock pipe disconnected"));
+    }
+
     private static GuardServiceInfo Service => new("guard", GuardServiceState.Running, true, 7, @"C:\mock\guard.exe", "LocalSystem");
     private static GuardPanelSnapshot Snapshot(bool protecting) => new(Service,
         new(protecting, "mock guard reason", 1, 0, Fixture.Policy.Revision, []), false, null);

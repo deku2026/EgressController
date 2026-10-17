@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using EgressController.Core.Protection;
 using EgressController.Windows.Process;
+using EgressController.Diagnostics;
 
 namespace EgressController.Guardian;
 
@@ -39,7 +40,13 @@ public static unsafe partial class GuardServiceHost
     {
         _stop = new();
         _handle = Register(_paths!.ServiceName, &Handler, 0);
-        if (_handle == 0) return;
+        if (_handle == 0)
+        {
+            var failure = new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            new DiagnosticJournal(Path.Combine(_paths.LogDirectory, "guard-service.log"))
+                .Report("服务注册", "service.register", failure.Message, failure);
+            return;
+        }
         Report(2);
         uint error = 0;
         try { GuardServiceWorker.RunAsync(_paths, () => Report(4), _stop.Token).GetAwaiter().GetResult(); }
@@ -47,7 +54,9 @@ public static unsafe partial class GuardServiceHost
         catch (Exception exception)
         {
             error = 1;
-            try { File.WriteAllText(Path.Combine(_paths.DataDirectory, "service-error.log"), exception.ToString()); } catch { }
+            new DiagnosticJournal(Path.Combine(_paths.LogDirectory, "guard-service.log"))
+                .Report("服务退出", "service.fatal", exception.Message, exception);
+            try { File.WriteAllText(Path.Combine(_paths.DataDirectory, "service-error.log"), DiagnosticJournal.Redact(exception.ToString())); } catch { }
         }
         finally { Report(1, error); }
     }
@@ -82,6 +91,8 @@ public static class GuardServiceWorker
     public static async Task RunAsync(GuardPaths paths, Action running, CancellationToken token)
     {
         RuntimeSafety.RequireLiveOperations();
+        var diagnostics = new DiagnosticJournal(Path.Combine(paths.LogDirectory, "guard-service.log"));
+        diagnostics.Info("服务启动", paths.ServiceName);
         var registrations = new GuardRegistrationStore(paths.RegistrationFile);
         var registration = registrations.Load() ?? throw new InvalidDataException("守护安装记录缺失。");
         if (registration.OwnerSid != paths.OwnerSid || registration.InstallDirectory != paths.InstallDirectory)
@@ -92,11 +103,11 @@ public static class GuardServiceWorker
         var mailbox = new GuardPolicyMailbox(paths.DataDirectory);
         var runtime = new GuardRuntime(store,
             new UserScopedProcessControl(new WindowsProcessControl(), paths.OwnerSid), new WindowsGuardFacts(),
-            [paths.ServiceExecutable, paths.TrayExecutable], pathResolver: new ExecutablePathCanonicalizer());
+            [paths.ServiceExecutable, paths.TrayExecutable], pathResolver: new ExecutablePathCanonicalizer(), diagnostics: diagnostics);
         using var stopped = CancellationTokenSource.CreateLinkedTokenSource(token);
         using var pulse = new SemaphoreSlim(0, 1);
         void Wake() { try { pulse.Release(); } catch (SemaphoreFullException) { } }
-        var server = new GuardPipeServer(paths, registration, runtime, Wake);
+        var server = new GuardPipeServer(paths, registration, runtime, Wake, diagnostics);
         Task listener = server.RunAsync(stopped.Token);
         running();
         try
@@ -116,7 +127,11 @@ public static class GuardServiceWorker
                     }
                     runtime.SetInfrastructureError(null);
                 }
-                catch (Exception error) { runtime.SetInfrastructureError("守护状态读取/同步失败，继续保护已保存名单：" + error.Message); }
+                catch (Exception error)
+                {
+                    runtime.SetInfrastructureError("守护状态读取/同步失败，继续保护已保存名单：" + error.Message);
+                    diagnostics.Report("守护名单同步", "guard.mailbox", error.Message, error);
+                }
                 runtime.Tick();
                 await pulse.WaitAsync(TimeSpan.FromSeconds(1), stopped.Token).ConfigureAwait(false);
             }
@@ -125,6 +140,7 @@ public static class GuardServiceWorker
         {
             await stopped.CancelAsync().ConfigureAwait(false);
             await listener.ConfigureAwait(false);
+            diagnostics.Info("服务停止", "守护服务停止。");
         }
     }
 }

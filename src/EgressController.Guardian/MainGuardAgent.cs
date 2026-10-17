@@ -13,6 +13,7 @@ public sealed class MainGuardAgent : IAsyncDisposable
     private Task? _loop;
     private string? _savedRevision;
     public string Status { get; private set; } = "正在初始化独立守护";
+    public event Action<string, Exception>? FailureReported;
     public MainGuardAgent(GuardPaths paths, Func<GuardPolicy> policy, Func<GuardPolicy, GuardHeartbeat> heartbeat)
         : this(new WindowsMainGuardEnvironment(paths), new GuardPipeClient(paths, main: true), policy, heartbeat) { }
     public MainGuardAgent(IMainGuardEnvironment environment, IMainGuardClient client,
@@ -22,7 +23,11 @@ public sealed class MainGuardAgent : IAsyncDisposable
         _initialization = new(() => Task.Run(() =>
         {
             try { _environment.Initialize(_policy()); }
-            catch (Exception error) { Status = "独立守护初始化失败：" + error.Message; }
+            catch (Exception error)
+            {
+                Status = "独立守护初始化失败：" + error.Message;
+                FailureReported?.Invoke("guard.initialize", error);
+            }
         }));
     }
     public void Start() => _loop ??= Task.Run(RunAsync);
@@ -55,7 +60,11 @@ public sealed class MainGuardAgent : IAsyncDisposable
                 await PollAsync(_stop.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
-            catch (Exception exception) { Status = "独立守护连接失败：" + exception.Message; }
+            catch (Exception exception)
+            {
+                Status = "独立守护连接失败：" + exception.Message;
+                FailureReported?.Invoke("guard.connection", exception);
+            }
             try { await Task.Delay(TimeSpan.FromSeconds(1), _stop.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
         }

@@ -19,10 +19,14 @@ public sealed class NetworkAdaptersViewModel : ObservableObject
     private bool _refreshing, _busy, _dirty, _showAll;
     private string _status = "", _configurationStatus = "";
     private RoleAdapterOption? _direct, _proxy;
+    private Action<Exception>? _reportError;
 
     public NetworkAdaptersViewModel(AppController controller) : this(
         () => controller.Profile, () => controller.Adapters,
-        controller.SetAdapterRolesAsync, () => controller.IsUpdatingProfile) { }
+        controller.SetAdapterRolesAsync, () => controller.IsUpdatingProfile)
+    {
+        _reportError = error => controller.ReportFailure("网卡配置", "adapters.save", error.Message, error);
+    }
 
     // Injectable without starting the controller, TUN or any native network operation.
     public NetworkAdaptersViewModel(Func<EgressProfileDocument> profile, Func<IReadOnlyList<NetworkAdapterInfo>> adapters,
@@ -115,7 +119,7 @@ public sealed class NetworkAdaptersViewModel : ObservableObject
             if (result.Succeeded) _dirty = false;
             Status = result.Succeeded ? "网卡配置已保存。" : result.Error ?? "网卡配置失败。";
         }
-        catch (Exception exception) { Status = exception.Message; }
+        catch (Exception exception) { Status = exception.Message; _reportError?.Invoke(exception); }
         finally { _busy = false; _signature = ""; OnPropertyChanged(nameof(CanEdit)); Refresh(); }
     }
 }

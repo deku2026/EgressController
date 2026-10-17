@@ -183,6 +183,66 @@ public sealed class RuntimeReviewRegressionTests : IDisposable
         Assert.False(host.Running);
     }
 
+    [Fact]
+    public async Task Initial_protection_failure_sets_failed_state_and_survives_retry_until_success()
+    {
+        var host = new Host();
+        bool blocked = true;
+        await using var service = new SingBoxService(host, Store, beforeTunChange: () =>
+        {
+            if (blocked) throw new IOException("mock guard handoff denied");
+        });
+        var first = await service.StartAsync(_ => Task.FromResult(Candidate("first")), TestContext.Current.CancellationToken);
+        Assert.False(first.Succeeded);
+        Assert.Equal(SingBoxServiceState.Failed, service.Status.State);
+        Assert.Equal("protection.failed", service.Status.ErrorCode);
+        Assert.Empty(host.Starts);
+        var ready = new TaskCompletionSource<SingBoxRuntimeCandidate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retry = service.StartAsync(_ => ready.Task, TestContext.Current.CancellationToken);
+        Assert.Equal(SingBoxServiceState.Preparing, service.Status.State);
+        Assert.Contains("mock guard handoff denied", service.LastFailure!.ErrorMessage);
+        blocked = false;
+        ready.SetResult(Candidate("second"));
+        Assert.True((await retry).Succeeded);
+        Assert.Null(service.LastFailure);
+    }
+
+    [Fact]
+    public async Task Detailed_failure_code_and_failed_rollback_are_both_preserved()
+    {
+        var host = new Host();
+        bool fail = false;
+        List<string> stages = [];
+        await using var service = new SingBoxService(host, Store, (candidate, _) => !fail
+            ? Task.FromResult(true) : Task.FromException<bool>(new SingBoxServiceException("tun.takeover",
+                candidate.ConfigSha256 == "old" ? "mock rollback interface missing" : "mock IPv6 route conflict")));
+        service.FailureReported += (stage, _) => stages.Add(stage);
+        await service.ApplyCandidateAsync(Candidate("old"), TestContext.Current.CancellationToken);
+        fail = true;
+        var result = await service.ApplyCandidateAsync(Candidate("new"), TestContext.Current.CancellationToken);
+        Assert.Contains("mock IPv6 route conflict", result.ErrorMessage);
+        Assert.Contains("mock rollback interface missing", result.ErrorMessage);
+        Assert.Equal("tun.takeover", service.Status.ErrorCode);
+        Assert.Contains("apply", stages);
+        Assert.Contains("rollback", stages);
+        Assert.False(host.Running);
+    }
+
+    [Fact]
+    public async Task Preparation_reports_full_exception_and_keeps_specific_error_code()
+    {
+        var host = new Host();
+        var failure = new SingBoxServiceException("tun.conflict", "mock other tunnel enabled");
+        await using var service = new SingBoxService(host, Store);
+        Exception? observed = null;
+        service.FailureReported += (_, error) => observed = error;
+        var result = await service.StartAsync(_ => Task.FromException<SingBoxRuntimeCandidate>(failure), TestContext.Current.CancellationToken);
+        Assert.Same(failure, observed);
+        Assert.Equal("tun.conflict", result.ErrorCode);
+        Assert.Equal("tun.conflict", service.Status.ErrorCode);
+        Assert.Empty(host.Starts);
+    }
+
     private static SingBoxRuntimeCandidate Candidate(string config) => new()
     {
         CoreVersion = "1.13.19", CorePath = @"C:\mock\sing-box.exe", CoreSha256 = new('a', 64),

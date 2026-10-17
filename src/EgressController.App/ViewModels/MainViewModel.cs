@@ -21,6 +21,7 @@ public sealed class MainViewModel : ObservableObject
         Connections = new ConnectionsViewModel(controller);
         Traffic = new TrafficViewModel(controller);
         Network = new NetworkViewModel(controller);
+        Diagnostics = new DiagnosticsViewModel(controller.Diagnostics, controller.Logs, controller.LogPath);
         Domains.RefreshSearch();
         Overview.Refresh();
         Network.Refresh();
@@ -34,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     public ConnectionsViewModel Connections { get; }
     public TrafficViewModel Traffic { get; }
     public NetworkViewModel Network { get; }
+    public DiagnosticsViewModel Diagnostics { get; }
     public EgressController.Guardian.GuardManagementViewModel Guard => Controller.Guard;
     public string GuardianConnectionStatus => Controller.GuardianConnectionStatus;
 
@@ -47,6 +49,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception exception)
         {
             Status = "初始化失败：" + exception.Message;
+            Controller.ReportFailure("初始化", "app.initialize", Status, exception);
         }
         Refresh();
     }
@@ -61,6 +64,17 @@ public sealed class MainViewModel : ObservableObject
 
     public void Refresh()
     {
+        try { RefreshCore(); }
+        catch (Exception error)
+        {
+            Status = "界面刷新失败：" + error.Message;
+            Controller.ReportFailure("界面刷新", "ui.refresh", Status, error);
+            Diagnostics.Refresh();
+        }
+    }
+
+    private void RefreshCore()
+    {
         Overview.Refresh();
         if (!Controller.IsUpdatingProfile && !ReferenceEquals(_routingProfile, Controller.Profile))
         {
@@ -72,6 +86,7 @@ public sealed class MainViewModel : ObservableObject
         Connections.Refresh();
         Traffic.Refresh();
         Network.Refresh();
+        Diagnostics.Refresh();
         _ = Guard.RefreshAsync();
         OnPropertyChanged(nameof(GuardianConnectionStatus));
         Status = Network.ProtectionStatus;
@@ -103,6 +118,8 @@ public sealed class NetworkViewModel : ObservableObject
     public string DirectInternetStatus { get => _directInternetStatus; private set => SetProperty(ref _directInternetStatus, value); }
     public string ProxyInternetStatus { get => _proxyInternetStatus; private set => SetProperty(ref _proxyInternetStatus, value); }
     public string LastChecked { get => _lastChecked; private set => SetProperty(ref _lastChecked, value); }
+    public string TunFailure => _controller.LastTunFailure;
+    public bool HasTunFailure => TunFailure.Length > 0;
     public string Status
     {
         get => _status;
@@ -119,6 +136,8 @@ public sealed class NetworkViewModel : ObservableObject
 
     public void Refresh()
     {
+        OnPropertyChanged(nameof(TunFailure));
+        OnPropertyChanged(nameof(HasTunFailure));
         MonitorStatus = _controller.NetworkMonitorStatus;
         ProtectionStatus = _controller.ProtectionStatus;
         DirectInternetStatus = _controller.DirectInternetStatus;
@@ -234,6 +253,7 @@ public sealed class AppsViewModel : ObservableObject
         catch (Exception exception)
         {
             Status = "扫描失败：" + exception.Message;
+            _controller.ReportFailure("应用扫描", "apps.scan", Status, exception);
         }
         finally
         {
@@ -290,7 +310,8 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         Target = target;
         Routing = new RouteSelectionViewModel(controller.Profile,
             controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == target.DiscoveryKey)?.Target,
-            (enabled, route) => controller.SetApplicationsRouteAsync([Target], enabled, route), changed);
+            (enabled, route) => controller.SetApplicationsRouteAsync([Target], enabled, route), changed,
+            error => controller.ReportFailure("应用分流", "apps.route", error.Message, error));
         Icon = AppIconLoader.Load(target.IconPath ?? target.CanonicalExecutable ?? target.Command);
     }
 
@@ -472,6 +493,7 @@ public sealed class DomainsViewModel : ObservableObject
         catch (Exception exception)
         {
             Status = "规则更新失败：" + exception.Message;
+            _controller.ReportFailure("规则更新", "rules.update", Status, exception);
         }
         finally
         {
@@ -516,6 +538,7 @@ public sealed class DomainsViewModel : ObservableObject
         catch (Exception exception)
         {
             Status = exception.Message;
+            _controller.ReportFailure("自定义域名", "domain.save", Status, exception);
         }
     }
 
@@ -540,7 +563,8 @@ public sealed class RuleEntryViewModel
         Path = path;
         Routing = new RouteSelectionViewModel(controller.Profile,
             controller.Profile.RuleSets.FirstOrDefault(route => route.Name == Name)?.Target,
-            (enabled, route) => controller.SetRuleSetAsync(Name, enabled, route), changed);
+            (enabled, route) => controller.SetRuleSetAsync(Name, enabled, route), changed,
+            error => controller.ReportFailure("规则分流", "rules.route", error.Message, error));
     }
 
     public string Name { get; }
@@ -560,7 +584,8 @@ public sealed class ManualDomainViewModel : ObservableObject
         Domain = domain;
         Routing = new RouteSelectionViewModel(controller.Profile,
             controller.Profile.Domains.FirstOrDefault(route => route.Name == domain)?.Target,
-            (_, route) => controller.AddManualDomainAsync(domain, route), () => { });
+            (_, route) => controller.AddManualDomainAsync(domain, route), () => { },
+            error => controller.ReportFailure("域名分流", "domain.route", error.Message, error));
         RemoveCommand = new AsyncRelayCommand(async () =>
         {
             ControllerOperationResult result = await controller.RemoveManualDomainAsync(domain);
@@ -816,6 +841,7 @@ public sealed class TrafficViewModel : ObservableObject
         catch (Exception exception)
         {
             Status = "保存套餐失败：" + exception.Message;
+            _controller.ReportFailure("流量套餐", "quota.save", Status, exception);
         }
         await Task.CompletedTask;
     }

@@ -54,7 +54,10 @@ public sealed unsafe class WindowsTunInspector
                     byte* bytes = (byte*)&prefix;
                     bool ipv6 = family == ADDRESS_FAMILY.AF_INET6;
                     var address = new IPAddress(new ReadOnlySpan<byte>(bytes + (ipv6 ? 8 : 4), ipv6 ? 16 : 4));
-                    result.Add(new((int)row.InterfaceIndex, ipv6, address, row.DestinationPrefix.PrefixLength, row.Metric));
+                    SOCKADDR_INET hop = row.NextHop;
+                    byte* hopBytes = (byte*)&hop;
+                    var nextHop = new IPAddress(new ReadOnlySpan<byte>(hopBytes + (ipv6 ? 8 : 4), ipv6 ? 16 : 4));
+                    result.Add(new((int)row.InterfaceIndex, ipv6, address, row.DestinationPrefix.PrefixLength, row.Metric, nextHop));
                 }
             }
             return result;

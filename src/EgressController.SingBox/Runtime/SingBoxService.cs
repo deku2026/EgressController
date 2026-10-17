@@ -131,6 +131,7 @@ public sealed class SingBoxService : IAsyncDisposable
     private readonly object _gate = new();
     private CancellationTokenSource? _operation;
     private SingBoxServiceStatus _status = new(SingBoxServiceState.Stopped, null, null, null, false);
+    private SingBoxServiceStatus? _lastFailure;
 
     public SingBoxService(
         ISingBoxProcessClient processClient,
@@ -149,6 +150,8 @@ public sealed class SingBoxService : IAsyncDisposable
 
     public event Action<SingBoxOutputEvent>? Output;
     public event Action<SingBoxServiceStatus>? StatusChanged;
+    public event Action<string, Exception>? FailureReported;
+    public SingBoxServiceStatus? LastFailure { get { lock (_gate) return _lastFailure; } }
 
     public SingBoxServiceStatus Status
     {
@@ -222,7 +225,8 @@ public sealed class SingBoxService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         CancelPreparation();
-        try { await StopAsync().ConfigureAwait(false); } catch { }
+        try { await StopAsync().ConfigureAwait(false); }
+        catch (Exception error) { FailureReported?.Invoke("dispose", error); }
         _processClient.Output -= OnOutput;
         await _processClient.DisposeAsync().ConfigureAwait(false);
         _lifecycleGate.Dispose();
@@ -256,9 +260,11 @@ public sealed class SingBoxService : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            FailureReported?.Invoke("prepare", ex);
+            string code = ex is SingBoxServiceException service ? service.Code : "prepare.failed";
             if (!keptRunning)
-                SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, null, "prepare.failed", ex.Message, HasPending()));
-            return new SingBoxApplyResult(false, false, "prepare.failed", ex.Message);
+                SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, null, code, ex.Message, HasPending()));
+            return new SingBoxApplyResult(false, false, code, ex.Message);
         }
         finally
         {
@@ -291,6 +297,9 @@ public sealed class SingBoxService : IAsyncDisposable
             try { _beforeTunChange?.Invoke(); }
             catch (Exception exception)
             {
+                FailureReported?.Invoke("protection", exception);
+                if (Status.State != SingBoxServiceState.Running)
+                    SetStatus(new(SingBoxServiceState.Failed, null, "protection.failed", exception.Message, HasPending()));
                 return new(false, false, "protection.failed", exception.Message);
             }
             SingBoxRuntimePointer pending = candidate.ToPointer();
@@ -335,6 +344,7 @@ public sealed class SingBoxService : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            FailureReported?.Invoke("apply", ex);
             // A failed state read/write before StartAsync has not touched the old core.
             if (!restartIssued)
             {
@@ -343,13 +353,14 @@ public sealed class SingBoxService : IAsyncDisposable
                 return new(false, false, "apply.failed", ex.Message);
             }
             (bool restored, string? cleanupError) = await TryRestoreLastGoodAsync().ConfigureAwait(false);
+            string code = ex is SingBoxServiceException service ? service.Code : "apply.failed";
             SetStatus(new SingBoxServiceStatus(
                 restored ? SingBoxServiceState.Running : SingBoxServiceState.Failed,
                 null,
-                restored ? "apply.failed.restored" : "apply.failed",
+                restored ? "apply.failed.restored" : code,
                 ex.Message + cleanupError,
                 !restored && HasPending()));
-            return new SingBoxApplyResult(false, restored, ex is SingBoxServiceException service ? service.Code : "apply.failed", ex.Message + cleanupError, CoreChanged: true);
+            return new SingBoxApplyResult(false, restored, code, ex.Message + cleanupError, CoreChanged: true);
         }
         finally
         {
@@ -361,6 +372,7 @@ public sealed class SingBoxService : IAsyncDisposable
     private async Task<(bool Restored, string? CleanupError)> TryRestoreLastGoodAsync()
     {
         bool restored = false;
+        string? restoreError = null;
         try
         {
             SingBoxRuntimePointer? lastGood = _stateStore.LoadLastGoodRuntime();
@@ -379,21 +391,28 @@ public sealed class SingBoxService : IAsyncDisposable
                         _stateStore.ClearPendingApply();
                         restored = true;
                     }
+                    else restoreError = confirmed.ErrorMessage ?? "回滚内核未保持运行";
                 }
+                else restoreError = started.ErrorMessage ?? "回滚内核健康检查失败";
             }
         }
-        catch { /* A rejected rollback must be cleaned up just like the failed candidate. */ }
+        catch (Exception error) { restoreError = error.Message; FailureReported?.Invoke("rollback", error); }
         if (restored) return (true, null);
+        string detail = restoreError is null ? "" : "；回滚失败：" + restoreError;
         try
         {
             using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             SingBoxProcessStatus stopped = await _processClient.StopAsync(cleanup.Token).ConfigureAwait(false);
             SingBoxProcessStatus confirmed = await _processClient.GetStatusAsync(cleanup.Token).ConfigureAwait(false);
             if (!stopped.Succeeded || !confirmed.Succeeded || confirmed.State != "stopped")
-                return (false, "；失败内核清理未完成：" + (stopped.ErrorMessage ?? confirmed.ErrorMessage ?? confirmed.State));
+                return (false, detail + "；失败内核清理未完成：" + (stopped.ErrorMessage ?? confirmed.ErrorMessage ?? confirmed.State));
         }
-        catch (Exception exception) { return (false, "；失败内核清理未完成：" + exception.Message); }
-        return (false, null);
+        catch (Exception exception)
+        {
+            FailureReported?.Invoke("cleanup", exception);
+            return (false, detail + "；失败内核清理未完成：" + exception.Message);
+        }
+        return (false, detail.Length == 0 ? null : detail);
     }
 
     private void CancelPreparation()
@@ -407,7 +426,11 @@ public sealed class SingBoxService : IAsyncDisposable
     private void SetStatus(SingBoxServiceStatus status)
     {
         lock (_gate)
+        {
             _status = status;
+            if (status.ErrorMessage is not null) _lastFailure = status;
+            else if (status.State == SingBoxServiceState.Running) _lastFailure = null;
+        }
         StatusChanged?.Invoke(status);
     }
 
@@ -418,6 +441,7 @@ public sealed class SingBoxService : IAsyncDisposable
         {
             if (_status.State != SingBoxServiceState.Running || (observed is not null && !ReferenceEquals(_status, observed))) return;
             failed = _status = _status with { State = SingBoxServiceState.Failed, ErrorCode = "tun.takeover", ErrorMessage = error };
+            _lastFailure = failed;
         }
         StatusChanged?.Invoke(failed);
     }
@@ -442,7 +466,7 @@ public sealed class SingBoxService : IAsyncDisposable
     }
 }
 
-public sealed class SingBoxServiceException(string code, string message) : InvalidOperationException(message)
+public class SingBoxServiceException(string code, string message, Exception? inner = null) : InvalidOperationException(message, inner)
 {
     public string Code { get; } = code;
 }

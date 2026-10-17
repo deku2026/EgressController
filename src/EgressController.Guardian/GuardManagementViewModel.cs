@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using EgressController.Diagnostics;
 
 namespace EgressController.Guardian;
 
@@ -16,9 +17,14 @@ public sealed class GuardManagementViewModel : ObservableObject
     private string _message = "";
     private bool _red = true;
     private bool _disabled;
-    public GuardManagementViewModel(IGuardManagementClient client)
+    private readonly DiagnosticJournal? _diagnostics;
+    private string _lastFailure = "";
+    public GuardManagementViewModel(IGuardManagementClient client, DiagnosticJournal? diagnostics = null,
+        string logDirectory = "")
     {
         _client = client;
+        _diagnostics = diagnostics;
+        LogDirectory = logDirectory;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         InstallCommand = Command(GuardAction.Install);
         StartCommand = Command(GuardAction.Start);
@@ -26,12 +32,15 @@ public sealed class GuardManagementViewModel : ObservableObject
         ForceStopCommand = Command(GuardAction.ForceStop);
         StopAndDisableCommand = Command(GuardAction.StopAndDisable);
         UninstallCommand = Command(GuardAction.Uninstall);
-        ClearHistoryCommand = new AsyncRelayCommand(async () => await RunAsync(() => _client.ClearHistoryAsync()));
+        ClearHistoryCommand = new AsyncRelayCommand(async () => await RunAsync("清空记录", () => _client.ClearHistoryAsync()));
     }
     public string Summary { get => _summary; private set => SetProperty(ref _summary, value); }
     public string Details { get => _details; private set => SetProperty(ref _details, value); }
     public string Records { get => _records; private set => SetProperty(ref _records, value); }
     public string Message { get => _message; private set => SetProperty(ref _message, value); }
+    public string LastFailure { get => _lastFailure; private set => SetProperty(ref _lastFailure, value); }
+    public string LogDirectory { get; }
+    public string DiagnosticLogPath => _diagnostics?.LogPath ?? "";
     public bool Red { get => _red; private set => SetProperty(ref _red, value); }
     public bool Disabled { get => _disabled; private set => SetProperty(ref _disabled, value); }
     public bool CanEdit => !_busy;
@@ -41,7 +50,7 @@ public sealed class GuardManagementViewModel : ObservableObject
         set
         {
             if (!SetProperty(ref _autoStart, value)) return;
-            _ = RunAsync(() => _client.ExecuteAsync(value ? GuardAction.EnableAutoStart : GuardAction.DisableAutoStart));
+            _ = RunAsync(value ? "启用自启" : "关闭自启", () => _client.ExecuteAsync(value ? GuardAction.EnableAutoStart : GuardAction.DisableAutoStart));
         }
     }
     public IAsyncRelayCommand RefreshCommand { get; }
@@ -52,7 +61,7 @@ public sealed class GuardManagementViewModel : ObservableObject
     public IAsyncRelayCommand StopAndDisableCommand { get; }
     public IAsyncRelayCommand UninstallCommand { get; }
     public IAsyncRelayCommand ClearHistoryCommand { get; }
-    private AsyncRelayCommand Command(GuardAction action) => new(() => RunAsync(() => _client.ExecuteAsync(action)));
+    private AsyncRelayCommand Command(GuardAction action) => new(() => RunAsync(action.ToString(), () => _client.ExecuteAsync(action)));
     public async Task RefreshAsync()
     {
         if (_refreshing || _busy) return;
@@ -62,6 +71,8 @@ public sealed class GuardManagementViewModel : ObservableObject
         {
             var state = await _client.ReadAsync();
             if (version != _operationVersion) return;
+            if (state.Error is { } error) RecordFailure("读取守护状态", error);
+            if (state.Guard is { FailedCount: > 0 } failed) RecordFailure("守护保护", failed.Reason);
             SetProperty(ref _autoStart, state.Service.AutoStart, nameof(AutoStart));
             string serviceState = state.Service.State switch
             {
@@ -84,17 +95,24 @@ public sealed class GuardManagementViewModel : ObservableObject
         {
             if (version != _operationVersion) return;
             Summary = "无法读取独立守护状态"; Message = exception.Message; Red = true; Disabled = false;
+            RecordFailure("读取守护状态", exception.Message, exception);
         }
         finally { _refreshing = false; }
     }
-    private async Task RunAsync(Func<Task> action)
+    private async Task RunAsync(string operation, Func<Task> action)
     {
         if (_busy) return;
         _operationVersion++;
         _busy = true; OnPropertyChanged(nameof(CanEdit));
-        try { await action(); Message = "操作已完成。"; }
-        catch (Exception exception) { Message = exception.Message; }
+        try { await action(); Message = operation + "：操作已完成。"; _diagnostics?.Info("守护管理", Message); }
+        catch (Exception exception) { Message = operation + "失败：" + exception.Message; RecordFailure(operation, Message, exception); }
         finally { _busy = false; OnPropertyChanged(nameof(CanEdit)); await RefreshAsync(); }
     }
-    public void ReportError(string error) => Message = error;
+    public void ReportError(string error) { Message = error; RecordFailure("托盘操作", error); }
+    private void RecordFailure(string operation, string message, Exception? error = null)
+    {
+        LastFailure = $"最近失败 · {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} · {operation}\n"
+            + DiagnosticJournal.Redact(error?.ToString() ?? message);
+        _diagnostics?.Report("独立守护 · " + operation, "guard.management", message, error);
+    }
 }

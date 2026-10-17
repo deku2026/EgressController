@@ -20,6 +20,9 @@ public sealed record GuardPaths(string OwnerSid, string ServiceName, string Pipe
     public string ServiceCommandLine => $"\"{ServiceExecutable}\" --owner {OwnerSid}";
     public string TrayExecutable => Path.Combine(InstallDirectory, "guard-tray", "EgressController.GuardTray.exe");
     public string RegistrationFile => Path.Combine(DataDirectory, "registration.json");
+    public string LogDirectory => Path.Combine(DataDirectory, "logs");
+    public string TrayLogDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "EgressController", "Guard", ServiceName, "logs");
 }
 
 public sealed class GuardRegistrationStore(string file) : IGuardRegistrationStore
