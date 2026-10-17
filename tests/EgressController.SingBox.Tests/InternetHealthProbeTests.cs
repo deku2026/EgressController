@@ -78,9 +78,11 @@ public sealed class InternetHealthProbeTests
     }
 
     [Fact]
-    public void Both_roles_share_a_one_minute_interval_and_bounded_timeout()
+    public void Both_roles_share_a_thirty_second_interval_and_bounded_timeout()
     {
-        Assert.Equal(TimeSpan.FromMinutes(1), InternetHealthProbe.CheckInterval);
+        Assert.Equal(TimeSpan.FromSeconds(30), InternetHealthProbe.CheckInterval);
+        Assert.Equal(TimeSpan.FromSeconds(5), InternetHealthProbe.RetryInterval);
+        Assert.Equal(3, InternetHealthProbe.MaxAttempts);
         Assert.Equal(TimeSpan.FromSeconds(8), InternetHealthProbe.Timeout);
     }
 

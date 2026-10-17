@@ -40,7 +40,9 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
 
 ## Runtime sequence
 
-1. Load selections and start the independent process guard in the protected state.
+1. Load selections, start local network protection and initialize the independent NativeAOT
+   main/TUN service and tray. See [independent guardian](independent-guard.md) for IPC, persistence
+   and service management. The two protections do not share a health verdict or probe timer.
 2. Discover applications and prepare cached/downloaded core and rules. Recovery downloads
    do not require a SOCKS listener. Their explicit self route precedes TUN DNS interception.
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
@@ -49,7 +51,7 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
    adapters and completed healthy website probes for the residential exit and configured default
    proxy before allowing selected apps. Without configured proxy ports, only the residential
    website probe is required; the UI explicitly reports that proxy checking is not configured.
-   The guard checks takeover and live adapters every second.
+   The service checks takeover every second; main checks live adapters separately every second.
 5. DNS is fixed to Cloudflare DoH through the direct role. There are no DoH health queries,
    generated probe hostnames, DNS health rules, provider selection or DNS status protection gates.
    The bootstrap resolver is retained for resolving the fixed server and preparing an offline exit.
@@ -58,7 +60,11 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
    (the current default loopback SOCKS5 endpoint). Its proxy core's external connections remain
    bound to the non-residential NIC through the higher-priority `proxy-direct` process route.
    The test must traverse the default proxy instead of requiring direct access to the website.
-   Both run in parallel on a shared one-minute cadence measured from the start of each round;
+   Both run in parallel on a shared 30-second cadence measured from the start of each round;
+   each failed attempt waits five seconds before retrying, up to three attempts per exit. Any
+   success ends that exit's retries. Only three consecutive failures publish an outage. The gate
+   spans retries so automatic/manual rounds cannot overlap; slower rounds delay the next check.
+   Progress and failure reasons are displayed without replacing the previous health verdict;
    startup checks immediately, and a manual check uses the same probes. Each probe is bounded
    to eight seconds, and each completed result takes effect independently. An online NIC with
    an unavailable default proxy still fails. Never fall back to another SOCKS port, a direct exit,
@@ -90,8 +96,10 @@ clears displayed records, not identities, descendant tracking, protection or ret
 
 Configured recovery communication remains permitted. This is not an operating-system kill
 switch: process termination has a detection interval and does not guarantee zero packets.
-The UI never claims system-wide disconnection. Closing the window hides to tray; explicit exit
-ends protection and stops the owned core. There is no persistent firewall or background service.
+The UI never claims system-wide disconnection. Closing the window hides to tray; explicit main
+exit first hands protection to the independent service, then stops the owned core. The service
+keeps enforcing the persisted selection while main is absent. Explicit service stop/uninstall
+disables this independent protection. There is no persistent firewall.
 
 ## Verification without network interruption
 
@@ -102,7 +110,8 @@ ends protection and stops the owned core. There is no persistent firewall or bac
 - Network health tests: successful/failed rechecks, no-IP/link loss for both roles, cached versus live
   adapter state, residential/default-proxy probes using generate_204, arbitrary default ports,
   no direct fallback on proxy failure, direct-only mode, Internet failures with an online NIC,
-  timeouts, malformed responses, cancellation, stale generations, port changes and reconnects.
+  timeouts, malformed responses, five-second retry spacing, early success, three-failure confirmation,
+  cancellation during retries, stale generations, port changes and reconnects.
   Fake process control verifies termination and recovery.
 - Lifecycle tests: preparation preserving TUN, protection before restart, and checked rollback.
 - History tests: pruning while healthy, count limits, clear preserving descendants and retries.
@@ -113,6 +122,8 @@ ends protection and stops the owned core. There is no persistent firewall or bac
   ambiguity, permissions, removed ports and unrelated-interface listeners.
 - View-model tests: filtered choices, saved offline cards, atomic swap/save/cancel, error
   recovery, legacy third-card repair and live binding row updates without starting the product.
+- Guardian tests: current-session main/TUN lease, persisted scopes and orphan identities,
+  startup/stop/uninstall intent, ownership isolation, bounded IPC frames, failed handoff and UI badges.
 
 Default builds omit live tests. `build/Invoke-Tests.ps1` and CI set `EGRESS_MOCK_ONLY=1`, which
 also prevents the real process and core adapters from running if called accidentally. Compile,

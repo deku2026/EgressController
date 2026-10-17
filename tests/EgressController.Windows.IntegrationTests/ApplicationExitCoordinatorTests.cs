@@ -73,16 +73,20 @@ public sealed class ApplicationExitCoordinatorTests
     }
 
     [Fact]
-    public async Task Stop_failure_still_allows_close_and_shutdown()
+    public async Task Failed_guard_handoff_keeps_window_and_tun_and_allows_retry()
     {
         var order = new List<string>();
         var coordinator = new ApplicationExitCoordinator();
 
-        await coordinator.ExitAsync(
-            () => throw new InvalidOperationException("stop failed"),
+        bool stopped = await coordinator.ExitAsync(
+            () => throw new InvalidOperationException("handoff failed"),
             () => order.Add("allow-close"),
             () => order.Add("shutdown"));
 
+        Assert.False(stopped);
+        Assert.Empty(order);
+        Assert.True(await coordinator.ExitAsync(() => Task.CompletedTask,
+            () => order.Add("allow-close"), () => order.Add("shutdown")));
         Assert.Equal(["allow-close", "shutdown"], order);
     }
 

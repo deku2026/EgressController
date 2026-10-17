@@ -7,6 +7,12 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (args is ["--mock-smoke"])
+        {
+            Environment.ExitCode = EgressController.Guardian.GuardSmoke.Run();
+            return;
+        }
+        EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
         using SingleInstanceGuard? instance = SingleInstanceGuard.Acquire();
         if (instance is null)
             return;

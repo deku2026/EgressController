@@ -20,6 +20,7 @@ public sealed record EgressApplicationSelection
     public required string DiscoveryKey { get; init; }
     public string? DisplayName { get; init; }
     public IReadOnlyList<string> ExecutablePaths { get; init; } = [];
+    public IReadOnlyList<string> DirectoryRoots { get; init; } = [];
     public EgressRouteTarget Target { get; init; } = EgressRouteTarget.DefaultAdapter;
 }
 
@@ -304,6 +305,9 @@ public sealed record EgressProfileDocument
             ExecutablePaths = (value.ExecutablePaths ?? []).Where(path => Path.IsPathFullyQualified(path)
                 && Path.GetExtension(path).Equals(".exe", StringComparison.OrdinalIgnoreCase))
                 .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            DirectoryRoots = (value.DirectoryRoots ?? []).Where(Path.IsPathFullyQualified)
+                .Select(Path.GetFullPath).Where(path => Path.GetPathRoot(path)?.TrimEnd('\\') != path.TrimEnd('\\'))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             Target = (value.Target ?? throw new ArgumentException("应用分流出口不能为空。"))
                 .NormalizeAndValidate(ports),
         };

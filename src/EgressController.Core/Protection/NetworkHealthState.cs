@@ -16,6 +16,8 @@ public sealed class NetworkHealthState
     private int? _defaultUpstreamPort;
     private NetworkHealthResult? _directInternet;
     private NetworkHealthResult? _proxyInternet;
+    private string? _directProgress;
+    private string? _proxyProgress;
 
     public int Generation { get { lock (_gate) return _generation; } }
 
@@ -26,6 +28,7 @@ public sealed class NetworkHealthState
             _generation++;
             _directInternet = null;
             _proxyInternet = null;
+            _directProgress = _proxyProgress = null;
         }
     }
 
@@ -34,7 +37,11 @@ public sealed class NetworkHealthState
         lock (_gate)
         {
             bool proxyChanged = _proxy != live.ProxyAdapter || _defaultUpstreamPort != defaultUpstreamPort;
-            if (_direct != live.DefaultAdapter || proxyChanged) _generation++;
+            if (_direct != live.DefaultAdapter || proxyChanged)
+            {
+                _generation++;
+                _directProgress = _proxyProgress = null;
+            }
             if (_direct != live.DefaultAdapter) _directInternet = null;
             if (proxyChanged) _proxyInternet = null;
             _direct = live.DefaultAdapter;
@@ -44,14 +51,32 @@ public sealed class NetworkHealthState
         }
     }
 
+    public bool ReportProgress(int generation, NetworkHealthCheck check, string detail, CancellationToken token)
+    {
+        lock (_gate)
+        {
+            if (token.IsCancellationRequested || generation != _generation) return false;
+            if (check == NetworkHealthCheck.ProxyInternet && _defaultUpstreamPort is null) return false;
+            if (check == NetworkHealthCheck.DirectInternet) _directProgress = detail;
+            else _proxyProgress = detail;
+            return true;
+        }
+    }
+
+    public void ClearProgress(int generation)
+    {
+        lock (_gate)
+            if (generation == _generation) _directProgress = _proxyProgress = null;
+    }
+
     public bool Complete(int generation, NetworkHealthCheck check, NetworkHealthResult result, CancellationToken token)
     {
         lock (_gate)
         {
             if (token.IsCancellationRequested || generation != _generation) return false;
             if (check == NetworkHealthCheck.ProxyInternet && _defaultUpstreamPort is null) return false;
-            if (check == NetworkHealthCheck.DirectInternet) _directInternet = result;
-            else _proxyInternet = result;
+            if (check == NetworkHealthCheck.DirectInternet) { _directInternet = result; _directProgress = null; }
+            else { _proxyInternet = result; _proxyProgress = null; }
             return true;
         }
     }
@@ -89,10 +114,12 @@ public sealed class NetworkHealthState
             if (!direct && _defaultUpstreamPort is int port) label += $" · 默认端口 {port}";
             AdapterSelection? adapter = direct ? _direct : _proxy;
             NetworkHealthResult? result = direct ? _directInternet : _proxyInternet;
+            string? progress = direct ? _directProgress : _proxyProgress;
             return adapter?.IsReady != true ? label + "：网卡离线或没有 IP"
                 : !direct && _defaultUpstreamPort is null ? label + "：未配置代理端口，不进行代理联网检测"
+                : progress is not null ? label + "：" + progress
                 : result is null ? label + "：等待联网检测"
-                : result.IsHealthy ? label + "：上次联网检测通过"
+                : result.IsHealthy ? label + "：上次联网检测通过，" + result.Detail
                 : label + "：上次联网检测失败，" + result.Detail;
         }
     }
