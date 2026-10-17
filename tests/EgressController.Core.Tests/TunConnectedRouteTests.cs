@@ -7,16 +7,16 @@ namespace EgressController.Core.Tests;
 public sealed class TunConnectedRouteTests
 {
     [Theory]
-    [InlineData("240e:33d:4c0d:8900::", "240e:33d:4c0d:8900::1234", 64, "::", true)]
+    [InlineData("2001:db8:1234:5600::", "2001:db8:1234:5600::1234", 64, "::", true)]
     [InlineData("198.51.100.0", "198.51.100.10", 24, "0.0.0.0", false)]
     public void Physical_connected_subnet_does_not_prevent_takeover(string network, string address,
         int prefix, string nextHop, bool ipv6)
         => Assert.Null(Check(network, address, prefix, prefix, nextHop, ipv6));
 
     [Theory]
-    [InlineData("240e:33d:4c0d:8900::", "240e:33d:4c0d:8900::1234", 64, 64, "fe80::1", true)]
-    [InlineData("240e:33d:4c0d:8900::", "240e:33d:4c0d:8800::1234", 64, 64, "::", true)]
-    [InlineData("::", "240e:33d:4c0d:8900::1234", 1, 64, "::", true)]
+    [InlineData("2001:db8:1234:5600::", "2001:db8:1234:5600::1234", 64, 64, "fe80::1", true)]
+    [InlineData("2001:db8:1234:5600::", "2001:db8:1234:5700::1234", 64, 64, "::", true)]
+    [InlineData("::", "2001:db8:1234:5600::1234", 1, 64, "::", true)]
     [InlineData("198.51.100.0", "198.51.100.10", 24, 24, "192.168.1.1", false)]
     [InlineData("0.0.0.0", "198.51.100.10", 1, 24, "0.0.0.0", false)]
     [InlineData("128.0.0.0", "198.51.100.10", 1, 1, "0.0.0.0", false)]
