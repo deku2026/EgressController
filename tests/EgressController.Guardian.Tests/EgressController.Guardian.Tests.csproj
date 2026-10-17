@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject><IsPackable>false</IsPackable><OutputType>Exe</OutputType>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+  <ItemGroup><PackageReference Include="xunit.v3" /><Using Include="Xunit" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="..\..\src\EgressController.Guardian\EgressController.Guardian.csproj" /></ItemGroup>
+</Project>

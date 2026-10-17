@@ -154,7 +154,6 @@ New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
 $publishDirectory = Join-Path $outputRoot 'publish'
 $stagingDirectory = Join-Path $outputRoot 'msix-staging'
-$applicationProject = Join-Path $repositoryRoot 'src\EgressController.App\EgressController.App.csproj'
 $portableZip = Join-Path $outputRoot 'EgressController-win-x64.zip'
 
 Push-Location $repositoryRoot
@@ -162,32 +161,52 @@ try {
     # A NativeAOT publish needs a runtime-specific assets graph. Restore it explicitly so
     # publish never depends on NuGet's implicit second restore, which can fail transiently
     # on otherwise healthy hosted runners without reporting the underlying restore error.
-    Restore-RuntimeDependencies `
-        -Project $applicationProject `
-        -RuntimeIdentifier 'win-x64' `
-        -BuildConfiguration $Configuration
-
-    $publishArguments = @(
-        'publish', $applicationProject,
-        '--configuration', $Configuration,
-        '--runtime', 'win-x64',
-        '--self-contained', 'true',
-        '--no-restore',
-        '--output', $publishDirectory,
-        '-p:PublishAot=true',
-        "-p:Version=$semanticVersion",
-        "-p:AssemblyVersion=$resolvedPackageVersion",
-        "-p:FileVersion=$resolvedPackageVersion",
-        "-p:InformationalVersion=$semanticVersion"
+    $components = @(
+        @{ Project = 'EgressController.App'; Directory = $publishDirectory },
+        @{ Project = 'EgressController.GuardService'; Directory = (Join-Path $publishDirectory 'guard-service') },
+        @{ Project = 'EgressController.GuardTray'; Directory = (Join-Path $publishDirectory 'guard-tray') }
     )
-    & dotnet @publishArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw 'NativeAOT publish failed.'
+    foreach ($component in $components) {
+        $project = Join-Path $repositoryRoot "src\$($component.Project)\$($component.Project).csproj"
+        Restore-RuntimeDependencies -Project $project -RuntimeIdentifier 'win-x64' -BuildConfiguration $Configuration
+        $publishArguments = @(
+            'publish', $project,
+            '--configuration', $Configuration,
+            '--runtime', 'win-x64',
+            '--self-contained', 'true',
+            '--no-restore',
+            '--output', $component.Directory,
+            '-p:PublishAot=true',
+            "-p:Version=$semanticVersion",
+            "-p:AssemblyVersion=$resolvedPackageVersion",
+            "-p:FileVersion=$resolvedPackageVersion",
+            "-p:InformationalVersion=$semanticVersion"
+        )
+        & dotnet @publishArguments
+        if ($LASTEXITCODE -ne 0) { throw "NativeAOT publish failed: $($component.Project)" }
     }
+
+    # This entry point returns before Avalonia, identity discovery, pipes, SCM or process
+    # adapters initialize. Exercise native JSON/SQLite with fake processes, never live TUN.
+    $previousMockOnly = $env:EGRESS_MOCK_ONLY
+    try {
+        $env:EGRESS_MOCK_ONLY = '1'
+        foreach ($component in ($components | Where-Object { $_.Project -ne 'EgressController.App' })) {
+            $executable = Join-Path $component.Directory "$($component.Project).exe"
+            if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Missing AOT binary: $executable" }
+            $smoke = Start-Process -FilePath $executable -ArgumentList '--mock-smoke' -WindowStyle Hidden -PassThru
+            try {
+                if (-not $smoke.WaitForExit(30000)) { throw "Mock-only AOT smoke timed out: $($component.Project)" }
+                if ($smoke.ExitCode -ne 0) { throw "Mock-only AOT smoke failed: $($component.Project), exit $($smoke.ExitCode)" }
+            }
+            finally { $smoke.Dispose() }
+        }
+    }
+    finally { $env:EGRESS_MOCK_ONLY = $previousMockOnly }
 
     # NativeAOT emits native PDBs that contain build-machine paths and are not required at
     # runtime. Keep release artifacts portable and free of machine-specific debug metadata.
-    Get-ChildItem -LiteralPath $publishDirectory -Filter '*.pdb' -File |
+    Get-ChildItem -LiteralPath $publishDirectory -Filter '*.pdb' -File -Recurse |
         Remove-Item -Force
 
     Compress-Archive -Path (Join-Path $publishDirectory '*') -DestinationPath $portableZip -CompressionLevel Optimal

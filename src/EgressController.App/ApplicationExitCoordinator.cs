@@ -12,7 +12,7 @@ internal sealed class ApplicationExitCoordinator
 {
     private int _started;
 
-    public async Task ExitAsync(
+    public async Task<bool> ExitAsync(
         Func<Task> stopTunAsync,
         Action allowWindowClose,
         Action shutdown)
@@ -22,7 +22,7 @@ internal sealed class ApplicationExitCoordinator
         ArgumentNullException.ThrowIfNull(shutdown);
 
         if (Interlocked.Exchange(ref _started, 1) != 0)
-            return;
+            return false;
 
         try
         {
@@ -30,18 +30,15 @@ internal sealed class ApplicationExitCoordinator
         }
         catch
         {
-            // AppController disposal gets a final chance to stop the managed core.
+            // Failed protection handoff must leave the current TUN and window running.
+            Interlocked.Exchange(ref _started, 0);
+            return false;
         }
-        finally
+        try
         {
-            try
-            {
-                allowWindowClose();
-            }
-            finally
-            {
-                shutdown();
-            }
+            allowWindowClose();
         }
+        finally { shutdown(); }
+        return true;
     }
 }

@@ -9,7 +9,7 @@ namespace EgressController.App;
 
 public partial class App : Application
 {
-    public AppController Controller { get; } = new();
+    public AppController Controller { get; private set; } = null!;
     internal static SingleInstanceGuard? InstanceGuard { get; set; }
 
     private TrayIcon? _tray;
@@ -24,6 +24,19 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            try { Controller = new(); }
+            catch (Exception error)
+            {
+                desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
+                desktop.MainWindow = new Window
+                {
+                    Title = "EgressController 启动失败", Width = 680, Height = 260,
+                    Content = new TextBlock { Text = error.Message, Margin = new Thickness(24),
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                };
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             var window = new MainWindow { DataContext = new MainViewModel(Controller) };
             desktop.MainWindow = window;
@@ -46,14 +59,15 @@ public partial class App : Application
         var menu = new NativeMenu();
         var open = new NativeMenuItem("打开 EgressController");
         open.Click += (_, _) => ShowWindow(window);
-        var exit = new NativeMenuItem("退出并结束进程保护");
+        var exit = new NativeMenuItem("退出主程序（独立守护继续运行）");
         exit.Click += async (_, _) =>
         {
             exit.IsEnabled = false;
-            await _exitCoordinator.ExitAsync(
+            bool completed = await _exitCoordinator.ExitAsync(
                 async () => await Controller.ShutdownAsync(),
                 window.AllowApplicationExit,
                 () => desktop.Shutdown());
+            if (!completed) { exit.IsEnabled = true; ShowWindow(window); }
         };
         menu.Items.Add(open);
         menu.Items.Add(new NativeMenuItemSeparator());

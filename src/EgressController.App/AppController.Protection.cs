@@ -71,6 +71,8 @@ public sealed partial class AppController
         string? conflict = profile.Applications.SelectMany(selection =>
                 inventory.ExpandSelected([selection.DiscoveryKey]).Concat(selection.ExecutablePaths))
             .FirstOrDefault(excluded.Contains);
+        conflict ??= excluded.FirstOrDefault(path => profile.Applications
+            .SelectMany(selection => selection.DirectoryRoots).Any(root => ProcessProtection.IsWithinDirectory(path, root)));
         if (conflict is not null)
             throw new InvalidOperationException("勾选范围包含控制器、sing-box 或上游代理，请取消该选择：" + conflict);
     }
@@ -87,6 +89,10 @@ public sealed partial class AppController
         // Results from the old core must not release protection after a restart or rollback.
         _networkHealth.Reset();
         _profileApplied = false;
+        // ShutdownAsync already received the guard ACK before cancelling the lifetime.
+        // Dispose also disconnects the agent before releasing the owned core. Do not try
+        // to reacquire that handoff using the now-cancelled startup token.
+        if (!_shuttingDown) _guardAgent?.PrepareAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
         int failures = SweepProtection(new(false, "TUN 即将启动或重启，先终止所选应用"));
         if (failures > 0)
             throw new InvalidOperationException("部分所选进程无法终止，已取消本次 TUN 变更；请检查进程保护记录。");
@@ -102,7 +108,10 @@ public sealed partial class AppController
 
     private int SweepProtection(ProtectionReadiness readiness)
     {
-        int failures = _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready, readiness.Reason);
+        var directories = _profile.Applications.SelectMany(item => item.DirectoryRoots.Select(path =>
+            new ProtectedDirectory(path, item.DisplayName ?? item.DiscoveryKey))).ToArray();
+        int failures = _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready,
+            "主程序网络保护：" + readiness.Reason, directories);
         _protectionStatus = readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
         if (failures > 0)
             _protectionStatus = $"保护未完成：{failures} 个进程终止失败；{readiness.Reason}";
@@ -134,9 +143,8 @@ public sealed partial class AppController
                     // An observation spanning a restart must not fail the replacement TUN.
                     if (error is not null) _singBox.ReportTakeoverFailure(error, observed);
                 }
-                var readiness = ProtectionReadiness.Evaluate(IsTunRunning,
-                    _singBox.Status.ErrorMessage ?? _tunSupervisor.LastError,
-                    _profileApplied, _protectionError, _takeoverError, _networkHealth.Readiness);
+                // Independent from the companion's main/TUN lease and tray badge.
+                var readiness = _protectionError is null ? _networkHealth.Readiness : new ProtectionReadiness(false, _protectionError);
                 SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)
                     _tunSupervisor.Tick(IsTunRunning, IsUpdatingProfile, token);
@@ -157,6 +165,19 @@ public sealed partial class AppController
 
     public async Task ShutdownAsync()
     {
+        _guardTransition = true;
+        try
+        {
+            if (_guardAgent is not null) await _guardAgent.PrepareAsync().ConfigureAwait(false);
+            if (SweepProtection(new(false, "主程序准备退出，先终止所选应用")) > 0)
+                throw new InvalidOperationException("仍有进程未能终止，已取消退出。");
+        }
+        catch (Exception exception)
+        {
+            _guardTransition = false;
+            _protectionStatus = "退出已取消：" + exception.Message;
+            throw;
+        }
         _shuttingDown = true;
         _lifetimeCts.Cancel();
         if (_protectionTask is not null) await _protectionTask.ConfigureAwait(false);

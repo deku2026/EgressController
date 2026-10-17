@@ -40,7 +40,9 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
 
 ## Runtime sequence
 
-1. Load selections and start the independent process guard in the protected state.
+1. Load selections, start local network protection and initialize the independent NativeAOT
+   main/TUN service and tray. See [independent guardian](independent-guard.md) for IPC, persistence
+   and service management. The two protections do not share a health verdict or probe timer.
 2. Discover applications and prepare cached/downloaded core and rules. Recovery downloads
    do not require a SOCKS listener. Their explicit self route precedes TUN DNS interception.
 3. The supervisor attempts startup once at a time and retries on subsequent one-second ticks.
@@ -49,7 +51,7 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
    adapters and completed healthy website probes for the residential exit and configured default
    proxy before allowing selected apps. Without configured proxy ports, only the residential
    website probe is required; the UI explicitly reports that proxy checking is not configured.
-   The guard checks takeover and live adapters every second.
+   The service checks takeover every second; main checks live adapters separately every second.
 5. DNS is fixed to Cloudflare DoH through the direct role. There are no DoH health queries,
    generated probe hostnames, DNS health rules, provider selection or DNS status protection gates.
    The bootstrap resolver is retained for resolving the fixed server and preparing an offline exit.
@@ -94,8 +96,10 @@ clears displayed records, not identities, descendant tracking, protection or ret
 
 Configured recovery communication remains permitted. This is not an operating-system kill
 switch: process termination has a detection interval and does not guarantee zero packets.
-The UI never claims system-wide disconnection. Closing the window hides to tray; explicit exit
-ends protection and stops the owned core. There is no persistent firewall or background service.
+The UI never claims system-wide disconnection. Closing the window hides to tray; explicit main
+exit first hands protection to the independent service, then stops the owned core. The service
+keeps enforcing the persisted selection while main is absent. Explicit service stop/uninstall
+disables this independent protection. There is no persistent firewall.
 
 ## Verification without network interruption
 
@@ -118,6 +122,8 @@ ends protection and stops the owned core. There is no persistent firewall or bac
   ambiguity, permissions, removed ports and unrelated-interface listeners.
 - View-model tests: filtered choices, saved offline cards, atomic swap/save/cancel, error
   recovery, legacy third-card repair and live binding row updates without starting the product.
+- Guardian tests: current-session main/TUN lease, persisted scopes and orphan identities,
+  startup/stop/uninstall intent, ownership isolation, bounded IPC frames, failed handoff and UI badges.
 
 Default builds omit live tests. `build/Invoke-Tests.ps1` and CI set `EGRESS_MOCK_ONLY=1`, which
 also prevents the real process and core adapters from running if called accidentally. Compile,

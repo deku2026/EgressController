@@ -10,6 +10,20 @@ public sealed class EgressProfileStoreTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "EgressController.ProfileTests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Cached_executables_and_recursive_directory_roots_survive_profile_restart()
+    {
+        var store = new EgressProfileStore(_directory);
+        store.Save(new EgressProfileDocument { Applications = [new()
+        {
+            DiscoveryKey = "mock-app", DisplayName = "AI", ExecutablePaths = [@"C:\apps\AI\ai.exe"],
+            DirectoryRoots = [@"C:\apps\AI", @"c:\apps\AI"],
+        }] });
+        var selection = Assert.Single(new EgressProfileStore(_directory).Load().Applications);
+        Assert.Equal(@"C:\apps\AI\ai.exe", Assert.Single(selection.ExecutablePaths));
+        Assert.Equal(@"C:\apps\AI", Assert.Single(selection.DirectoryRoots));
+    }
+
+    [Fact]
     public void Missing_profile_loads_defaults_and_save_round_trips_normalized_data()
     {
         var store = new EgressProfileStore(_directory);

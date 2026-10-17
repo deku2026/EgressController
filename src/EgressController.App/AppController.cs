@@ -125,6 +125,7 @@ public sealed partial class AppController : IAsyncDisposable
         _singBox = new SingBoxService(_directSingBox, _stateStore, HealthCheckAsync, BeforeTunChange);
         _singBox.Output += OnSingBoxOutput;
         InitializeProtection();
+        InitializeGuardian();
     }
 
     public string DataRoot => _dataRoot;
@@ -235,6 +236,7 @@ public sealed partial class AppController : IAsyncDisposable
                     Name = selected.DisplayName ?? selected.DiscoveryKey,
                     Source = "缓存记录（当前未发现）",
                     OwnedExecutables = selected.ExecutablePaths,
+                    OwnedRoots = selected.DirectoryRoots,
                     ResolutionUnsupported = true,
                 });
             }
@@ -249,7 +251,9 @@ public sealed partial class AppController : IAsyncDisposable
             _profile = _profile with
             {
                 Applications = _profile.Applications.Select(selection => inventory.TryGet(selection.DiscoveryKey, out var entry) && entry is not null
-                    ? selection with { DisplayName = entry.DisplayName, ExecutablePaths = entry.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() }
+                    ? selection with { DisplayName = entry.DisplayName, ExecutablePaths = entry.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                        DirectoryRoots = discovered.Where(target => target.DiscoveryKey == selection.DiscoveryKey).SelectMany(target => target.OwnedRoots)
+                            .Concat(selection.DirectoryRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() }
                     : selection).ToArray(),
             };
             _profileStore.Save(_profile);
@@ -289,6 +293,7 @@ public sealed partial class AppController : IAsyncDisposable
                             DiscoveryKey = key,
                             DisplayName = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.Name,
                             ExecutablePaths = ApplicationInventorySnapshot.Create(_targets.All()).ExpandSelected([key]),
+                            DirectoryRoots = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.OwnedRoots ?? [],
                             Target = route ?? routes?.GetValueOrDefault(key)
                                 ?? selected.GetValueOrDefault(key)?.Target ?? EgressRouteTarget.DefaultAdapter,
                         };
@@ -627,6 +632,7 @@ public sealed partial class AppController : IAsyncDisposable
         StopDiagnostics();
         try { await Task.WhenAll(background).ConfigureAwait(false); } catch (OperationCanceledException) { }
         _singBox.Output -= OnSingBoxOutput;
+        if (_guardAgent is not null) await _guardAgent.DisposeAsync().ConfigureAwait(false);
         try { await _singBox.DisposeAsync().ConfigureAwait(false); } catch { }
         _remoteFetcher.Dispose();
         _releaseHttpClient.Dispose();
@@ -793,10 +799,18 @@ public sealed partial class AppController : IAsyncDisposable
                 _profile = next;
                 _profileStore.Save(next);
                 RefreshProtectedInventory();
+                if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
                 _profile = previous;
+                RefreshProtectedInventory();
+                try
+                {
+                    _profileStore.Save(previous);
+                    if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch { /* Retain the persisted desired state and report the failed handoff below. */ }
                 return ControllerOperationResult.Failure("保存 Profile 失败：" + exception.Message);
             }
 
@@ -824,6 +838,7 @@ public sealed partial class AppController : IAsyncDisposable
             try
             {
                 _profileStore.Save(previous);
+                if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
             }
             catch { }
             return ControllerOperationResult.Failure(applied.ErrorMessage ?? "配置应用失败，已回滚。");
@@ -868,8 +883,9 @@ public sealed partial class AppController : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            _lastMessage = "Profile 读取失败，已使用默认配置：" + exception.Message;
-            return EgressProfileDocument.Default;
+            // A fabricated empty profile would erase the independent guardian's last
+            // selection. Leave both files intact and never establish a ready heartbeat.
+            throw new InvalidDataException("Profile 读取失败，原文件及守护名单已保留。请修复配置后重新打开：" + exception.Message, exception);
         }
     }
 

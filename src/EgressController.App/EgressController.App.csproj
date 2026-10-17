@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EgressController.Core\EgressController.Core.csproj" />
+    <ProjectReference Include="..\EgressController.Guardian\EgressController.Guardian.csproj" />
     <ProjectReference Include="..\EgressController.Transport\EgressController.Transport.csproj" />
     <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
     <ProjectReference Include="..\EgressController.Rules\EgressController.Rules.csproj" />

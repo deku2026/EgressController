@@ -34,6 +34,8 @@ public sealed class MainViewModel : ObservableObject
     public ConnectionsViewModel Connections { get; }
     public TrafficViewModel Traffic { get; }
     public NetworkViewModel Network { get; }
+    public EgressController.Guardian.GuardManagementViewModel Guard => Controller.Guard;
+    public string GuardianConnectionStatus => Controller.GuardianConnectionStatus;
 
     private async Task InitializeAsync()
     {
@@ -70,6 +72,8 @@ public sealed class MainViewModel : ObservableObject
         Connections.Refresh();
         Traffic.Refresh();
         Network.Refresh();
+        _ = Guard.RefreshAsync();
+        OnPropertyChanged(nameof(GuardianConnectionStatus));
         Status = Network.ProtectionStatus;
     }
 }

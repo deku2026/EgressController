@@ -1,0 +1,92 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace EgressController.Guardian;
+
+public sealed class GuardManagementViewModel : ObservableObject
+{
+    private readonly IGuardManagementClient _client;
+    private bool _refreshing;
+    private bool _busy;
+    private bool _autoStart = true;
+    private string _summary = "正在读取独立守护状态";
+    private string _details = "";
+    private string _records = "";
+    private string _message = "";
+    private bool _red = true;
+    private bool _disabled;
+    public GuardManagementViewModel(IGuardManagementClient client)
+    {
+        _client = client;
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync);
+        InstallCommand = Command(GuardAction.Install);
+        StartCommand = Command(GuardAction.Start);
+        StopCommand = Command(GuardAction.Stop);
+        ForceStopCommand = Command(GuardAction.ForceStop);
+        StopAndDisableCommand = Command(GuardAction.StopAndDisable);
+        UninstallCommand = Command(GuardAction.Uninstall);
+        ClearHistoryCommand = new AsyncRelayCommand(async () => await RunAsync(() => _client.ClearHistoryAsync()));
+    }
+    public string Summary { get => _summary; private set => SetProperty(ref _summary, value); }
+    public string Details { get => _details; private set => SetProperty(ref _details, value); }
+    public string Records { get => _records; private set => SetProperty(ref _records, value); }
+    public string Message { get => _message; private set => SetProperty(ref _message, value); }
+    public bool Red { get => _red; private set => SetProperty(ref _red, value); }
+    public bool Disabled { get => _disabled; private set => SetProperty(ref _disabled, value); }
+    public bool CanEdit => !_busy;
+    public bool AutoStart
+    {
+        get => _autoStart;
+        set
+        {
+            if (!SetProperty(ref _autoStart, value) || _refreshing) return;
+            _ = RunAsync(() => _client.ExecuteAsync(value ? GuardAction.EnableAutoStart : GuardAction.DisableAutoStart));
+        }
+    }
+    public IAsyncRelayCommand RefreshCommand { get; }
+    public IAsyncRelayCommand InstallCommand { get; }
+    public IAsyncRelayCommand StartCommand { get; }
+    public IAsyncRelayCommand StopCommand { get; }
+    public IAsyncRelayCommand ForceStopCommand { get; }
+    public IAsyncRelayCommand StopAndDisableCommand { get; }
+    public IAsyncRelayCommand UninstallCommand { get; }
+    public IAsyncRelayCommand ClearHistoryCommand { get; }
+    private AsyncRelayCommand Command(GuardAction action) => new(() => RunAsync(() => _client.ExecuteAsync(action)));
+    public async Task RefreshAsync()
+    {
+        if (_refreshing || _busy) return;
+        _refreshing = true;
+        try
+        {
+            var state = await _client.ReadAsync();
+            AutoStart = state.Service.AutoStart;
+            string serviceState = state.Service.State switch
+            {
+                GuardServiceState.Running => "运行中", GuardServiceState.Stopped => "已停止",
+                GuardServiceState.Missing => "未安装", GuardServiceState.Starting => "正在启动",
+                GuardServiceState.Stopping => "正在停止", _ => "状态未知",
+            };
+            Summary = state.Service.State == GuardServiceState.Running
+                ? state.Guard?.Reason ?? state.Error ?? "无法确认守护状态"
+                : state.UserStopped ? "独立守护已手动停止/卸载，当前不执行守护保护" : "独立守护：" + serviceState;
+            Red = state.Service.State == GuardServiceState.Running
+                ? state.Guard?.Protecting != false || state.Error is not null : !state.UserStopped;
+            Disabled = state.Service.State != GuardServiceState.Running && state.UserStopped;
+            Details = $"服务：{state.Service.Name}\n状态：{serviceState} · PID：{state.Service.Pid}\n启动：{(state.Service.AutoStart ? "开机自动" : "手动")}\n账号：{state.Service.Account}\n程序：{state.Service.BinaryPath}"
+                + (state.Error is null ? "" : "\n错误：" + state.Error);
+            Records = state.Guard is null ? "服务未连接，无法读取记录。" : string.Join("\n\n", state.Guard.Events.Select(item =>
+                $"{item.At.ToLocalTime():yyyy-MM-dd HH:mm:ss} · 独立守护 · {item.Application} · PID {item.Pid}\n{item.Path}\n{item.Reason}\n{(item.Succeeded ? "已终止" : "失败：" + item.Error)}"));
+        }
+        catch (Exception exception) { Summary = "无法读取独立守护状态"; Message = exception.Message; Red = true; Disabled = false; }
+        finally { _refreshing = false; }
+    }
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy) return;
+        _busy = true; OnPropertyChanged(nameof(CanEdit));
+        try { await action(); Message = "操作已完成。"; }
+        catch (Exception exception) { Message = exception.Message; }
+        finally { _busy = false; OnPropertyChanged(nameof(CanEdit)); await RefreshAsync(); }
+    }
+    public void ReportError(string error) => Message = error;
+}

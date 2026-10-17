@@ -2,7 +2,7 @@ using System.Xml.Linq;
 
 namespace EgressController.Core.Tests;
 
-/// <summary>Checks that the only product data plane is sing-box and that UI dependencies stay in App.</summary>
+/// <summary>Checks the sing-box data plane and the independent service/tray dependency boundaries.</summary>
 public class ArchitectureTests
 {
     private static readonly string[] SrcProjects =
@@ -16,6 +16,9 @@ public class ArchitectureTests
         "EgressController.State",
         "EgressController.SingBox",
         "EgressController.App",
+        "EgressController.Guardian",
+        "EgressController.GuardService",
+        "EgressController.GuardTray",
     ];
 
     private static readonly Dictionary<string, HashSet<string>> AllowedRefs = new(StringComparer.OrdinalIgnoreCase)
@@ -35,8 +38,11 @@ public class ArchitectureTests
         {
             "EgressController.Core", "EgressController.Transport", "EgressController.Windows",
             "EgressController.Rules", "EgressController.Launcher", "EgressController.Diagnostics",
-            "EgressController.State", "EgressController.SingBox",
+            "EgressController.State", "EgressController.SingBox", "EgressController.Guardian",
         },
+        ["EgressController.Guardian"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Core", "EgressController.Windows" },
+        ["EgressController.GuardService"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
+        ["EgressController.GuardTray"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
     };
 
     [Fact]
@@ -91,19 +97,19 @@ public class ArchitectureTests
 
     [Theory]
     [MemberData(nameof(NonAppProjectNames))]
-    public void Only_App_may_reference_UI_assemblies(string projectName)
+    public void Only_App_and_tray_may_reference_Avalonia(string projectName)
     {
         var map = LoadProjectMap();
         string[] uiPackages = map.PackagesOf(projectName)
             .Where(p => p.StartsWith("Avalonia", StringComparison.OrdinalIgnoreCase)
-                     || p.Equals("CommunityToolkit.Mvvm", StringComparison.OrdinalIgnoreCase))
+                     || projectName != "EgressController.Guardian" && p.Equals("CommunityToolkit.Mvvm", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         Assert.Empty(uiPackages);
     }
 
     public static TheoryData<string> SrcProjectNames => new(SrcProjects);
     public static TheoryData<string> NonAppProjectNames
-        => new(SrcProjects.Where(name => name != "EgressController.App"));
+        => new(SrcProjects.Where(name => name is not ("EgressController.App" or "EgressController.GuardTray")));
 
     private static ProjectMap LoadProjectMap() => ProjectMap.Load(FindSolutionRoot());
 
@@ -134,7 +140,7 @@ public class ArchitectureTests
             {
                 string name = Path.GetFileNameWithoutExtension(path);
                 XDocument doc = XDocument.Load(path);
-                XNamespace msbuild = "http://schemas.microsoft.com/developer/msbuild/2003";
+                XNamespace msbuild = doc.Root!.Name.Namespace;
                 var references = doc.Descendants(msbuild + "ProjectReference")
                     .Where(item => !string.Equals((string?)item.Attribute("ReferenceOutputAssembly"), "false", StringComparison.OrdinalIgnoreCase))
                     .Select(item => (string?)item.Attribute("Include"))

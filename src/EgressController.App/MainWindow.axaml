@@ -34,11 +34,38 @@
         </Border>
 
         <TabControl Margin="20" SelectedIndex="0">
+            <TabItem Header="独立守护">
+                <ScrollViewer Margin="20">
+                    <StackPanel Spacing="12">
+                        <TextBlock Classes="section-title" Text="{Binding Guard.Summary}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding GuardianConnectionStatus}" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" Text="独立守护只监控主程序和 TUN 接管，不参与联网测速。退出主程序后仍保护最近勾选的应用及递归目录、子孙进程；主程序网络保护独立运行。" TextWrapping="Wrap" />
+                        <SelectableTextBlock Text="{Binding Guard.Details}" TextWrapping="Wrap" />
+                        <CheckBox Content="开机自动启动守护服务及登录托盘" IsChecked="{Binding Guard.AutoStart, Mode=TwoWay}" IsEnabled="{Binding Guard.CanEdit}" />
+                        <TextBlock Classes="muted" Text="取消自启不停止当前服务。手动停止后，本次 Windows 启动期间不会自动拉起；下次开机按自启设置处理。卸载后不会自动重装。" TextWrapping="Wrap" />
+                        <WrapPanel IsEnabled="{Binding Guard.CanEdit}">
+                            <Button Margin="0,0,8,8" Content="安装服务" Command="{Binding Guard.InstallCommand}" />
+                            <Button Margin="0,0,8,8" Content="启动服务" Command="{Binding Guard.StartCommand}" />
+                            <Button Margin="0,0,8,8" Content="停止服务" Command="{Binding Guard.StopCommand}" />
+                            <Button Margin="0,0,8,8" Content="强制停止" Command="{Binding Guard.ForceStopCommand}" />
+                            <Button Margin="0,0,8,8" Content="停止并关闭自启" Command="{Binding Guard.StopAndDisableCommand}" />
+                            <Button Margin="0,0,8,8" Content="卸载服务" Command="{Binding Guard.UninstallCommand}" />
+                            <Button Margin="0,0,8,8" Content="刷新状态" Command="{Binding Guard.RefreshCommand}" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding Guard.Message}" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Classes="section-title" Text="独立守护终止记录（24 小时，最多 200 条）" />
+                            <Button Content="清空守护记录" Command="{Binding Guard.ClearHistoryCommand}" />
+                        </StackPanel>
+                        <SelectableTextBlock Text="{Binding Guard.Records}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
             <TabItem Header="进程保护">
                 <ScrollViewer Margin="20">
                     <StackPanel Spacing="12">
                         <TextBlock Classes="section-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="按勾选应用及目录递归扫描出的 EXE 路径匹配所有运行实例，同时处理子孙进程。每秒检查；恢复后不会自动启动应用。关闭窗口会继续在托盘保护，退出程序会结束保护。" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" Text="这里显示主程序网络保护，独立守护的状态和记录在“独立守护”页。两套条件独立；按勾选 EXE、递归目录及子孙进程保护，恢复后不会自动启动应用。" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <TextBlock Classes="section-title" Text="最近 24 小时的终止记录（最多 200 条，自动清理）" VerticalAlignment="Center" />
                             <Button Content="清空记录" Command="{Binding Network.ClearProtectionHistoryCommand}" />
