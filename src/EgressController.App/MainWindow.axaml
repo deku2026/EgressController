@@ -68,6 +68,7 @@
                         </WrapPanel>
                         <TextBlock Text="{Binding Guard.Message}" TextWrapping="Wrap" />
                         <SelectableTextBlock Text="{Binding Guard.LastFailure}" TextWrapping="Wrap" Foreground="#9F1239" />
+                        <SelectableTextBlock Text="{Binding Guard.LogFailure}" TextWrapping="Wrap" Foreground="#9F1239" />
                         <Button Content="打开守护服务日志目录" Click="OnOpenGuardLogDirectory" />
                         <SelectableTextBlock Text="{Binding Guard.LogDirectory, StringFormat='守护日志目录：{0}'}" TextWrapping="Wrap" />
                         <TextBlock Classes="muted" Text="更换发布包不会自动更新已安装的守护组件。升级守护时先退出旧小托盘，在此卸载再安装服务（保护名单保留），然后重新打开主程序以启动新托盘。" TextWrapping="Wrap" />

@@ -16,6 +16,7 @@ public sealed class DiagnosticJournal
     private readonly int _capacity;
     private long _version;
     private DateTimeOffset _lastRepeatedWrite;
+    private string? _writeFailure;
     public DiagnosticJournal(string path, Action<CoreLogEntry>? write = null,
         Func<DateTimeOffset>? now = null, int capacity = 200)
     {
@@ -29,6 +30,7 @@ public sealed class DiagnosticJournal
     public string DirectoryPath => Path.GetDirectoryName(LogPath)!;
     public BoundedLogStore Logs { get; } = new();
     public long Version => Interlocked.Read(ref _version);
+    public string? WriteFailure => Volatile.Read(ref _writeFailure);
     public IReadOnlyList<DiagnosticIssue> Snapshot() { lock (_gate) return _issues.ToArray(); }
     public void Info(string stage, string message) => Write(stage, "info", Redact(message));
 
@@ -65,11 +67,12 @@ public sealed class DiagnosticJournal
     {
         var entry = new CoreLogEntry(_now(), stage, level, Redact(message));
         Logs.Append(entry.Source, entry.Level, entry.Message, entry.TimestampUtc);
-        try { _write(entry); }
+        try { _write(entry); Volatile.Write(ref _writeFailure, null); }
         catch (Exception error)
         {
             // Do not call Report here: logging its own I/O failure would recurse.
             string detail = Redact($"无法写入日志：{LogPath}\n{error}");
+            Volatile.Write(ref _writeFailure, detail);
             lock (_gate)
             {
                 _issues.RemoveAll(issue => issue.Code == "log.write");

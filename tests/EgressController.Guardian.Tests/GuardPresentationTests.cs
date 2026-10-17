@@ -3,6 +3,18 @@ namespace EgressController.Guardian.Tests;
 public sealed class GuardPresentationTests
 {
     [Fact]
+    public async Task Tray_log_write_failure_is_visible_alongside_original_operation_error()
+    {
+        var log = new EgressController.Diagnostics.DiagnosticJournal(Path.GetFullPath("mock-tray.log"),
+            _ => throw new IOException("mock tray log denied"));
+        var vm = new GuardManagementViewModel(new Client { Throw = true }, log);
+        await vm.StopCommand.ExecuteAsync(null);
+        Assert.Contains("mock UAC cancelled", vm.LastFailure);
+        Assert.Contains("mock tray log denied", vm.LogFailure);
+        Assert.Contains(log.LogPath, vm.LogFailure);
+    }
+
+    [Fact]
     public async Task Startup_click_during_refresh_is_applied_and_late_snapshot_cannot_undo_it()
     {
         var response = new TaskCompletionSource<GuardPanelSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);

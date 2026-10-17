@@ -168,6 +168,7 @@ public sealed class GuardRuntime
             }
             if (failures > 0) reason = $"保护未完成：{failures} 项失败；{reason}";
             if (_status.Reason != reason) _diagnostics?.Info("守护状态", reason);
+            if (_diagnostics?.WriteFailure is { } logFailure) reason += "\n守护日志写入失败：" + logFailure;
             return _status = new(!ready || failures > 0, reason, _policy.Executables.Length,
                 failures, _policy.Revision, _protection.Events.ToArray());
         }

@@ -21,6 +21,7 @@ public sealed class GuardWindow : Window
         var message = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DarkRed };
         var records = new SelectableTextBlock { TextWrapping = TextWrapping.Wrap };
         var failure = new SelectableTextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DarkRed };
+        var logFailure = new SelectableTextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DarkRed };
         var automatic = new CheckBox { Content = "开机启动守护服务，登录后显示托盘" };
         var buttons = new WrapPanel { Orientation = Orientation.Horizontal };
         void Button(string text, ICommand command) => buttons.Children.Add(new Button { Content = text, Command = command, Margin = new Thickness(0, 0, 8, 8) });
@@ -34,6 +35,7 @@ public sealed class GuardWindow : Window
             updating = true;
             summary.Text = vm.Summary; details.Text = vm.Details; message.Text = vm.Message;
             failure.Text = vm.LastFailure;
+            logFailure.Text = vm.LogFailure;
             records.Text = vm.Records; automatic.IsChecked = vm.AutoStart;
             automatic.IsEnabled = buttons.IsEnabled = vm.CanEdit;
             updating = false;
@@ -72,6 +74,7 @@ public sealed class GuardWindow : Window
         });
         panel.Children.Add(message);
         panel.Children.Add(failure);
+        panel.Children.Add(logFailure);
         panel.Children.Add(new TextBlock { Text = "独立守护终止记录 · 最近 24 小时，最多 200 条", FontWeight = FontWeight.SemiBold });
         panel.Children.Add(records);
         Content = new ScrollViewer { Content = panel };

@@ -41,6 +41,7 @@ public sealed class GuardManagementViewModel : ObservableObject
     public string LastFailure { get => _lastFailure; private set => SetProperty(ref _lastFailure, value); }
     public string LogDirectory { get; }
     public string DiagnosticLogPath => _diagnostics?.LogPath ?? "";
+    public string LogFailure => _diagnostics?.WriteFailure ?? "";
     public bool Red { get => _red; private set => SetProperty(ref _red, value); }
     public bool Disabled { get => _disabled; private set => SetProperty(ref _disabled, value); }
     public bool CanEdit => !_busy;
@@ -97,7 +98,7 @@ public sealed class GuardManagementViewModel : ObservableObject
             Summary = "无法读取独立守护状态"; Message = exception.Message; Red = true; Disabled = false;
             RecordFailure("读取守护状态", exception.Message, exception);
         }
-        finally { _refreshing = false; }
+        finally { _refreshing = false; OnPropertyChanged(nameof(LogFailure)); }
     }
     private async Task RunAsync(string operation, Func<Task> action)
     {
@@ -114,5 +115,6 @@ public sealed class GuardManagementViewModel : ObservableObject
         LastFailure = $"最近失败 · {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} · {operation}\n"
             + DiagnosticJournal.Redact(error?.ToString() ?? message);
         _diagnostics?.Report("独立守护 · " + operation, "guard.management", message, error);
+        OnPropertyChanged(nameof(LogFailure));
     }
 }
