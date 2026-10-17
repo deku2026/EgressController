@@ -290,7 +290,7 @@ public sealed class WindowsLaunchTargetScanner
                             if (string.IsNullOrWhiteSpace(name) || IsHiddenRegistryEntry(key))
                                 continue;
 
-                            string? iconPath = ResolveRegisteredPath(GetString(key, "DisplayIcon"));
+                            string? iconPath = RegisteredExecutablePath.Parse(GetString(key, "DisplayIcon"), icon: true);
                             string? installLocation = ResolveDirectory(GetString(key, "InstallLocation"));
                             string? executable = FindRegisteredExecutable(name, iconPath, installLocation);
                             if (executable is null)
@@ -416,7 +416,7 @@ public sealed class WindowsLaunchTargetScanner
                         try
                         {
                             using RegistryKey? key = root.OpenSubKey(name, writable: false);
-                            string? exe = ResolveRegisteredPath(GetString(key, string.Empty));
+                            string? exe = RegisteredExecutablePath.Parse(GetString(key, string.Empty));
                             if (!IsExecutable(exe))
                                 continue;
                             AddNative(registry, exe!, Path.GetFileNameWithoutExtension(name), LaunchKind.DirectExe, "App Paths");
@@ -597,31 +597,6 @@ public sealed class WindowsLaunchTargetScanner
             IconPath = full,
             Source = source,
         });
-    }
-
-    private static string? ResolveRegisteredPath(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.StartsWith("@", StringComparison.Ordinal))
-            return null;
-
-        string text = value.Trim();
-        if (text.StartsWith('"'))
-        {
-            int end = text.IndexOf('"', 1);
-            if (end > 1)
-                text = text[1..end];
-        }
-        else
-        {
-            int comma = text.IndexOf(',');
-            int space = text.IndexOf(' ');
-            int end = comma >= 0 && (space < 0 || comma < space) ? comma : space;
-            if (end > 0)
-                text = text[..end];
-        }
-
-        text = Environment.ExpandEnvironmentVariables(text.Trim().Trim('"'));
-        return Path.IsPathFullyQualified(text) ? Path.GetFullPath(text) : null;
     }
 
     private static string? ResolveDirectory(string? value)

@@ -20,7 +20,10 @@ public sealed unsafe class ExecutablePathCanonicalizer : IExecutablePathCanonica
 
         try
         {
-            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var handle = PInvoke.CreateFile(path, 0,
+                FILE_SHARE_MODE.FILE_SHARE_READ | FILE_SHARE_MODE.FILE_SHARE_WRITE | FILE_SHARE_MODE.FILE_SHARE_DELETE,
+                null, FILE_CREATION_DISPOSITION.OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES.FILE_FLAG_BACKUP_SEMANTICS, null);
+            if (handle.IsInvalid) return null;
             uint needed = PInvoke.GetFinalPathNameByHandle(new HANDLE(handle.DangerousGetHandle()), null, 0, GETFINALPATHNAMEBYHANDLE_FLAGS.FILE_NAME_NORMALIZED);
             if (needed == 0)
                 return null;
@@ -31,19 +34,23 @@ public sealed unsafe class ExecutablePathCanonicalizer : IExecutablePathCanonica
             {
                 written = PInvoke.GetFinalPathNameByHandle(new HANDLE(handle.DangerousGetHandle()), new PWSTR(p), (uint)buffer.Length, GETFINALPATHNAMEBYHANDLE_FLAGS.FILE_NAME_NORMALIZED);
             }
-            if (written == 0)
+            if (written == 0 || written >= buffer.Length)
                 return null;
 
-            string canonical = new string(buffer, 0, (int)written);
-            // GetFinalPathNameByHandle returns "\\?\C:\..." — normalize to a dot-relative DOS path.
-            if (canonical.StartsWith(@"\\?\", StringComparison.Ordinal))
-                canonical = canonical[4..];
-
-            return canonical.Replace('/', Path.DirectorySeparatorChar);
+            return NormalizeFinalPath(new string(buffer, 0, (int)written));
         }
         catch
         {
             return null;
         }
+    }
+
+    internal static string NormalizeFinalPath(string canonical)
+    {
+        if (canonical.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            canonical = @"\\" + canonical[8..];
+        else if (canonical.StartsWith(@"\\?\", StringComparison.Ordinal))
+            canonical = canonical[4..];
+        return canonical.Replace('/', Path.DirectorySeparatorChar);
     }
 }

@@ -91,7 +91,8 @@ public sealed record SingBoxApplyResult(
     bool Succeeded,
     bool RestoredLastGood,
     string? ErrorCode,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    bool CoreChanged = false);
 
 public sealed record SingBoxProcessStatus(
     bool Succeeded,
@@ -125,6 +126,7 @@ public sealed class SingBoxService : IAsyncDisposable
     private readonly SingBoxStateStore _stateStore;
     private readonly Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>> _healthCheck;
     private readonly Action? _beforeTunChange;
+    private readonly Action? _afterTunChange;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly object _gate = new();
     private CancellationTokenSource? _operation;
@@ -134,12 +136,14 @@ public sealed class SingBoxService : IAsyncDisposable
         ISingBoxProcessClient processClient,
         SingBoxStateStore stateStore,
         Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>>? healthCheck = null,
-        Action? beforeTunChange = null)
+        Action? beforeTunChange = null,
+        Action? afterTunChange = null)
     {
         _processClient = processClient ?? throw new ArgumentNullException(nameof(processClient));
         _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
         _healthCheck = healthCheck ?? ((_, _) => Task.FromResult(true));
         _beforeTunChange = beforeTunChange;
+        _afterTunChange = afterTunChange;
         _processClient.Output += OnOutput;
     }
 
@@ -178,46 +182,39 @@ public sealed class SingBoxService : IAsyncDisposable
         {
             _beforeTunChange?.Invoke();
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopping, null, null, null, HasPending()));
-            await _processClient.StopAsync(cancellationToken).ConfigureAwait(false);
+            SingBoxProcessStatus stopped = await _processClient.StopAsync(cancellationToken).ConfigureAwait(false);
+            if (!stopped.Succeeded || stopped.State != "stopped")
+            {
+                SetStatus(new(SingBoxServiceState.Failed, stopped.ProcessId, "process.stop", stopped.ErrorMessage ?? "内核未停止。", HasPending()));
+                throw new SingBoxServiceException("process.stop", stopped.ErrorMessage ?? "内核未停止。");
+            }
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopped, null, null, null, HasPending()));
         }
         finally
         {
+            _afterTunChange?.Invoke();
             _lifecycleGate.Release();
         }
     }
 
     public async Task<bool> RecoverPendingAsync(CancellationToken cancellationToken = default)
     {
-        SingBoxRuntimePointer? lastGood = _stateStore.LoadLastGoodRuntime();
         if (_stateStore.LoadPendingApply() is null)
             return false;
-        if (lastGood is null)
-        {
-            _stateStore.ClearPendingApply();
-            SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Stopped, null, "recovery.no-last-good", "没有可恢复的 last-good runtime。", false));
-            return false;
-        }
 
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             _beforeTunChange?.Invoke();
-            SetStatus(new SingBoxServiceStatus(SingBoxServiceState.RollingBack, null, null, null, true));
-            SingBoxRuntimeCandidate candidate = SingBoxRuntimeCandidate.FromPointer(lastGood);
-            SingBoxProcessStatus status = await _processClient.StartAsync(candidate, restart: true, cancellationToken).ConfigureAwait(false);
-            if (!status.Succeeded || !await _healthCheck(candidate, cancellationToken).ConfigureAwait(false))
-            {
-                SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Failed, status.ProcessId, status.ErrorCode, status.ErrorMessage, true));
-                return false;
-            }
-            _stateStore.SaveCurrentRuntime(lastGood);
-            _stateStore.ClearPendingApply();
-            SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Running, status.ProcessId, null, null, false));
-            return true;
+            (bool restored, string? cleanupError) = await TryRestoreLastGoodAsync().ConfigureAwait(false);
+            SetStatus(new(restored ? SingBoxServiceState.Running : SingBoxServiceState.Failed,
+                null, restored ? null : "recovery.failed",
+                restored ? null : "未能恢复有效的 last-good runtime。" + cleanupError, !restored && HasPending()));
+            return restored;
         }
         finally
         {
+            _afterTunChange?.Invoke();
             _lifecycleGate.Release();
         }
     }
@@ -325,14 +322,16 @@ public sealed class SingBoxService : IAsyncDisposable
             _stateStore.SaveLastGood(pending.Core);
             _stateStore.ClearPendingApply();
             SetStatus(new SingBoxServiceStatus(SingBoxServiceState.Running, started.ProcessId, null, null, false));
-            return new SingBoxApplyResult(true, false, null, null);
+            return new SingBoxApplyResult(true, false, null, null, CoreChanged: true);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            bool restored = await TryRestoreLastGoodAsync().ConfigureAwait(false);
+            if (!restartIssued)
+                return new(false, false, "operation.cancelled", "操作已取消，现有内核未改变。");
+            (bool restored, string? cleanupError) = await TryRestoreLastGoodAsync().ConfigureAwait(false);
             SetStatus(new(restored ? SingBoxServiceState.Running : SingBoxServiceState.Failed,
-                null, "operation.cancelled", "操作已取消。", !restored && HasPending()));
-            return new SingBoxApplyResult(false, restored, "operation.cancelled", "操作已取消。");
+                null, "operation.cancelled", "操作已取消。" + cleanupError, !restored && HasPending()));
+            return new SingBoxApplyResult(false, restored, "operation.cancelled", "操作已取消。" + cleanupError, CoreChanged: true);
         }
         catch (Exception ex)
         {
@@ -343,46 +342,58 @@ public sealed class SingBoxService : IAsyncDisposable
                     SetStatus(new(SingBoxServiceState.Failed, null, "apply.failed", ex.Message, false));
                 return new(false, false, "apply.failed", ex.Message);
             }
-            bool restored = await TryRestoreLastGoodAsync().ConfigureAwait(false);
+            (bool restored, string? cleanupError) = await TryRestoreLastGoodAsync().ConfigureAwait(false);
             SetStatus(new SingBoxServiceStatus(
                 restored ? SingBoxServiceState.Running : SingBoxServiceState.Failed,
                 null,
                 restored ? "apply.failed.restored" : "apply.failed",
-                ex.Message,
+                ex.Message + cleanupError,
                 !restored && HasPending()));
-            return new SingBoxApplyResult(false, restored, ex is SingBoxServiceException service ? service.Code : "apply.failed", ex.Message);
+            return new SingBoxApplyResult(false, restored, ex is SingBoxServiceException service ? service.Code : "apply.failed", ex.Message + cleanupError, CoreChanged: true);
         }
         finally
         {
+            _afterTunChange?.Invoke();
             _lifecycleGate.Release();
         }
     }
 
-    private async Task<bool> TryRestoreLastGoodAsync()
+    private async Task<(bool Restored, string? CleanupError)> TryRestoreLastGoodAsync()
     {
-        SingBoxRuntimePointer? lastGood = _stateStore.LoadLastGoodRuntime();
-        if (lastGood is null)
-            return false;
-        SetStatus(new SingBoxServiceStatus(SingBoxServiceState.RollingBack, null, null, null, true));
+        bool restored = false;
         try
         {
-            SingBoxRuntimeCandidate candidate = SingBoxRuntimeCandidate.FromPointer(lastGood);
-            SingBoxProcessStatus restored = await _processClient.StartAsync(
-                candidate,
-                restart: true,
-                CancellationToken.None).ConfigureAwait(false);
-            if (!restored.Succeeded || !await _healthCheck(candidate, CancellationToken.None).ConfigureAwait(false))
-                return false;
-            SingBoxProcessStatus confirmed = await _processClient.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
-            if (!confirmed.Succeeded || confirmed.State != "running") return false;
-            _stateStore.SaveCurrentRuntime(lastGood);
-            _stateStore.ClearPendingApply();
-            return true;
+            SingBoxRuntimePointer? lastGood = _stateStore.LoadLastGoodRuntime();
+            if (lastGood is not null)
+            {
+                SetStatus(new(SingBoxServiceState.RollingBack, null, null, null, true));
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                SingBoxRuntimeCandidate candidate = SingBoxRuntimeCandidate.FromPointer(lastGood);
+                SingBoxProcessStatus started = await _processClient.StartAsync(candidate, true, timeout.Token).ConfigureAwait(false);
+                if (started.Succeeded && await _healthCheck(candidate, timeout.Token).ConfigureAwait(false))
+                {
+                    SingBoxProcessStatus confirmed = await _processClient.GetStatusAsync(timeout.Token).ConfigureAwait(false);
+                    if (confirmed.Succeeded && confirmed.State == "running")
+                    {
+                        _stateStore.SaveCurrentRuntime(lastGood);
+                        _stateStore.ClearPendingApply();
+                        restored = true;
+                    }
+                }
+            }
         }
-        catch
+        catch { /* A rejected rollback must be cleaned up just like the failed candidate. */ }
+        if (restored) return (true, null);
+        try
         {
-            return false;
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            SingBoxProcessStatus stopped = await _processClient.StopAsync(cleanup.Token).ConfigureAwait(false);
+            SingBoxProcessStatus confirmed = await _processClient.GetStatusAsync(cleanup.Token).ConfigureAwait(false);
+            if (!stopped.Succeeded || !confirmed.Succeeded || confirmed.State != "stopped")
+                return (false, "；失败内核清理未完成：" + (stopped.ErrorMessage ?? confirmed.ErrorMessage ?? confirmed.State));
         }
+        catch (Exception exception) { return (false, "；失败内核清理未完成：" + exception.Message); }
+        return (false, null);
     }
 
     private void CancelPreparation()

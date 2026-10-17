@@ -25,6 +25,8 @@ public sealed class HttpRemoteFetcher : IRemoteFetcher, IDisposable
         if (maxBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxBytes));
         ObjectDisposedException.ThrowIf(_disposed, this);
+        using var deadline = HttpTransfer.Deadline(_client, cancellationToken);
+        cancellationToken = deadline.Token;
 
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
@@ -38,16 +40,7 @@ public sealed class HttpRemoteFetcher : IRemoteFetcher, IDisposable
 
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var output = new MemoryStream(Math.Min(maxBytes, 64 * 1024));
-        byte[] buffer = new byte[16 * 1024];
-        while (true)
-        {
-            int read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-                break;
-            if (output.Length + read > maxBytes)
-                throw new InvalidDataException($"remote response exceeds {maxBytes} bytes");
-            output.Write(buffer, 0, read);
-        }
+        await HttpTransfer.CopyBoundedAsync(stream, output, maxBytes, cancellationToken).ConfigureAwait(false);
         return new RemoteFetchResult(true, statusCode, output.ToArray());
     }
 

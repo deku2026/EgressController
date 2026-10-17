@@ -1,5 +1,6 @@
 using System.Text.Json;
 using EgressController.Core.Protection;
+using EgressController.Core.Contracts;
 
 namespace EgressController.Guardian;
 
@@ -16,19 +17,24 @@ public sealed class GuardRuntime
     private readonly IGuardFacts _facts;
     private readonly ProcessProtection _protection;
     private readonly GuardLease _lease;
+    private readonly IExecutablePathCanonicalizer? _pathResolver;
     private readonly HashSet<string> _selfPaths;
     private GuardPolicy? _policy;
+    private GuardPolicy? _storedPolicy;
     private string? _lastCheckpoint;
     private string? _infrastructureError;
     private GuardStatus _status = new(true, "主程序未运行", 0, 0, null, []);
     public GuardRuntime(IGuardStore store, IProcessControl processes, IGuardFacts facts,
-        IEnumerable<string> selfPaths, TimeProvider? clock = null)
+        IEnumerable<string> selfPaths, TimeProvider? clock = null, IExecutablePathCanonicalizer? pathResolver = null)
     {
         _store = store; _facts = facts;
+        _pathResolver = pathResolver;
         _protection = new(processes, clock);
         _lease = new(clock);
         _selfPaths = selfPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
         _policy = store.LoadPolicy(); // Corrupt/missing data never becomes a fabricated empty selection.
+        _storedPolicy = _policy;
+        if (_policy is not null && _pathResolver is not null) _policy = _policy.WithPathAliases(_pathResolver);
         var checkpoint = store.LoadCheckpoint();
         _protection.RestoreTracking(checkpoint.Processes, checkpoint.Events);
     }
@@ -74,15 +80,16 @@ public sealed class GuardRuntime
         lock (_gate)
         {
             policy = policy.Validate();
-            if (_policy?.Revision == policy.Revision)
+            if (_storedPolicy?.Revision == policy.Revision)
             {
-                if (JsonSerializer.Serialize(_policy, GuardJson.Default.GuardPolicy) != JsonSerializer.Serialize(policy, GuardJson.Default.GuardPolicy))
+                if (JsonSerializer.Serialize(_storedPolicy, GuardJson.Default.GuardPolicy) != JsonSerializer.Serialize(policy, GuardJson.Default.GuardPolicy))
                     throw new InvalidDataException("同一守护版本不能对应不同名单。");
                 return;
             }
             _lease.Revoke();
             _store.SavePolicy(policy);
-            _policy = policy;
+            _storedPolicy = policy;
+            _policy = _pathResolver is null ? policy : policy.WithPathAliases(_pathResolver);
         }
     }
     public bool Report(Guid session, long sequence, GuardHeartbeat heartbeat)

@@ -112,6 +112,8 @@ public static class GuardWindowsIdentity
 public sealed class WindowsGuardFacts : IGuardFacts
 {
     private readonly WindowsProcessIdentityResolver _identities = new(new ExecutablePathCanonicalizer());
+    private readonly WindowsTunInspector _tun = new();
+    private ProcessKey? _core;
     public bool IsAlive(ProcessKey identity, string executable)
     {
         RuntimeSafety.RequireLiveOperations();
@@ -120,7 +122,11 @@ public sealed class WindowsGuardFacts : IGuardFacts
             && string.Equals(current.ExePathFinal, executable, StringComparison.OrdinalIgnoreCase);
     }
     public string? InspectTun(ProcessKey core, string executable)
-        => !IsAlive(core, executable) ? "受管理 sing-box 实例已退出" : new WindowsTunInspector().GetError();
+    {
+        if (!IsAlive(core, executable)) return "受管理 sing-box 实例已退出";
+        if (_core != core) { _tun.Reset(); _core = core; }
+        return _tun.GetError();
+    }
 }
 
 /// <summary>LocalSystem must not terminate another user's matching executable.</summary>

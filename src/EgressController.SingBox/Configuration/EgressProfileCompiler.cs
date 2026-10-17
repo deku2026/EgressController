@@ -2,11 +2,13 @@ using System.Security.Cryptography;
 using System.Text;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
+using EgressController.Core.Protection;
 
 namespace EgressController.SingBox.Configuration;
 
 public sealed record SingBoxRuleSetInput(string Name, string Path);
-public sealed record SingBoxApplicationRouteInput(IReadOnlyList<string> ExecutablePaths, EgressRouteTarget Target);
+public sealed record SingBoxApplicationRouteInput(IReadOnlyList<string> ExecutablePaths, EgressRouteTarget Target,
+    IReadOnlyList<string>? DirectoryRoots = null);
 
 /// <summary>Runtime-only inputs assembled by AppController after inventory/network resolution.</summary>
 public sealed record EgressProfileCompileInput
@@ -14,8 +16,6 @@ public sealed record EgressProfileCompileInput
     public required EgressProfileDocument Profile { get; init; }
     public required NetworkEnvironmentSnapshot Environment { get; init; }
     public IReadOnlyList<SingBoxApplicationRouteInput> ApplicationRoutes { get; init; } = [];
-    // Includes unchecked applications so a selected app's helper cannot capture another app.
-    public IReadOnlyList<string> KnownApplicationExecutablePaths { get; init; } = [];
     public required IReadOnlyList<string> UpstreamOwnerPaths { get; init; }
     public IReadOnlyList<int> UnreadyUpstreamPorts { get; init; } = [];
     public IReadOnlyList<string> SelfExecutablePaths { get; init; } = Array.Empty<string>();
@@ -59,6 +59,7 @@ public sealed class EgressProfileCompiler
             throw Failure("upstream.owner.self", "上游 SOCKS5 owner 是 EgressController/sing-box 自身，拒绝生成配置。");
 
         var applicationTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
+        var directoryTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
         foreach (SingBoxApplicationRouteInput application in input.ApplicationRoutes)
         {
             EgressRouteTarget target = application.Target.NormalizeAndValidate(profile.UpstreamPorts);
@@ -68,13 +69,19 @@ public sealed class EgressProfileCompiler
                     throw Failure("application.conflict", $"同一个 EXE 路径被指定到不同出口：{path}。请统一该程序的分流选择。");
                 applicationTargets[path] = target;
             }
+            foreach (string directory in NormalizePaths(application.DirectoryRoots ?? [], "application.directory")
+                .Select(Path.TrimEndingDirectorySeparator))
+            {
+                if (directory == Path.GetPathRoot(directory))
+                    throw Failure("application.directory", "递归应用规则不能使用磁盘根目录。");
+                if (directoryTargets.Any(existing => existing.Value != target
+                    && (existing.Key.Equals(directory, StringComparison.OrdinalIgnoreCase)
+                        || ProcessProtection.IsWithinDirectory(existing.Key, directory)
+                        || ProcessProtection.IsWithinDirectory(directory, existing.Key))))
+                    throw Failure("application.directory.conflict", $"重叠的应用目录被指定到不同出口：{directory}。");
+                directoryTargets[directory] = target;
+            }
         }
-        HashSet<string> sharedNames = NormalizePaths(input.KnownApplicationExecutablePaths
-                .Concat(applicationTargets.Keys).Concat(owners), "application.path")
-            .GroupBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Skip(1).Any())
-            .Select(group => group.Key!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var selectedRuleSets = NormalizeRuleSets(profile, input.RuleSets);
         ValidateEnvironment(input.Environment);
@@ -101,24 +108,24 @@ public sealed class EgressProfileCompiler
         if (self.Length > 0)
             rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = RecoveryDirectTag });
         foreach (var group in applicationTargets
+            .Where(route => !directoryTargets.Any(directory => directory.Value == route.Value
+                && ProcessProtection.IsWithinDirectory(route.Key, directory.Key)))
             .GroupBy(route => route.Value)
             .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
         {
-            AddProcessRules(group.Select(route => route.Key), RouteTo(group.Key));
+            rules.Add(RouteTo(group.Key) with
+            {
+                ProcessPathRegex = group.Select(route => route.Key).Order(StringComparer.OrdinalIgnoreCase).Select(ProcessPathPattern).ToArray(),
+            });
         }
-
-        void AddProcessRules(IEnumerable<string> executablePaths, SingBoxRouteRuleDocument action)
+        foreach (var group in directoryTargets.GroupBy(route => route.Value)
+            .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
         {
-            string[] paths = executablePaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
-            bool NeedsPath(string path) => sharedNames.Contains(Path.GetFileNameWithoutExtension(path))
-                || owners.Contains(path, StringComparer.OrdinalIgnoreCase);
-            string[] names = NormalizeProcessNames(paths.Where(path => !NeedsPath(path)));
-            if (names.Length > 0)
-                rules.Add(action with { ProcessName = names });
-            string[] patterns = paths.Where(NeedsPath).Select(ProcessPathPattern).ToArray();
-            if (patterns.Length > 0)
-                rules.Add(action with { ProcessPathRegex = patterns });
-            // Separate rules are intentional: sing-box ANDs process_name and process_path_regex.
+            rules.Add(RouteTo(group.Key) with
+            {
+                ProcessPathRegex = group.Select(route => route.Key).Order(StringComparer.OrdinalIgnoreCase)
+                    .Select(directory => ProcessPathPattern(directory + Path.DirectorySeparatorChar)[..^1] + @".+\.exe$").ToArray(),
+            });
         }
 
         // Explicit process rules win; custom domains override broad catalog sets. More
@@ -303,29 +310,6 @@ public sealed class EgressProfileCompiler
             Inet6BindAddress = adapter.Ipv6BindAddress?.ToString(),
         };
 
-    private static string[] NormalizeProcessNames(IEnumerable<string> paths)
-    {
-        // sing-box receives the process name from Windows. Keep the casing variants explicit:
-        // process_name matching is owned by sing-box and must not rely on the host filesystem's
-        // case-insensitivity. Ordinal de-duplication also makes the generated JSON prove which
-        // spellings are accepted instead of silently collapsing them on the C# side.
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (string path in paths)
-        {
-            string fileName = Path.GetFileName(path);
-            if (string.IsNullOrWhiteSpace(fileName))
-                throw Failure("upstream.owner.name", "上游 SOCKS5 owner executable name 为空。");
-            AddProcessNameVariants(names, fileName);
-            string withoutExtension = Path.GetFileNameWithoutExtension(fileName);
-            if (!string.IsNullOrWhiteSpace(withoutExtension))
-                AddProcessNameVariants(names, withoutExtension);
-        }
-        return names
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-    }
-
     private static string ProcessPathPattern(string path)
     {
         // Match Go's regexp.QuoteMeta metacharacter set, leaving spaces and '#' literal.
@@ -338,20 +322,6 @@ public sealed class EgressProfileCompiler
             pattern.Append(character);
         }
         return pattern.Append('$').ToString();
-    }
-
-    private static void AddProcessNameVariants(HashSet<string> names, string value)
-    {
-        names.Add(value);
-
-        string lower = value.ToLowerInvariant();
-        names.Add(lower);
-
-        if (value.Length > 0)
-        {
-            string title = char.ToUpperInvariant(value[0]) + value[1..].ToLowerInvariant();
-            names.Add(title);
-        }
     }
 
     private static List<SingBoxRuleSetInput> NormalizeRuleSets(

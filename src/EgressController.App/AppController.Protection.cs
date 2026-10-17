@@ -16,6 +16,27 @@ public sealed partial class AppController
     private EgressController.SingBox.Core.SingBoxCoreCandidate? _preparedCore;
     private volatile bool _shuttingDown;
     private volatile bool _inventoryReady;
+    private volatile bool _routingDirty;
+    private sealed record ApplicationRouteState(ApplicationRoutingCoverage Coverage, string InheritedKey);
+    private ApplicationRouteState _activeRouting = new(ApplicationRoutingCoverage.Empty, "");
+    private ApplicationRouteState _preparedRouting = new(ApplicationRoutingCoverage.Empty, "");
+    private void ActivatePreparedRouting() => Volatile.Write(ref _activeRouting, _preparedRouting);
+
+    private SingBoxApplicationRouteInput[] InheritedApplicationRoutes(EgressProfileDocument profile)
+    {
+        var covered = new ApplicationRoutingCoverage(profile.Applications.SelectMany(item => item.ExecutablePaths),
+            profile.Applications.SelectMany(item => item.DirectoryRoots));
+        return _processProtection.CaptureRoutingMembers()
+            .Where(item => !covered.Contains(item.Path) && !_excludedPaths.Contains(item.Path))
+            .SelectMany(item => profile.Applications.Where(selection =>
+                selection.ExecutablePaths.Contains(item.Source.Path, StringComparer.OrdinalIgnoreCase)
+                || selection.DirectoryRoots.Any(root => ProcessProtection.IsWithinDirectory(item.Source.Path, root)))
+                .Select(selection => new SingBoxApplicationRouteInput([item.Path], selection.Target)))
+            .ToArray();
+    }
+    private static string InheritedRoutingKey(IEnumerable<SingBoxApplicationRouteInput> routes)
+        => string.Join("\n", routes.SelectMany(route => route.ExecutablePaths.Select(path => path + ":" + route.Target))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase));
     private readonly EgressController.Windows.Network.WindowsTunInspector _tunInspector = new();
     private readonly AdapterBindingCache _adapterBindings = new();
     private string? _takeoverError = "等待 TUN 接管";
@@ -62,11 +83,12 @@ public sealed partial class AppController
         _protectedExecutables = result.ToArray();
     }
 
-    private void ValidateProtectionConflicts(EgressProfileDocument profile, IReadOnlyList<string> ownerPaths)
+    private void ValidateProtectionConflicts(EgressProfileDocument profile, IReadOnlyList<string> ownerPaths, bool updateExclusions = true)
     {
-        var excluded = ownerPaths.Concat(new[] { Environment.ProcessPath, _coreExecutable }.OfType<string>())
+        var excluded = ApplicationPathAliases.Expand(ownerPaths.Concat(new[] { Environment.ProcessPath, _coreExecutable }.OfType<string>()),
+                new ExecutablePathCanonicalizer())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _excludedPaths = excluded;
+        if (updateExclusions) _excludedPaths = excluded;
         ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(_targets.All());
         string? conflict = profile.Applications.SelectMany(selection =>
                 inventory.ExpandSelected([selection.DiscoveryKey]).Concat(selection.ExecutablePaths))
@@ -86,20 +108,37 @@ public sealed partial class AppController
 
     private void BeforeTunChange()
     {
-        // Results from the old core must not release protection after a restart or rollback.
-        _networkHealth.Reset();
-        _profileApplied = false;
+        if (!_shuttingDown && _tunInspector.GetStartError(_directSingBox.Status.State == "running") is { } conflict)
+            throw new InvalidOperationException(conflict);
         // ShutdownAsync already received the guard ACK before cancelling the lifetime.
         // Dispose also disconnects the agent before releasing the owned core. Do not try
         // to reacquire that handoff using the now-cancelled startup token.
-        if (!_shuttingDown) _guardAgent?.PrepareAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
-        int failures = SweepProtection(new(false, "TUN 即将启动或重启，先终止所选应用"));
-        if (failures > 0)
-            throw new InvalidOperationException("部分所选进程无法终止，已取消本次 TUN 变更；请检查进程保护记录。");
+        _guardTransition = true;
+        try
+        {
+            if (!_shuttingDown) _guardAgent?.PrepareAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
+            int failures = SweepProtection(new(false, "TUN 即将启动或重启，先终止所选应用"));
+            if (failures > 0)
+                throw new InvalidOperationException("部分所选进程无法终止，已取消本次 TUN 变更；请检查进程保护记录。");
+        }
+        catch
+        {
+            if (!_shuttingDown) _guardTransition = false;
+            throw;
+        }
     }
 
     private void OnTunStatusChanged(EgressController.SingBox.Runtime.SingBoxServiceStatus status)
     {
+        if (status.State is EgressController.SingBox.Runtime.SingBoxServiceState.Starting
+            or EgressController.SingBox.Runtime.SingBoxServiceState.Applying
+            or EgressController.SingBox.Runtime.SingBoxServiceState.Stopping
+            or EgressController.SingBox.Runtime.SingBoxServiceState.RollingBack)
+        {
+            InvalidateReadiness("TUN 正在变更");
+            _tunInspector.Reset();
+            return;
+        }
         if (status.State != EgressController.SingBox.Runtime.SingBoxServiceState.Failed) return;
         InvalidateReadiness(status.ErrorMessage ?? "TUN 已退出");
         try { SweepProtection(new(false, status.ErrorMessage ?? "TUN 已退出")); }
@@ -111,8 +150,12 @@ public sealed partial class AppController
         var directories = _profile.Applications.SelectMany(item => item.DirectoryRoots.Select(path =>
             new ProtectedDirectory(path, item.DisplayName ?? item.DiscoveryKey))).ToArray();
         int failures = _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready,
-            "主程序网络保护：" + readiness.Reason, directories);
+            "主程序网络保护：" + readiness.Reason, directories, Volatile.Read(ref _activeRouting).Coverage.Contains);
+        if (InheritedRoutingKey(InheritedApplicationRoutes(_profile)) != Volatile.Read(ref _activeRouting).InheritedKey)
+            _routingDirty = true;
         _protectionStatus = readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
+        if (readiness.Ready && _processProtection.PendingRoutingCount > 0)
+            _protectionStatus = $"保护中：{_processProtection.PendingRoutingCount} 个进程的分流规则尚未生效，已执行终止并等待配置更新";
         if (failures > 0)
             _protectionStatus = $"保护未完成：{failures} 个进程终止失败；{readiness.Reason}";
         return failures;
@@ -144,7 +187,8 @@ public sealed partial class AppController
                     if (error is not null) _singBox.ReportTakeoverFailure(error, observed);
                 }
                 // Independent from the companion's main/TUN lease and tray badge.
-                var readiness = _protectionError is null ? _networkHealth.Readiness : new ProtectionReadiness(false, _protectionError);
+                var readiness = ProtectionReadiness.Evaluate(IsTunRunning, _singBox.Status.ErrorMessage,
+                    _profileApplied, _protectionError, _takeoverError, _networkHealth.Readiness);
                 SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)
                     _tunSupervisor.Tick(IsTunRunning, IsUpdatingProfile, token);

@@ -91,8 +91,9 @@ public sealed class EgressProfileCompilerTests
             Assert.Equal("reject", rules[2].GetProperty("action").GetString());
             Assert.Equal("proxy-direct", rules[3].GetProperty("outbound").GetString());
             Assert.False(rules[4].TryGetProperty("process_path", out _));
-            Assert.Contains("chrome.exe", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
-            Assert.Contains("chrome", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+            Assert.True(rules[4].TryGetProperty("process_path_regex", out _));
+            Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\Apps\Chrome\chrome.exe"));
+            Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, @"C:\Other\chrome.exe"));
             Assert.Equal("openai.com", rules[5].GetProperty("domain_suffix")[0].GetString());
             Assert.Equal("google", rules[6].GetProperty("rule_set")[0].GetString());
             Assert.Equal("upstream-7890", json.RootElement.GetProperty("route").GetProperty("final").GetString());
@@ -160,15 +161,15 @@ public sealed class EgressProfileCompilerTests
         Assert.Equal(first.Sha256, second.Sha256);
         using JsonDocument json = JsonDocument.Parse(first.JsonBytes);
         JsonElement[] rules = ActiveRules(json.RootElement);
-        Assert.Equal(6, rules.Length);
+        Assert.Equal(5, rules.Length);
         Assert.Equal("proxy-direct", rules[3].GetProperty("outbound").GetString());
         Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, owner));
         Assert.False(rules[3].TryGetProperty("process_name", out _));
-        Assert.Contains("brave.exe", rules[4].GetProperty("process_name").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\Apps\Browser\brave.exe"));
     }
 
     [Fact]
-    public void Application_paths_are_compiled_to_stable_process_names()
+    public void Application_paths_stay_exact_even_when_no_known_app_shares_the_name()
     {
         const string configuredPath = @"C:\Program Files\Vendor (Preview)\App[1]+.EXE";
         EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(Input(
@@ -177,16 +178,14 @@ public sealed class EgressProfileCompilerTests
 
         using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
         JsonElement applicationRule = ActiveRules(json.RootElement)[4];
-        string[] processNames = applicationRule.GetProperty("process_name").EnumerateArray()
-            .Select(value => value.GetString()!)
-            .ToArray();
-        Assert.Contains("App[1]+.EXE", processNames);
-        Assert.Contains("App[1]+", processNames);
-        Assert.False(applicationRule.TryGetProperty("process_path_regex", out _));
+        Assert.False(applicationRule.TryGetProperty("process_name", out _));
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, configuredPath));
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, @"D:\Other\App[1]+.EXE"));
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, configuredPath[..^4]));
     }
 
     [Fact]
-    public void Process_name_matching_keeps_windows_case_variants_for_the_same_application()
+    public void Exact_path_matching_is_case_insensitive_and_deduplicated()
     {
         EgressProfileCompilationResult result = new EgressProfileCompiler().Compile(Input(
             new EgressProfileDocument(),
@@ -198,17 +197,13 @@ public sealed class EgressProfileCompilerTests
 
         using JsonDocument json = JsonDocument.Parse(result.JsonBytes);
         JsonElement routeRule = ActiveRules(json.RootElement)[4];
-        string[] routeNames = routeRule.GetProperty("process_name")
+        string[] routeNames = routeRule.GetProperty("process_path_regex")
             .EnumerateArray()
             .Select(value => value.GetString()!)
             .ToArray();
-        Assert.Equal(4, routeNames.Length);
-        Assert.Contains("Claude", routeNames);
-        Assert.Contains("Claude.exe", routeNames);
-        Assert.Contains("claude", routeNames);
-        Assert.Contains("claude.exe", routeNames);
-        Assert.Equal(4, routeNames.Distinct(StringComparer.Ordinal).Count());
-        Assert.DoesNotContain(routeNames, name => name == "CLAUDE.EXE");
+        Assert.Single(routeNames);
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\APPS\CLAUDE\CLAUDE.EXE"));
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, @"C:\Other\Claude.exe"));
         Assert.False(json.RootElement.GetProperty("dns").TryGetProperty("rules", out _));
     }
 
@@ -236,8 +231,8 @@ public sealed class EgressProfileCompilerTests
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         JsonElement root = json.RootElement;
         JsonElement routeRules = root.GetProperty("route").GetProperty("rules");
-        JsonElement processRule = routeRules.EnumerateArray().Single(rule => rule.TryGetProperty("process_name", out JsonElement names)
-            && names.EnumerateArray().Any(name => name.GetString() == "chrome.exe"));
+        JsonElement processRule = routeRules[4];
+        Assert.Equal("reject", RouteForProcess(root, @"C:\Apps\Chrome\chrome.exe"));
         JsonElement domainRule = routeRules.EnumerateArray().Single(rule => rule.TryGetProperty("domain_suffix", out _));
         Assert.Equal("reject", processRule.GetProperty("action").GetString());
         Assert.Equal("reject", domainRule.GetProperty("action").GetString());
@@ -352,8 +347,8 @@ public sealed class EgressProfileCompilerTests
             Assert.Equal("proxy-direct", rules[3].GetProperty("outbound").GetString());
             Assert.Equal("proxy-direct", RouteForProcess(root, @"C:\Apps\Proxy2\xray.exe"));
             Assert.Equal("proxy-direct", RouteForProcess(root, @"C:\Apps\Proxy\mihomo.exe"));
-            Assert.Equal("upstream-7892", rules.Single(rule => Matches(rule, "process_name", "chrome.exe")).GetProperty("outbound").GetString());
-            Assert.Equal("adapter-22222222222222222222222222222222", rules.Single(rule => Matches(rule, "process_name", "claude.exe")).GetProperty("outbound").GetString());
+            Assert.Equal("upstream-7892", RouteForProcess(root, @"C:\Apps\Chrome\chrome.exe"));
+            Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(root, @"C:\Apps\Claude\claude.exe"));
             Assert.Equal("ai.google.com", rules[6].GetProperty("domain_suffix")[0].GetString());
             Assert.Equal("upstream-7892", rules[6].GetProperty("outbound").GetString());
             Assert.Equal("upstream-7891", rules[7].GetProperty("outbound").GetString());
@@ -448,10 +443,7 @@ public sealed class EgressProfileCompilerTests
     {
         const string selectedHelper = @"C:\Apps\Selected\chrome_proxy.exe";
         const string uncheckedHelper = @"C:\Apps\Unchecked\chrome_proxy.exe";
-        EgressProfileCompileInput input = Input(new EgressProfileDocument(), applicationPaths: [selectedHelper]) with
-        {
-            KnownApplicationExecutablePaths = [selectedHelper, uncheckedHelper],
-        };
+        EgressProfileCompileInput input = Input(new EgressProfileDocument(), applicationPaths: [selectedHelper]);
         using JsonDocument json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, selectedHelper));
         Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, uncheckedHelper));
@@ -691,6 +683,67 @@ public sealed class EgressProfileCompilerTests
         var dns = config.Outbounds.Single(outbound => outbound.Tag == EgressProfileCompiler.DnsDirectTag);
         Assert.Equal(input.Environment.DefaultAdapter.Alias, dns.BindInterface);
         Assert.Equal(input.Environment.DefaultAdapter.Ipv4BindAddress!.ToString(), dns.Inet4BindAddress);
+    }
+
+
+    [Fact]
+    public void Recursive_directory_routes_cover_future_exes_and_keep_proxy_owner_priority()
+    {
+        const string directory = @"C:\Apps\AI[1]+ (Preview)";
+        const string owner = directory + @"\proxy.exe";
+        var input = Input(new() { UpstreamPorts = [7890, 7891] }, ownerPaths: [owner, owner]) with
+        {
+            ApplicationRoutes = [new([], EgressRouteTarget.DefaultAdapter, [directory])]
+        };
+        using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, directory.ToUpperInvariant() + @"\new\helper.EXE"));
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, directory + @"-copy\helper.exe"));
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, directory + @"\helper.dll"));
+        Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, owner));
+        Assert.DoesNotContain("process_name", json.RootElement.GetRawText());
+        Assert.Equal(2, json.RootElement.GetProperty("outbounds").EnumerateArray().Count(item => item.GetProperty("type").GetString() == "socks"));
+    }
+
+    [Fact]
+    public void Conflicting_nested_directory_routes_are_rejected_instead_of_depending_on_rule_order()
+    {
+        var input = Input(new()) with
+        {
+            ApplicationRoutes = [
+                new([], EgressRouteTarget.DefaultAdapter, [@"C:\Apps\AI"]),
+                new([], EgressRouteTarget.Default, [@"C:\Apps\AI\Child"])]
+        };
+        Assert.Equal("application.directory.conflict",
+            Assert.Throws<EgressProfileCompilationException>(() => new EgressProfileCompiler().Compile(input)).Code);
+    }
+
+    [Fact]
+    public void An_exact_file_can_override_a_directory_but_proxy_owner_still_wins()
+    {
+        var input = Input(new(), ownerPaths: [@"C:\Apps\proxy.exe"]) with
+        {
+            ApplicationRoutes = [
+                new([], EgressRouteTarget.DefaultAdapter, [@"C:\Apps"]),
+                new([@"C:\Apps\special.exe", @"C:\Apps\proxy.exe"], EgressRouteTarget.Default)]
+        };
+        using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, @"C:\Apps\special.exe"));
+        Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, @"C:\Apps\proxy.exe"));
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\Apps\other.exe"));
+    }
+
+
+    [Fact]
+    public void Rescan_of_files_already_covered_by_directory_keeps_identical_config()
+    {
+        var compiler = new EgressProfileCompiler();
+        var input = Input(new()) with { ApplicationRoutes = [new([], EgressRouteTarget.DefaultAdapter, [@"C:\Apps\AI"])] };
+        var rescanned = input with
+        {
+            ApplicationRoutes = [new([@"C:\Apps\AI\new.exe", @"C:\Apps\AI\nested\child.exe"],
+                EgressRouteTarget.DefaultAdapter, [@"C:\Apps\AI"])]
+        };
+        Assert.Equal(compiler.Compile(input).Sha256, compiler.Compile(rescanned).Sha256);
     }
 
     private static bool Matches(JsonElement rule, string field, string value)

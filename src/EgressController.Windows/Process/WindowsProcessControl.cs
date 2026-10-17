@@ -28,10 +28,12 @@ public sealed unsafe class WindowsProcessControl : IProcessControl
             do
             {
                 var identity = _identities.Resolve(entry.th32ProcessID);
-                if (identity?.ExePathFinal is not null)
-                    result.Add(new(new(identity.Pid, identity.StartTimeUtc), entry.th32ParentProcessID, identity.ExePathFinal));
+                if (identity is not null)
+                    result.Add(new(new(identity.Pid, identity.StartTimeUtc), entry.th32ParentProcessID,
+                        identity.ExePathFinal ?? identity.ExePathObserved, identity.ExePathObserved));
                 else if (entry.th32ProcessID > 4)
-                    failures.Add(new(entry.th32ProcessID, entry.szExeFile.ToString(), "进程已退出或权限不足，无法确认完整路径及创建时间。"));
+                    failures.Add(new(entry.th32ProcessID, entry.szExeFile.ToString(), "进程已退出或权限不足，无法确认完整路径及创建时间。",
+                        identity?.ExePathObserved));
             } while (PInvoke.Process32NextW(snapshot, &entry));
             int error = Marshal.GetLastWin32Error();
             if (error != 18) throw new Win32Exception(error);
