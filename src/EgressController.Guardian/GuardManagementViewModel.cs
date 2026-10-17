@@ -8,6 +8,7 @@ public sealed class GuardManagementViewModel : ObservableObject
     private readonly IGuardManagementClient _client;
     private bool _refreshing;
     private bool _busy;
+    private long _operationVersion;
     private bool _autoStart = true;
     private string _summary = "正在读取独立守护状态";
     private string _details = "";
@@ -39,7 +40,7 @@ public sealed class GuardManagementViewModel : ObservableObject
         get => _autoStart;
         set
         {
-            if (!SetProperty(ref _autoStart, value) || _refreshing) return;
+            if (!SetProperty(ref _autoStart, value)) return;
             _ = RunAsync(() => _client.ExecuteAsync(value ? GuardAction.EnableAutoStart : GuardAction.DisableAutoStart));
         }
     }
@@ -56,10 +57,12 @@ public sealed class GuardManagementViewModel : ObservableObject
     {
         if (_refreshing || _busy) return;
         _refreshing = true;
+        long version = _operationVersion;
         try
         {
             var state = await _client.ReadAsync();
-            AutoStart = state.Service.AutoStart;
+            if (version != _operationVersion) return;
+            SetProperty(ref _autoStart, state.Service.AutoStart, nameof(AutoStart));
             string serviceState = state.Service.State switch
             {
                 GuardServiceState.Running => "运行中", GuardServiceState.Stopped => "已停止",
@@ -77,12 +80,17 @@ public sealed class GuardManagementViewModel : ObservableObject
             Records = state.Guard is null ? "服务未连接，无法读取记录。" : string.Join("\n\n", state.Guard.Events.Select(item =>
                 $"{item.At.ToLocalTime():yyyy-MM-dd HH:mm:ss} · 独立守护 · {item.Application} · PID {item.Pid}\n{item.Path}\n{item.Reason}\n{(item.Succeeded ? "已终止" : "失败：" + item.Error)}"));
         }
-        catch (Exception exception) { Summary = "无法读取独立守护状态"; Message = exception.Message; Red = true; Disabled = false; }
+        catch (Exception exception)
+        {
+            if (version != _operationVersion) return;
+            Summary = "无法读取独立守护状态"; Message = exception.Message; Red = true; Disabled = false;
+        }
         finally { _refreshing = false; }
     }
     private async Task RunAsync(Func<Task> action)
     {
         if (_busy) return;
+        _operationVersion++;
         _busy = true; OnPropertyChanged(nameof(CanEdit));
         try { await action(); Message = "操作已完成。"; }
         catch (Exception exception) { Message = exception.Message; }

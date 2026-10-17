@@ -811,6 +811,7 @@ public sealed partial class AppController : IAsyncDisposable
                     if (_guardAgent is not null) await _guardAgent.SyncAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch { /* Retain the persisted desired state and report the failed handoff below. */ }
+                _profileApplied = IsTunRunning && previouslyApplied;
                 return ControllerOperationResult.Failure("保存 Profile 失败：" + exception.Message);
             }
 

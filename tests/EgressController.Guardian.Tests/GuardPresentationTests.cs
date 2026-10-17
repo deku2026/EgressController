@@ -2,6 +2,19 @@ namespace EgressController.Guardian.Tests;
 
 public sealed class GuardPresentationTests
 {
+    [Fact]
+    public async Task Startup_click_during_refresh_is_applied_and_late_snapshot_cannot_undo_it()
+    {
+        var response = new TaskCompletionSource<GuardPanelSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new Client { PendingRead = response.Task };
+        var vm = new GuardManagementViewModel(client);
+        Task refresh = vm.RefreshAsync();
+        vm.AutoStart = false;
+        Assert.Equal(GuardAction.DisableAutoStart, Assert.Single(client.Actions));
+        response.SetResult(Snapshot(false)); // Older response still has AutoStart = true.
+        await refresh;
+        Assert.False(vm.AutoStart);
+    }
     [Theory]
     [InlineData(true, true)]
     [InlineData(false, false)]
@@ -69,7 +82,8 @@ public sealed class GuardPresentationTests
         public List<GuardAction> Actions = [];
         public int Clears;
         public bool Throw = false;
-        public Task<GuardPanelSnapshot> ReadAsync(CancellationToken token) => Task.FromResult(Snapshot);
+        public Task<GuardPanelSnapshot>? PendingRead = null;
+        public Task<GuardPanelSnapshot> ReadAsync(CancellationToken token) => PendingRead ?? Task.FromResult(Snapshot);
         public Task ExecuteAsync(GuardAction action, CancellationToken token)
         {
             if (Throw) throw new InvalidOperationException("mock UAC cancelled");
