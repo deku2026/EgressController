@@ -65,7 +65,7 @@ public sealed partial class AppController
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
-                SetMessage("联网检测失败：" + DescribeDiagnosticsFailure(exception));
+                ReportFailure("联网检测", "network.monitor", "联网检测失败：" + DescribeDiagnosticsFailure(exception), exception);
                 try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             }
@@ -75,7 +75,7 @@ public sealed partial class AppController
     private async Task<ControllerOperationResult> RunInternetHealthCheckAsync(CancellationToken token, bool announce)
     {
         if (!IsTunRunning || IsUpdatingProfile || !_profileApplied)
-            return ControllerOperationResult.Failure("TUN 或配置正在变化，请稍后检测。");
+            return Failure("TUN 或配置正在变化，请稍后检测。");
         int generation = _networkHealth.Generation;
         EgressProfileDocument profile = _profile;
         int? defaultUpstreamPort = profile.UpstreamPorts.Count > 0 ? profile.UpstreamPort : null;
@@ -94,10 +94,17 @@ public sealed partial class AppController
             {
                 NetworkHealthResult result = ready
                     ? await InternetHealthProbe.RunWithRetriesAsync(check, defaultUpstreamPort, api.ProbeOutboundAsync, token,
-                        detail => _networkHealth.ReportProgress(generation, check, detail, token)).ConfigureAwait(false)
+                        detail =>
+                        {
+                            if (_networkHealth.ReportProgress(generation, check, detail, token))
+                                Diagnostics.Info("联网复测 · " + check, detail);
+                        }).ConfigureAwait(false)
                     : new(false, "网卡未连接或没有 IP");
                 // Publish only success or three consecutive failures, independently for each exit.
-                return _networkHealth.Complete(generation, check, result, token);
+                bool applied = _networkHealth.Complete(generation, check, result, token);
+                if (applied && !result.IsHealthy)
+                    Diagnostics.Report("联网检测 · " + check, "network.failed", result.Detail);
+                return applied;
             }
             bool[] results = await Task.WhenAll(
                 CheckAsync(NetworkHealthCheck.DirectInternet, live.DefaultAdapter.IsReady),
@@ -118,7 +125,7 @@ public sealed partial class AppController
             string error = "联网检测未完成，沿用上次完成的结果：" + DescribeDiagnosticsFailure(exception);
             lock (_networkStateGate)
                 if (generation == _networkHealth.Generation) _networkMonitorStatus = error;
-            return ControllerOperationResult.Failure(error);
+            return Failure(error, exception);
         }
 
         finally { _networkHealth.ClearProgress(generation); }
@@ -127,13 +134,13 @@ public sealed partial class AppController
         lock (_networkStateGate)
         {
             if (!accepted || token.IsCancellationRequested || generation != _networkHealth.Generation)
-                return ControllerOperationResult.Failure("检测已取消或网络配置已变化，丢弃过期的联网结果。");
+                return Failure("检测已取消或网络配置已变化，丢弃过期的联网结果。");
             network = _networkHealth.Readiness;
             _networkLastCheckedAtUtc = DateTimeOffset.UtcNow;
             _networkMonitorStatus = network.Ready ? network.Reason
                 : "持续关闭所选应用：" + network.Reason;
         }
         if (announce) SetMessage(NetworkMonitorStatus);
-        return network.Ready ? ControllerOperationResult.Success() : ControllerOperationResult.Failure(network.Reason);
+        return network.Ready ? ControllerOperationResult.Success() : Failure(network.Reason);
     }
 }

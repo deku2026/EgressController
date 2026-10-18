@@ -10,6 +10,9 @@ namespace EgressController.Core.Models;
 /// </summary>
 public sealed record NetworkAdapterIdentity(Guid Guid, string NameSnapshot);
 
+/// <summary>A unicast address and its Windows-reported connected subnet.</summary>
+public sealed record NetworkAdapterPrefix(IPAddress Address, int PrefixLength);
+
 /// <summary>
 /// Runtime snapshot of a network adapter (plan §6 data model). identity.Guid pins the
 /// adapter across FriendlyName renames / interface-index churn.
@@ -32,6 +35,8 @@ public sealed class NetworkAdapterInfo
     public required bool IsUp { get; init; }
 
     public required IReadOnlyList<IPAddress> Addresses { get; init; }
+
+    public IReadOnlyList<NetworkAdapterPrefix> ConnectedPrefixes { get; init; } = [];
 
     public required IReadOnlyList<IPAddress> Gateways { get; init; }
 

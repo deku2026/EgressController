@@ -5,6 +5,27 @@ namespace EgressController.Guardian.Tests;
 public sealed class GuardRuntimeTests
 {
     [Fact]
+    public void Service_log_write_failure_reaches_status_without_changing_the_protection_verdict()
+    {
+        bool deny = true;
+        var log = new EgressController.Diagnostics.DiagnosticJournal(Path.GetFullPath("mock-service.log"),
+            _ => { if (deny) throw new IOException("mock service log disk full"); });
+        var processes = new FakeProcesses { Snapshot = [Fixture.Process()] };
+        var runtime = new GuardRuntime(new FakeStore(), processes, new FakeFacts(), [], diagnostics: log);
+        Guid session = Guid.NewGuid();
+        runtime.Connect(session, Fixture.Main, Fixture.Policy.MainExecutable);
+        runtime.Report(session, 1, Fixture.Heartbeat());
+        var status = runtime.Tick();
+        Assert.False(status.Protecting);
+        Assert.Contains("mock service log disk full", status.Reason);
+        Assert.Contains(log.LogPath, status.Reason);
+        Assert.Empty(processes.Killed);
+        deny = false;
+        Assert.DoesNotContain("mock service log disk full", runtime.Tick().Reason);
+        Assert.Null(log.WriteFailure);
+    }
+
+    [Fact]
     public void Infrastructure_failure_keeps_last_saved_selection_protected_until_fresh_heartbeat()
     {
         var processes = new FakeProcesses { Snapshot = [Fixture.Process()] };

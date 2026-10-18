@@ -22,6 +22,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
 {
     private readonly Func<bool, EgressRouteTarget, Task<ControllerOperationResult>> _save;
     private readonly Action _changed;
+    private readonly Action<Exception>? _reportError;
     private bool _isSelected;
     private bool _isBusy;
     private bool _notifyingOptions;
@@ -30,10 +31,11 @@ public sealed class RouteSelectionViewModel : ObservableObject
     private RouteOptionViewModel _selectedRoute;
 
     public RouteSelectionViewModel(EgressProfileDocument profile, EgressRouteTarget? target,
-        Func<bool, EgressRouteTarget, Task<ControllerOperationResult>> save, Action changed)
+        Func<bool, EgressRouteTarget, Task<ControllerOperationResult>> save, Action changed, Action<Exception>? reportError = null)
     {
         _save = save;
         _changed = changed;
+        _reportError = reportError;
         _isSelected = target is not null;
         _options = WithCurrent(RouteOptionViewModel.Create(profile), target);
         _selectedRoute = _options.First(option => option.Target == (target ?? EgressRouteTarget.DefaultAdapter));
@@ -140,6 +142,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
             _isSelected = previousEnabled;
             _selectedRoute = previousRoute;
             Status = exception.Message;
+            _reportError?.Invoke(exception);
         }
         finally
         {

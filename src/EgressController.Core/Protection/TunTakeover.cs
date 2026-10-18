@@ -5,7 +5,7 @@ namespace EgressController.Core.Protection;
 
 // Prefix and metrics are required: /1 routes override /0 regardless of metric.
 public sealed record TunDefaultRoute(int InterfaceIndex, bool Ipv6, IPAddress? Destination = null,
-    int PrefixLength = 0, uint Metric = 0);
+    int PrefixLength = 0, uint Metric = 0, IPAddress? NextHop = null);
 
 public static class TunTakeover
 {
@@ -50,6 +50,9 @@ public static class TunTakeover
                 // The host's own public addresses are local destinations, not an Internet bypass.
                 if (route.PrefixLength == (ipv6 ? 128 : 32) && route.Destination is { } address
                     && adapters.Any(adapter => adapter.Addresses.Contains(address))) continue;
+                // Windows installs connected LAN routes for global IPv6 (and public IPv4)
+                // addresses too. Only exempt the exact, independently reported on-link subnet.
+                if (owner is { IsUp: true } && !IsTunnel(owner) && IsConnectedSubnet(owner, route)) continue;
                 if (route.PrefixLength > 0 || owner is null || Metric(owner, route) <= ownMetric)
                     return $"TUN 路由冲突：{owner?.Identity.NameSnapshot ?? $"ifIndex {route.InterfaceIndex}"} 的 "
                         + $"{route.Destination?.ToString() ?? (ipv6 ? "::" : "0.0.0.0")}/{route.PrefixLength} 路由可能绕过当前 TUN。";
@@ -62,6 +65,18 @@ public static class TunTakeover
         => route.InterfaceIndex == (route.Ipv6 ? adapter.Ipv6IfIndex : adapter.IfIndex);
     private static ulong Metric(NetworkAdapterInfo adapter, TunDefaultRoute route)
         => (ulong)route.Metric + (route.Ipv6 ? adapter.Ipv6Metric : adapter.Ipv4Metric);
+
+    private static bool IsConnectedSubnet(NetworkAdapterInfo adapter, TunDefaultRoute route)
+    {
+        if (route.PrefixLength <= 1 || route.Destination is not { } destination
+            || route.NextHop is not { } nextHop
+            || !nextHop.Equals(route.Ipv6 ? IPAddress.IPv6Any : IPAddress.Any)) return false;
+        return adapter.ConnectedPrefixes.Any(prefix => prefix.PrefixLength == route.PrefixLength
+            && prefix.Address.AddressFamily == destination.AddressFamily
+            && adapter.Addresses.Contains(prefix.Address)
+            && IPNetwork.TryParse($"{destination}/{route.PrefixLength}", out var subnet)
+            && subnet.Contains(prefix.Address));
+    }
 
     private static bool IsTunnel(NetworkAdapterInfo adapter)
     {

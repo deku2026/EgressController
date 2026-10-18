@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Text.Json;
+using EgressController.Diagnostics;
 
 namespace EgressController.Guardian;
 
-public sealed class GuardPipeServer(GuardPaths paths, GuardRegistration registration, GuardRuntime runtime, Action wake)
+public sealed class GuardPipeServer(GuardPaths paths, GuardRegistration registration, GuardRuntime runtime, Action wake,
+    DiagnosticJournal? diagnostics = null)
 {
     public async Task RunAsync(CancellationToken token)
     {
@@ -44,8 +46,11 @@ public sealed class GuardPipeServer(GuardPaths paths, GuardRegistration registra
                     await GuardWire.WriteAsync(pipe, handler.Handle(request), GuardJson.Default.GuardReply, deadline.Token).ConfigureAwait(false);
                 }
             }
+            catch (EndOfStreamException) { /* Status-only clients close after one reply. */ }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception error) when (error is IOException or InvalidDataException or JsonException or OperationCanceledException
-                or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { }
+                or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            { diagnostics?.Report("守护通信", "guard.pipe", error.Message, error); }
         }
     }
 }

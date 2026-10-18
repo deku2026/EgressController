@@ -27,12 +27,38 @@ public partial class App : Application
             try { Controller = new(); }
             catch (Exception error)
             {
+                Services.StartupDiagnostics.Record(error);
                 desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
+                var journal = Services.StartupDiagnostics.Journal;
+                var detail = new TextBox { Text = EgressController.Diagnostics.DiagnosticJournal.Redact(error.ToString()),
+                    IsReadOnly = true, AcceptsReturn = true, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+                var open = new Button { Content = "打开日志目录" };
+                open.Click += (_, _) =>
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(journal.DirectoryPath);
+                        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                            journal.DirectoryPath) { UseShellExecute = true });
+                    }
+                    catch (Exception failure)
+                    {
+                        journal.Report("日志目录", "logs.open", failure.Message, failure);
+                        detail.Text += "\n打开日志目录失败：" + failure.Message;
+                    }
+                };
+                var content = new StackPanel { Margin = new Thickness(24), Spacing = 12 };
+                content.Children.Add(new TextBlock { Text = "主程序启动失败，保护名单未清空。", FontSize = 20 });
+                content.Children.Add(new SelectableTextBlock { Text = "日志：" + journal.LogPath,
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+                content.Children.Add(open);
+                content.Children.Add(detail);
+                foreach (var issue in journal.Snapshot().Where(issue => issue.Code == "log.write"))
+                    content.Children.Add(new SelectableTextBlock { Text = issue.Detail, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
                 desktop.MainWindow = new Window
                 {
-                    Title = "EgressController 启动失败", Width = 680, Height = 260,
-                    Content = new TextBlock { Text = error.Message, Margin = new Thickness(24),
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                    Title = "EgressController 启动失败", Width = 800, Height = 520,
+                    Content = new ScrollViewer { Content = content },
                 };
                 base.OnFrameworkInitializationCompleted();
                 return;

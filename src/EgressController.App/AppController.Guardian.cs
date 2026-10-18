@@ -16,8 +16,9 @@ public sealed partial class AppController
     private void InitializeGuardian()
     {
         GuardPaths paths = GuardPaths.Current;
-        Guard = new(new WindowsGuardManagementClient(paths, CurrentGuardPolicy));
+        Guard = new(new WindowsGuardManagementClient(paths, CurrentGuardPolicy), Diagnostics, paths.LogDirectory);
         _guardAgent = new(paths, CurrentGuardPolicy, CaptureGuardHeartbeat);
+        _guardAgent.FailureReported += (code, error) => Diagnostics.Report("独立守护通信", code, error.Message, error);
         _guardAgent.Start();
     }
     private GuardHeartbeat CaptureGuardHeartbeat(GuardPolicy policy)

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Net;
 using System.Runtime.InteropServices;
 using EgressController.Core.Contracts;
@@ -28,7 +29,9 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
     {
         uint size = 0;
         // First call with empty buffer: returns ERROR_BUFFER_OVERFLOW and reports required size.
-        _ = PInvoke.GetAdaptersAddresses(AfUnspec, Flags, Reserved: null, AdapterAddresses: null, SizePointer: &size);
+        uint initial = PInvoke.GetAdaptersAddresses(AfUnspec, Flags, Reserved: null, AdapterAddresses: null, SizePointer: &size);
+        if (initial == 232) return []; // ERROR_NO_DATA
+        if (initial is not (0 or 111)) throw new Win32Exception((int)initial);
         if (size == 0)
             return Array.Empty<NetworkAdapterInfo>();
 
@@ -40,7 +43,7 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
         {
             uint rc = PInvoke.GetAdaptersAddresses(AfUnspec, Flags, Reserved: null, AdapterAddresses: (IP_ADAPTER_ADDRESSES_LH*)buffer, SizePointer: &size);
             if (rc != 0)
-                return Array.Empty<NetworkAdapterInfo>();
+                throw new Win32Exception((int)rc);
 
             var result = new List<NetworkAdapterInfo>();
             for (var cur = (IP_ADAPTER_ADDRESSES_LH*)buffer; cur is not null; cur = cur->Next)
@@ -87,9 +90,14 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
         string description = cur->Description.ToString() ?? string.Empty;
 
         var addresses = new List<IPAddress>();
+        var prefixes = new List<NetworkAdapterPrefix>();
         for (var a = cur->FirstUnicastAddress; a is not null; a = a->Next)
             if (TryAddress(a->Address, out IPAddress ip))
+            {
                 addresses.Add(ip);
+                if (a->OnLinkPrefixLength > 0 && a->OnLinkPrefixLength <= ip.GetAddressBytes().Length * 8)
+                    prefixes.Add(new(ip, a->OnLinkPrefixLength));
+            }
 
         var gateways = new List<IPAddress>();
         for (var gw = cur->FirstGatewayAddress; gw is not null; gw = gw->Next)
@@ -110,6 +118,7 @@ public sealed unsafe class WindowsNetworkAdapterService : INetworkAdapterService
             Ipv6IfIndex = ipv6IfIndex,
             IsUp = cur->OperStatus == IF_OPER_STATUS.IfOperStatusUp,
             Addresses = addresses,
+            ConnectedPrefixes = prefixes,
             Gateways = gateways,
             DnsServers = dnsServers,
             InterfaceType = cur->IfType,

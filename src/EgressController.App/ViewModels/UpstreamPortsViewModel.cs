@@ -81,6 +81,7 @@ public sealed class UpstreamPortsViewModel : ObservableObject
         catch (Exception exception)
         {
             Status = exception.Message;
+            _controller.ReportFailure("代理端口", "ports.save", Status, exception);
             return false;
         }
         finally
