@@ -19,6 +19,7 @@ public sealed class GuardManagementViewModel : ObservableObject
     private bool _disabled;
     private readonly DiagnosticJournal? _diagnostics;
     private string _lastFailure = "";
+    private bool _running, _installed;
     public GuardManagementViewModel(IGuardManagementClient client, DiagnosticJournal? diagnostics = null,
         string logDirectory = "")
     {
@@ -43,8 +44,18 @@ public sealed class GuardManagementViewModel : ObservableObject
     public string DiagnosticLogPath => _diagnostics?.LogPath ?? "";
     public string LogFailure => _diagnostics?.WriteFailure ?? "";
     public bool Red { get => _red; private set => SetProperty(ref _red, value); }
+    public bool Healthy => !Red && !Disabled;
     public bool Disabled { get => _disabled; private set => SetProperty(ref _disabled, value); }
     public bool CanEdit => !_busy;
+    public bool CanInstall => !_busy && !_installed;
+    public bool CanStart => !_busy && _installed && !_running;
+    public bool CanStop => !_busy && _running;
+    public bool CanUninstall => !_busy && _installed;
+    public bool HasRecords => !string.IsNullOrWhiteSpace(Records);
+    public bool NoRecords => !HasRecords;
+    public bool HasMessage => !string.IsNullOrWhiteSpace(Message);
+    public bool HasFailure => !string.IsNullOrWhiteSpace(LastFailure) || !string.IsNullOrWhiteSpace(LogFailure);
+    public string StateLabel => Disabled ? "已停用" : Red ? "保护中" : "运行正常";
     public bool AutoStart
     {
         get => _autoStart;
@@ -72,6 +83,8 @@ public sealed class GuardManagementViewModel : ObservableObject
         {
             var state = await _client.ReadAsync();
             if (version != _operationVersion) return;
+            _running = state.Service.State == GuardServiceState.Running;
+            _installed = state.Service.State != GuardServiceState.Missing;
             if (state.Error is { } error) RecordFailure("读取守护状态", error);
             if (state.Guard is { FailedCount: > 0 } failed) RecordFailure("守护保护", failed.Reason);
             SetProperty(ref _autoStart, state.Service.AutoStart, nameof(AutoStart));
@@ -98,23 +111,29 @@ public sealed class GuardManagementViewModel : ObservableObject
             Summary = "无法读取独立守护状态"; Message = exception.Message; Red = true; Disabled = false;
             RecordFailure("读取守护状态", exception.Message, exception);
         }
-        finally { _refreshing = false; OnPropertyChanged(nameof(LogFailure)); }
+        finally { _refreshing = false; NotifyPresentation(); }
     }
     private async Task RunAsync(string operation, Func<Task> action)
     {
         if (_busy) return;
         _operationVersion++;
-        _busy = true; OnPropertyChanged(nameof(CanEdit));
+        _busy = true; NotifyPresentation();
         try { await action(); Message = operation + "：操作已完成。"; _diagnostics?.Info("守护管理", Message); }
         catch (Exception exception) { Message = operation + "失败：" + exception.Message; RecordFailure(operation, Message, exception); }
-        finally { _busy = false; OnPropertyChanged(nameof(CanEdit)); await RefreshAsync(); }
+        finally { _busy = false; NotifyPresentation(); await RefreshAsync(); }
     }
     public void ReportError(string error) { Message = error; RecordFailure("托盘操作", error); }
     private void RecordFailure(string operation, string message, Exception? error = null)
     {
         LastFailure = $"最近失败 · {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} · {operation}\n"
             + DiagnosticJournal.Redact(error?.ToString() ?? message);
-        _diagnostics?.Report("独立守护 · " + operation, "guard.management", message, error);
+        _diagnostics?.Report(operation is "读取守护状态" or "托盘操作" ? "独立守护 · " + operation : "守护管理", "guard.management", message, error);
         OnPropertyChanged(nameof(LogFailure));
+        NotifyPresentation();
+    }
+    private void NotifyPresentation()
+    {
+        foreach (string name in new[] { nameof(CanEdit), nameof(CanInstall), nameof(CanStart), nameof(CanStop), nameof(CanUninstall),
+            nameof(HasRecords), nameof(NoRecords), nameof(HasMessage), nameof(HasFailure), nameof(StateLabel), nameof(Healthy), nameof(LogFailure) }) OnPropertyChanged(name);
     }
 }

@@ -14,17 +14,19 @@ public sealed class DiagnosticJournal
     private readonly Action<CoreLogEntry> _write;
     private readonly Func<DateTimeOffset> _now;
     private readonly int _capacity;
+    private readonly Func<CoreLogEntry, bool> _shouldPersist;
     private long _version;
     private DateTimeOffset _lastRepeatedWrite;
     private string? _writeFailure;
     public DiagnosticJournal(string path, Action<CoreLogEntry>? write = null,
-        Func<DateTimeOffset>? now = null, int capacity = 200)
+        Func<DateTimeOffset>? now = null, int capacity = 200, Func<CoreLogEntry, bool>? shouldPersist = null)
     {
         if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity));
         LogPath = Path.GetFullPath(path);
         _write = write ?? new RotatingDiagnosticFile(LogPath).Append;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _capacity = capacity;
+        _shouldPersist = shouldPersist ?? (_ => true);
     }
     public string LogPath { get; }
     public string DirectoryPath => Path.GetDirectoryName(LogPath)!;
@@ -67,6 +69,7 @@ public sealed class DiagnosticJournal
     {
         var entry = new CoreLogEntry(_now(), stage, level, Redact(message));
         Logs.Append(entry.Source, entry.Level, entry.Message, entry.TimestampUtc);
+        if (!_shouldPersist(entry)) return;
         try { _write(entry); Volatile.Write(ref _writeFailure, null); }
         catch (Exception error)
         {

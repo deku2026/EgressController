@@ -1,0 +1,48 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.ProtectionPage" x:DataType="vm:MainViewModel">
+  <Grid RowDefinitions="Auto,Auto,*" RowSpacing="18">
+    <Border Classes="card">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{Binding Dashboard.StatusTitle}" Classes="section-title"/>
+          <TextBlock Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" Foreground="#667184"/>
+        </StackPanel>
+        <Border Grid.Column="1" Classes="badge" Classes.healthy="{Binding Dashboard.Ready}" Classes.waiting="{Binding !Dashboard.Ready}" VerticalAlignment="Top">
+          <TextBlock Text="{Binding ShortStatus}"/>
+        </Border>
+      </Grid>
+    </Border>
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="6">
+        <TextBlock Text="最近的终止记录" Classes="section-title"/>
+        <TextBlock Text="保留 24 小时，最多 200 条。清空记录不会停止保护。" Classes="muted"/>
+      </StackPanel>
+      <Button Grid.Column="1" Content="清空记录" Command="{Binding Network.ClearProtectionHistoryCommand}"/>
+    </Grid>
+    <Border Grid.Row="2" Classes="list-card">
+      <Grid>
+        <ScrollViewer>
+          <ItemsControl ItemsSource="{Binding Network.ProtectionEvents}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ProtectionEventViewModel">
+                <Border Padding="20,17" BorderBrush="#E8EDF4" BorderThickness="0,0,0,1">
+                  <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{Binding Summary}" FontWeight="Medium"/>
+                      <TextBlock Grid.Column="1" Text="终止失败" Classes="danger" IsVisible="{Binding Failed}"/>
+                    </Grid>
+                    <SelectableTextBlock Text="{Binding Path}" Foreground="#667184" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <StackPanel IsVisible="{Binding Network.NoProtectionEvents}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+          <TextBlock Text="暂无终止记录" FontSize="18" HorizontalAlignment="Center"/>
+          <TextBlock Text="影响应用运行的保护原因会记录在这里。" Classes="muted"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</local:PageView>

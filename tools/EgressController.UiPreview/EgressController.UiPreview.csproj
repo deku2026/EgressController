@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EgressController.App\EgressController.App.csproj" />
+    <PackageReference Include="Avalonia.Headless" />
+    <ProjectReference Include="..\..\src\EgressController.GuardTray\EgressController.GuardTray.csproj" />
+  </ItemGroup>
+</Project>

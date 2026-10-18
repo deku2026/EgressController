@@ -149,7 +149,7 @@ public sealed class GuardRuntime
             {
                 var excluded = _selfPaths.Concat(_policy.Exclusions).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var previousEvents = _protection.Events;
-                failures = _protection.Sweep(_policy.Executables, excluded, ready, "独立守护：" + reason, _policy.Directories);
+                failures = _protection.Sweep(_policy.Executables, excluded, ready, "独立守护：" + reason);
                 foreach (var item in _protection.Events.Except(previousEvents))
                 {
                     string detail = $"{item.Application} · PID {item.Pid}\n{item.Path}\n{item.Reason}\n{item.Error}";

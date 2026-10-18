@@ -56,7 +56,10 @@ public sealed class GuardPipeClient(GuardPaths paths, bool main = false) : IMain
     {
         await GuardWire.WriteAsync(_pipe!, request, GuardJson.Default.GuardRequest, token).ConfigureAwait(false);
         var response = await GuardWire.ReadAsync(_pipe!, GuardJson.Default.GuardReply, token).ConfigureAwait(false);
-        if (!response.Success) throw new InvalidOperationException(response.Error);
+        if (!response.Success)
+            throw new InvalidOperationException(response.Error == "不支持的守护通信版本。"
+                ? "已安装旧版守护组件。请退出旧托盘，卸载后重新安装守护服务，再重新打开主程序。保护名单会保留。"
+                : response.Error);
         return response;
     }
     public async ValueTask DisposeAsync()

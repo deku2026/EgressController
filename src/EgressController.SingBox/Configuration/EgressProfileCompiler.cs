@@ -2,13 +2,11 @@ using System.Security.Cryptography;
 using System.Text;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
-using EgressController.Core.Protection;
 
 namespace EgressController.SingBox.Configuration;
 
 public sealed record SingBoxRuleSetInput(string Name, string Path);
-public sealed record SingBoxApplicationRouteInput(IReadOnlyList<string> ExecutablePaths, EgressRouteTarget Target,
-    IReadOnlyList<string>? DirectoryRoots = null);
+public sealed record SingBoxApplicationRouteInput(IReadOnlyList<string> ExecutablePaths, EgressRouteTarget Target);
 
 /// <summary>Runtime-only inputs assembled by AppController after inventory/network resolution.</summary>
 public sealed record EgressProfileCompileInput
@@ -59,7 +57,6 @@ public sealed class EgressProfileCompiler
             throw Failure("upstream.owner.self", "上游 SOCKS5 owner 是 EgressController/sing-box 自身，拒绝生成配置。");
 
         var applicationTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
-        var directoryTargets = new Dictionary<string, EgressRouteTarget>(StringComparer.OrdinalIgnoreCase);
         foreach (SingBoxApplicationRouteInput application in input.ApplicationRoutes)
         {
             EgressRouteTarget target = application.Target.NormalizeAndValidate(profile.UpstreamPorts);
@@ -68,18 +65,6 @@ public sealed class EgressProfileCompiler
                 if (applicationTargets.TryGetValue(path, out EgressRouteTarget? existing) && existing != target)
                     throw Failure("application.conflict", $"同一个 EXE 路径被指定到不同出口：{path}。请统一该程序的分流选择。");
                 applicationTargets[path] = target;
-            }
-            foreach (string directory in NormalizePaths(application.DirectoryRoots ?? [], "application.directory")
-                .Select(Path.TrimEndingDirectorySeparator))
-            {
-                if (directory == Path.GetPathRoot(directory))
-                    throw Failure("application.directory", "递归应用规则不能使用磁盘根目录。");
-                if (directoryTargets.Any(existing => existing.Value != target
-                    && (existing.Key.Equals(directory, StringComparison.OrdinalIgnoreCase)
-                        || ProcessProtection.IsWithinDirectory(existing.Key, directory)
-                        || ProcessProtection.IsWithinDirectory(directory, existing.Key))))
-                    throw Failure("application.directory.conflict", $"重叠的应用目录被指定到不同出口：{directory}。");
-                directoryTargets[directory] = target;
             }
         }
 
@@ -108,23 +93,12 @@ public sealed class EgressProfileCompiler
         if (self.Length > 0)
             rules.Insert(0, new() { ProcessPathRegex = self.Select(ProcessPathPattern).ToArray(), Action = "route", Outbound = RecoveryDirectTag });
         foreach (var group in applicationTargets
-            .Where(route => !directoryTargets.Any(directory => directory.Value == route.Value
-                && ProcessProtection.IsWithinDirectory(route.Key, directory.Key)))
             .GroupBy(route => route.Value)
-            .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
+            .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port).ThenBy(group => group.Key.AdapterId, StringComparer.Ordinal))
         {
             rules.Add(RouteTo(group.Key) with
             {
                 ProcessPathRegex = group.Select(route => route.Key).Order(StringComparer.OrdinalIgnoreCase).Select(ProcessPathPattern).ToArray(),
-            });
-        }
-        foreach (var group in directoryTargets.GroupBy(route => route.Value)
-            .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Port))
-        {
-            rules.Add(RouteTo(group.Key) with
-            {
-                ProcessPathRegex = group.Select(route => route.Key).Order(StringComparer.OrdinalIgnoreCase)
-                    .Select(directory => ProcessPathPattern(directory + Path.DirectorySeparatorChar)[..^1] + @".+\.exe$").ToArray(),
             });
         }
 

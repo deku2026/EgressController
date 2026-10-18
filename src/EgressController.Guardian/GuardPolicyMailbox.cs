@@ -25,8 +25,7 @@ public sealed class GuardPolicyMailbox(string directory)
             Executables = profile.Applications.SelectMany(item => item.ExecutablePaths
                 .Concat(item.DiscoveryKey.StartsWith("exe:", StringComparison.OrdinalIgnoreCase) ? [item.DiscoveryKey[4..]] : [])
                 .Select(path => new ProtectedExecutable(path, item.DisplayName ?? item.DiscoveryKey))).OrderBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToArray(),
-            Directories = profile.Applications.SelectMany(item => item.DirectoryRoots.Select(path =>
-                new ProtectedDirectory(path, item.DisplayName ?? item.DiscoveryKey))).OrderBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToArray(),
+            Directories = [], // Roots are discovery inputs; only saved executable paths enforce protection.
             Exclusions = excluded.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
         }.Validate();
         byte[] hash = SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(policy, GuardJson.Default.GuardPolicy));

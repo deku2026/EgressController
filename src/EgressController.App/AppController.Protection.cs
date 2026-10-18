@@ -17,26 +17,6 @@ public sealed partial class AppController
     private volatile bool _shuttingDown;
     private volatile bool _inventoryReady;
     private volatile bool _routingDirty;
-    private sealed record ApplicationRouteState(ApplicationRoutingCoverage Coverage, string InheritedKey);
-    private ApplicationRouteState _activeRouting = new(ApplicationRoutingCoverage.Empty, "");
-    private ApplicationRouteState _preparedRouting = new(ApplicationRoutingCoverage.Empty, "");
-    private void ActivatePreparedRouting() => Volatile.Write(ref _activeRouting, _preparedRouting);
-
-    private SingBoxApplicationRouteInput[] InheritedApplicationRoutes(EgressProfileDocument profile)
-    {
-        var covered = new ApplicationRoutingCoverage(profile.Applications.SelectMany(item => item.ExecutablePaths),
-            profile.Applications.SelectMany(item => item.DirectoryRoots));
-        return _processProtection.CaptureRoutingMembers()
-            .Where(item => !covered.Contains(item.Path) && !_excludedPaths.Contains(item.Path))
-            .SelectMany(item => profile.Applications.Where(selection =>
-                selection.ExecutablePaths.Contains(item.Source.Path, StringComparer.OrdinalIgnoreCase)
-                || selection.DirectoryRoots.Any(root => ProcessProtection.IsWithinDirectory(item.Source.Path, root)))
-                .Select(selection => new SingBoxApplicationRouteInput([item.Path], selection.Target)))
-            .ToArray();
-    }
-    private static string InheritedRoutingKey(IEnumerable<SingBoxApplicationRouteInput> routes)
-        => string.Join("\n", routes.SelectMany(route => route.ExecutablePaths.Select(path => path + ":" + route.Target))
-            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase));
     private readonly EgressController.Windows.Network.WindowsTunInspector _tunInspector = new();
     private readonly AdapterBindingCache _adapterBindings = new();
     private string? _takeoverError = "等待 TUN 接管";
@@ -45,6 +25,8 @@ public sealed partial class AppController
     private ProtectedExecutable[] _protectedExecutables = [];
     private HashSet<string> _excludedPaths = new(StringComparer.OrdinalIgnoreCase);
     private string _protectionStatus = "保护中：正在初始化，所选应用暂不能运行";
+    private ProtectionReadiness _protection = new(false, "正在准备 TUN");
+    public ProtectionReadiness Protection => Volatile.Read(ref _protection);
 
     public string ProtectionStatus => _protectionStatus;
     public IReadOnlyList<ProtectionEvent> ProtectionEvents => _processProtection.Events;
@@ -93,14 +75,13 @@ public sealed partial class AppController
         string? conflict = profile.Applications.SelectMany(selection =>
                 inventory.ExpandSelected([selection.DiscoveryKey]).Concat(selection.ExecutablePaths))
             .FirstOrDefault(excluded.Contains);
-        conflict ??= excluded.FirstOrDefault(path => profile.Applications
-            .SelectMany(selection => selection.DirectoryRoots).Any(root => ProcessProtection.IsWithinDirectory(path, root)));
         if (conflict is not null)
             throw new InvalidOperationException("勾选范围包含控制器、sing-box 或上游代理，请取消该选择：" + conflict);
     }
 
     private void InvalidateReadiness(string reason)
     {
+        Volatile.Write(ref _protection, new(false, reason));
         _networkHealth.Reset();
         _profileApplied = false;
         _protectionStatus = "保护中：" + reason;
@@ -148,6 +129,7 @@ public sealed partial class AppController
         catch (Exception exception)
         {
             _protectionStatus = "保护未完成：" + exception.Message;
+            Volatile.Write(ref _protection, new(false, _protectionStatus));
             ReportFailure("进程保护", "protection.sweep", _protectionStatus, exception);
         }
     }
@@ -155,23 +137,20 @@ public sealed partial class AppController
     private int SweepProtection(ProtectionReadiness readiness)
     {
         var previousEvents = _processProtection.Events;
-        var directories = _profile.Applications.SelectMany(item => item.DirectoryRoots.Select(path =>
-            new ProtectedDirectory(path, item.DisplayName ?? item.DiscoveryKey))).ToArray();
         int failures = _processProtection.Sweep(_protectedExecutables, _excludedPaths, readiness.Ready,
-            "主程序网络保护：" + readiness.Reason, directories, Volatile.Read(ref _activeRouting).Coverage.Contains);
+            "主程序网络保护：" + readiness.Reason);
         foreach (var item in _processProtection.Events.Except(previousEvents))
         {
             string detail = $"{item.Application} · PID {item.Pid}\n{item.Path}\n{item.Reason}\n{item.Error}";
             if (!item.Succeeded) Diagnostics.Report("进程终止", "process.terminate", detail);
             else Diagnostics.Info("进程终止", detail);
         }
-        if (InheritedRoutingKey(InheritedApplicationRoutes(_profile)) != Volatile.Read(ref _activeRouting).InheritedKey)
-            _routingDirty = true;
-        _protectionStatus = readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
-        if (readiness.Ready && _processProtection.PendingRoutingCount > 0)
-            _protectionStatus = $"保护中：{_processProtection.PendingRoutingCount} 个进程的分流规则尚未生效，已执行终止并等待配置更新";
-        if (failures > 0)
-            _protectionStatus = $"保护未完成：{failures} 个进程终止失败；{readiness.Reason}";
+        string status = failures > 0 ? $"保护未完成：{failures} 个进程终止失败；{readiness.Reason}"
+            : readiness.Ready ? readiness.Reason : "保护中：" + readiness.Reason;
+        if (_protectionStatus != status)
+            Diagnostics.Info("保护状态", readiness.Ready && failures == 0 ? "允许所选应用运行：" + status : status);
+        _protectionStatus = status;
+        Volatile.Write(ref _protection, failures == 0 ? readiness : new(false, _protectionStatus));
         return failures;
     }
 
@@ -208,7 +187,7 @@ public sealed partial class AppController
                 }
                 // Independent from the companion's main/TUN lease and tray badge.
                 var readiness = ProtectionReadiness.Evaluate(IsTunRunning, LastTunFailure.Length == 0 ? null : LastTunFailure,
-                    _profileApplied, _protectionError, _takeoverError, _networkHealth.Readiness);
+                    _profileApplied && !_routingDirty, _protectionError, _takeoverError, _networkHealth.Readiness);
                 SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)
                     _tunSupervisor.Tick(IsTunRunning, IsUpdatingProfile, token);
@@ -221,6 +200,7 @@ public sealed partial class AppController
                 catch (Exception failure)
                 {
                     _protectionStatus = "保护未完成：" + failure.Message;
+                    Volatile.Write(ref _protection, new(false, _protectionStatus));
                     ReportFailure("进程保护", "protection.sweep", _protectionStatus, failure);
                 }
             }

@@ -17,7 +17,7 @@ internal static class Program
         string? owner = null;
         for (int i = 0; i + 1 < args.Length; i++) if (args[i] == "--owner") owner = args[i + 1];
         Paths = owner is null ? GuardPaths.Current : GuardPaths.ForSid(owner);
-        Diagnostics = new DiagnosticJournal(Path.Combine(Paths.TrayLogDirectory, "guard-tray.log"));
+        Diagnostics = new DiagnosticJournal(Path.Combine(Paths.TrayLogDirectory, "guard-tray.log"), shouldPersist: ProtectionLogPolicy.IsRelevant);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             if (e.ExceptionObject is Exception error) Diagnostics.Report("托盘异常", "tray.unhandled", error.Message, error);
@@ -39,7 +39,7 @@ internal static class Program
         }
         using var instance = new Mutex(true, @"Local\EgressController.GuardTray." + Paths.ServiceName, out bool created);
         if (!created) return 0;
-        AppBuilder.Configure<TrayApp>().UsePlatformDetect().StartWithClassicDesktopLifetime(args);
+        AppBuilder.Configure<TrayApp>().With(EgressController.Presentation.DesktopFonts.Options()).UsePlatformDetect().StartWithClassicDesktopLifetime(args);
         return 0;
     }
 }

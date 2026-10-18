@@ -45,7 +45,7 @@ public sealed class GuardRuntimeTests
         Assert.False(runtime.Tick().Protecting);
     }
     [Fact]
-    public void Main_absent_continuously_terminates_all_instances_directory_exes_and_descendants()
+    public void Main_absent_terminates_saved_paths_only_without_enrolling_new_files_or_OS_descendants()
     {
         var processes = new FakeProcesses { Snapshot = [
             Fixture.Process(), Fixture.Process(11), Fixture.Process(12, @"C:\apps\AI\updated\new.exe"),
@@ -56,10 +56,10 @@ public sealed class GuardRuntimeTests
             Fixture.Process(17, @"C:\apps\AI\proxy.exe")] };
         var runtime = new GuardRuntime(new FakeStore(), processes, new FakeFacts(), []);
         Assert.True(runtime.Tick().Protecting);
-        Assert.Equal(new uint[] { 10, 11, 12, 13, 14 }, processes.Killed.Select(x => x.Pid).Order().ToArray());
+        Assert.Equal(new uint[] { 10, 11 }, processes.Killed.Select(x => x.Pid).Order().ToArray());
         processes.Killed.Clear();
         runtime.Tick();
-        Assert.Equal(5, processes.Killed.Count);
+        Assert.Equal(2, processes.Killed.Count);
     }
     [Fact]
     public void Healthy_tun_stops_only_guard_kills_network_protection_remains_independent()
@@ -78,7 +78,7 @@ public sealed class GuardRuntimeTests
         Assert.Single(processes.Killed);
     }
     [Fact]
-    public void Persisted_orphan_is_terminated_after_guard_restart_but_reused_pid_is_not()
+    public void OS_descendants_and_reused_pids_never_expand_the_saved_inventory()
     {
         var store = new FakeStore();
         var processes = new FakeProcesses { Snapshot = [Fixture.Process(), Fixture.Process(20, @"C:\helper\child.exe", 10, 2)] };
@@ -90,10 +90,10 @@ public sealed class GuardRuntimeTests
         processes.Snapshot = [Fixture.Process(20, @"C:\helper\child.exe", 10, 2), Fixture.Process(10, @"C:\unrelated.exe", 0, 9)];
         var restarted = new GuardRuntime(store, processes, new FakeFacts(), []);
         restarted.Tick();
-        Assert.Equal((uint)20, Assert.Single(processes.Killed).Pid);
+        Assert.Empty(processes.Killed);
     }
     [Fact]
-    public void Removing_selection_drops_tracked_descendants()
+    public void Removing_selection_removes_saved_membership()
     {
         var processes = new FakeProcesses { Snapshot = [Fixture.Process(), Fixture.Process(20, @"C:\helper.exe", 10, 2)] };
         var runtime = new GuardRuntime(new FakeStore(), processes, new FakeFacts(), []);

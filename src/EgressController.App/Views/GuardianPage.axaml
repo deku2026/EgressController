@@ -1,0 +1,3 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:ui="using:EgressController.Presentation" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.GuardianPage" x:DataType="vm:MainViewModel">
+  <ui:GuardPanel Name="Surface" DataContext="{Binding Guard}"/>
+</local:PageView>

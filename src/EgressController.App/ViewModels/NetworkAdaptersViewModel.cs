@@ -21,7 +21,7 @@ public sealed class NetworkAdaptersViewModel : ObservableObject
     private RoleAdapterOption? _direct, _proxy;
     private Action<Exception>? _reportError;
 
-    public NetworkAdaptersViewModel(AppController controller) : this(
+    public NetworkAdaptersViewModel(IAppController controller) : this(
         () => controller.Profile, () => controller.Adapters,
         controller.SetAdapterRolesAsync, () => controller.IsUpdatingProfile)
     {

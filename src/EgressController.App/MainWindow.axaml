@@ -1,567 +1,77 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:vm="using:EgressController.App.ViewModels"
-        xmlns:local="using:EgressController.App"
-        mc:Ignorable="d" d:DesignWidth="1180" d:DesignHeight="760"
-        x:Class="EgressController.App.MainWindow"
-        x:DataType="vm:MainViewModel"
-        Title="EgressController" Width="1180" Height="760"
-        MinWidth="980" MinHeight="620">
-    <Window.DataTemplates>
-        <DataTemplate DataType="vm:RouteOptionViewModel" x:DataType="vm:RouteOptionViewModel">
-            <TextBlock Text="{Binding Label}" />
-        </DataTemplate>
-    </Window.DataTemplates>
-    <DockPanel Background="#F6F7FB">
-        <Border DockPanel.Dock="Top" Background="#172033" Padding="24,18,24,16">
-            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
-                <StackPanel Grid.Row="0" Spacing="4">
-                    <TextBlock Foreground="White" FontSize="25" FontWeight="SemiBold"
-                               Text="EgressController" />
-                    <TextBlock Foreground="#AAB7CF" FontSize="13"
-                               Text="Windows 全流量 TUN · 应用、域名与连接诊断" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Content="打开日志目录" Click="OnOpenLogDirectory" />
-                    <Button Content="诊断与日志" Click="OnShowDiagnostics" />
-                    <Border Background="#263652" CornerRadius="14" Padding="12,7">
-                        <TextBlock Foreground="#DCE7FF" Text="{Binding Overview.TunBadge}" />
-                    </Border>
-                </StackPanel>
-                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,16,0,0"
-                           Foreground="#C3CDE0" Text="{Binding Status}" TextWrapping="Wrap" />
-                <SelectableTextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,8,0,0"
-                    Foreground="#C3CDE0" Text="{Binding Diagnostics.DirectoryPath, StringFormat='日志目录：{0}'}" TextWrapping="Wrap" />
-            </Grid>
-        </Border>
-
-        <Border DockPanel.Dock="Top" Background="#FFF1F2" BorderBrush="#FDA4AF" BorderThickness="0,0,0,1"
-                Padding="20,8" IsVisible="{Binding Diagnostics.HasFailures}">
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Spacing="4">
-                    <TextBlock Text="最近失败记录（恢复后仍保留；当前状态见上方）" Foreground="#9F1239" FontWeight="SemiBold" />
-                    <ScrollViewer MaxHeight="72"><SelectableTextBlock Text="{Binding Diagnostics.LatestFailure}" TextWrapping="Wrap" /></ScrollViewer>
-                </StackPanel>
-                <Button Grid.Column="1" Content="查看完整原因" Click="OnShowDiagnostics" VerticalAlignment="Center" />
-            </Grid>
-        </Border>
-        <TabControl x:Name="MainTabs" Margin="20" SelectedIndex="0">
-            <TabItem Header="独立守护">
-                <ScrollViewer Margin="20">
-                    <StackPanel Spacing="12">
-                        <TextBlock Classes="section-title" Text="{Binding Guard.Summary}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding GuardianConnectionStatus}" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="独立守护只监控主程序和 TUN 接管，不参与联网测速。退出主程序后仍保护最近勾选的应用及递归目录、子孙进程；主程序网络保护独立运行。" TextWrapping="Wrap" />
-                        <SelectableTextBlock Text="{Binding Guard.Details}" TextWrapping="Wrap" />
-                        <CheckBox Content="开机自动启动守护服务及登录托盘" IsChecked="{Binding Guard.AutoStart, Mode=TwoWay}" IsEnabled="{Binding Guard.CanEdit}" />
-                        <TextBlock Classes="muted" Text="取消自启不停止当前服务。手动停止后，本次 Windows 启动期间不会自动拉起；下次开机按自启设置处理。卸载后不会自动重装。" TextWrapping="Wrap" />
-                        <WrapPanel IsEnabled="{Binding Guard.CanEdit}">
-                            <Button Margin="0,0,8,8" Content="安装服务" Command="{Binding Guard.InstallCommand}" />
-                            <Button Margin="0,0,8,8" Content="启动服务" Command="{Binding Guard.StartCommand}" />
-                            <Button Margin="0,0,8,8" Content="停止服务" Command="{Binding Guard.StopCommand}" />
-                            <Button Margin="0,0,8,8" Content="强制停止" Command="{Binding Guard.ForceStopCommand}" />
-                            <Button Margin="0,0,8,8" Content="停止并关闭自启" Command="{Binding Guard.StopAndDisableCommand}" />
-                            <Button Margin="0,0,8,8" Content="卸载服务" Command="{Binding Guard.UninstallCommand}" />
-                            <Button Margin="0,0,8,8" Content="刷新状态" Command="{Binding Guard.RefreshCommand}" />
-                        </WrapPanel>
-                        <TextBlock Text="{Binding Guard.Message}" TextWrapping="Wrap" />
-                        <SelectableTextBlock Text="{Binding Guard.LastFailure}" TextWrapping="Wrap" Foreground="#9F1239" />
-                        <SelectableTextBlock Text="{Binding Guard.LogFailure}" TextWrapping="Wrap" Foreground="#9F1239" />
-                        <Button Content="打开守护服务日志目录" Click="OnOpenGuardLogDirectory" />
-                        <SelectableTextBlock Text="{Binding Guard.LogDirectory, StringFormat='守护日志目录：{0}'}" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="更换发布包不会自动更新已安装的守护组件。升级守护时先退出旧小托盘，在此卸载再安装服务（保护名单保留），然后重新打开主程序以启动新托盘。" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <TextBlock Classes="section-title" Text="独立守护终止记录（24 小时，最多 200 条）" />
-                            <Button Content="清空守护记录" Command="{Binding Guard.ClearHistoryCommand}" />
-                        </StackPanel>
-                        <SelectableTextBlock Text="{Binding Guard.Records}" TextWrapping="Wrap" />
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-            <TabItem Header="进程保护">
-                <ScrollViewer Margin="20">
-                    <StackPanel Spacing="12">
-                        <TextBlock Classes="section-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="这里显示主程序网络保护，独立守护的状态和记录在“独立守护”页。两套条件独立；按勾选 EXE、递归目录及子孙进程保护，恢复后不会自动启动应用。" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <TextBlock Classes="section-title" Text="最近 24 小时的终止记录（最多 200 条，自动清理）" VerticalAlignment="Center" />
-                            <Button Content="清空记录" Command="{Binding Network.ClearProtectionHistoryCommand}" />
-                        </StackPanel>
-                        <ItemsControl ItemsSource="{Binding Network.ProtectionEvents}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:ProtectionEventViewModel">
-                                    <Border Classes="card" Margin="0,0,0,8">
-                                        <StackPanel Spacing="5">
-                                            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="终止失败，请查看原因" Foreground="#F87171" IsVisible="{Binding Failed}" />
-                                            <SelectableTextBlock Text="{Binding Path}" TextWrapping="Wrap" />
-                                            <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-            <TabItem Header="概览">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="16">
-                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="14" RowSpacing="14">
-                            <Border Classes="card" Grid.Row="0" Grid.Column="0">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="两个网卡出口" />
-                                    <StackPanel Spacing="8" IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}">
-                                        <TextBlock Classes="section-title" Text="ESIM-家宽 · 默认直连" />
-                                        <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedDirect}" PlaceholderText="选择直连网卡" HorizontalAlignment="Stretch">
-                                            <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:RoleAdapterOption"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                        <TextBlock Classes="section-title" Text="Proxy-代理 · 代理进程出口" />
-                                        <ComboBox ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedProxy}" PlaceholderText="选择代理网卡" HorizontalAlignment="Stretch">
-                                            <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:RoleAdapterOption"><TextBlock Text="{Binding Display}" /></DataTemplate></ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                        <CheckBox Content="显示更多网卡（包含离线和虚拟网卡）" IsChecked="{Binding Overview.NetworkAdapters.ShowAll}" />
-                                        <WrapPanel>
-                                            <Button Content="保存两个出口" Command="{Binding Overview.NetworkAdapters.SaveCommand}" />
-                                            <Button Content="交换网卡" Command="{Binding Overview.NetworkAdapters.SwapCommand}" />
-                                            <Button Content="取消修改" Command="{Binding Overview.NetworkAdapters.CancelCommand}" />
-                                        </WrapPanel>
-                                    </StackPanel>
-                                    <TextBlock Classes="muted" Text="{Binding Overview.NetworkAdapters.ConfigurationStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="{Binding Overview.NetworkAdapters.Status}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Row="0" Grid.Column="1">
-                                <StackPanel Spacing="10">
-                                    <TextBlock Classes="eyebrow" Text="DNS 网卡" />
-                                    <TextBlock Classes="card-title" Text="Cloudflare DoH" />
-                                    <TextBlock Text="ESIM-家宽 · 直连网卡" />
-                                    <TextBlock Classes="muted" Text="DNS 固定使用 Cloudflare DoH，经 ESIM-家宽发送。DNS 不进行健康检测，不参与关闭程序的判断；联网状态由独立 HTTPS 探测决定。" TextWrapping="Wrap" />
-                                    <TextBlock Classes="section-title" Text="进程保护" />
-                                    <TextBlock Text="{Binding Overview.ProtectionStatus}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Row="1" Grid.Column="0">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="本地 SOCKS5 端口" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.Upstream}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="端口自动识别监听进程，所有代理进程统一走 Proxy-代理；多个端口可以属于同一个进程。未匹配规则的流量走默认端口。" TextWrapping="Wrap" />
-                                    <ItemsControl ItemsSource="{Binding Overview.Ports.Entries}" IsEnabled="{Binding Overview.Ports.CanEdit}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:UpstreamPortEntryViewModel">
-                                                <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" Margin="0,6" ToolTip.Tip="{Binding RemovalHint}">
-                                                    <TextBlock Text="{Binding Endpoint}" VerticalAlignment="Center" />
-                                                    <Button Grid.Column="1" Content="{Binding DefaultLabel}" Command="{Binding SetDefaultCommand}"
-                                                            IsEnabled="{Binding CanSetDefault}" />
-                                                    <Button Grid.Column="2" Content="移除" Command="{Binding RemoveCommand}"
-                                                            IsEnabled="{Binding CanRemove}" ToolTip.Tip="{Binding RemovalHint}" />
-                                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding BindingSummary}" TextWrapping="Wrap" />
-                                                    <SelectableTextBlock Grid.Row="2" Grid.ColumnSpan="3" Classes="muted" Text="{Binding OwnerPath}" TextWrapping="Wrap" />
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsEnabled="{Binding Overview.Ports.CanEdit}">
-                                        <TextBox Text="{Binding Overview.Ports.PortText}" PlaceholderText="输入端口，如 7891">
-                                            <TextBox.KeyBindings>
-                                                <KeyBinding Gesture="Enter" Command="{Binding Overview.Ports.AddCommand}" />
-                                            </TextBox.KeyBindings>
-                                        </TextBox>
-                                        <Button Grid.Column="1" Content="添加端口" Command="{Binding Overview.Ports.AddCommand}" />
-                                    </Grid>
-                                    <TextBlock Classes="muted" Text="{Binding Overview.Ports.Status}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Row="1" Grid.Column="1">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="sing-box Core" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.Core}" TextWrapping="Wrap" />
-                                     <TextBlock Classes="muted" Text="程序会在 exe 同级 ruleset 中管理 sing-box；配置、状态和日志写入 data。自动维持 TUN，每秒检查并重试；初始化期间保护所选应用。" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Row="2" Grid.Column="0">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="TUN 状态" />
-                                    <TextBlock Classes="card-title" Text="{Binding Overview.Tun}" />
-                                    <TextBlock Classes="muted" Text="{Binding Overview.Traffic}" />
-                                    <Button Content="扫描网卡" Command="{Binding Overview.RefreshCommand}"
-                                            HorizontalAlignment="Left" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Row="2" Grid.Column="1">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="数据面" />
-                                     <TextBlock Classes="card-title" Text="{Binding Overview.TunBadge}" />
-                                      <TextBlock Classes="muted" Text="优先级：代理进程固定出口 → 应用 → 自定义域名 → 规则集 → 默认端口。指定网卡和端口不会自动切换。TUN 未接管、出口掉线或联网检测连续三次失败时持续关闭所选应用，恢复后由你重新打开。" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                        <Border Classes="notice">
-                            <TextBlock Text="{Binding Overview.Notice}" TextWrapping="Wrap" />
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <TabItem Header="网络与内核">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="14">
-                        <Border Classes="card" Background="#FFF1F2" IsVisible="{Binding Network.HasTunFailure}">
-                            <StackPanel Spacing="6">
-                                <TextBlock Text="TUN 最近一次失败原因（自动重试时保留）" FontWeight="SemiBold" Foreground="#9F1239" />
-                                <SelectableTextBlock Text="{Binding Network.TunFailure}" TextWrapping="Wrap" />
-                                <Button Content="打开日志目录" Click="OnOpenLogDirectory" />
-                            </StackPanel>
-                        </Border>
-                        <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="14">
-                            <Border Classes="card">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="eyebrow" Text="TUN 与网络保护" />
-                                    <TextBlock Classes="card-title" Text="{Binding Network.ProtectionStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="TUN 未接管、任一网卡掉线、家宽或默认代理联网检测连续三次失败时，持续关闭所选应用。DoH 状态不参与判断；检测恢复后可手动重新打开。" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Column="1">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="eyebrow" Text="检测状态" />
-                                    <TextBlock Classes="card-title" Text="{Binding Network.MonitorStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Text="{Binding Network.DirectInternetStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Text="{Binding Network.ProxyInternetStatus}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="家宽直连与默认代理每 30 秒检测一轮。失败后间隔 5 秒复测两次，连续三次失败才确认故障；期间沿用上次结论。网卡连接与 IP 仍每秒检查。" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Column="2">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="eyebrow" Text="联网最后检测" />
-                                    <TextBlock Classes="card-title" Text="{Binding Network.LastChecked}" TextWrapping="Wrap" />
-                                    <TextBlock Classes="muted" Text="均访问 https://cp.cloudflare.com/generate_204：家宽直连，非家宽经过当前默认代理端口。每次最多等待 8 秒；复测任一次成功即结束重试，不切换 DNS 或重启 TUN。未配置代理端口时只做家宽网站检测。" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Button Grid.Column="3" Classes="primary" Content="检测联网"
-                                    Command="{Binding Network.CheckCommand}"
-                                    VerticalAlignment="Center" />
-                        </Grid>
-                        <Border Classes="card">
-                            <StackPanel Spacing="6">
-                                <TextBlock Classes="section-title" Text="固定 DNS 配置" />
-                                <TextBlock Text="Cloudflare DoH · https://cloudflare-dns.com/dns-query" TextWrapping="Wrap" />
-                                <TextBlock Classes="muted" Text="DNS 固定通过 ESIM-家宽，不做 DoH 健康检测或自动切换。家宽与非家宽使用各自网卡独立检测联网，检测结果单独展示。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                        <Border Classes="notice" IsVisible="{Binding Network.HasStatus}">
-                            <TextBlock Text="{Binding Network.Status}" TextWrapping="Wrap" />
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <TabItem Header="Windows 应用">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Spacing="10">
-                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
-                            <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用或路径…" />
-                            <Button Grid.Column="1" Classes="primary" Content="{Binding Apps.ScanText}" Command="{Binding Apps.ScanCommand}" />
-                            <Button Grid.Column="2" Content="全选分流" Command="{Binding Apps.SelectAllCommand}" />
-                            <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}" />
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Apps.Summary}" />
-                        </Grid>
-                        <TextBlock Classes="muted" Text="勾选后按所选出口分流，初始为默认网卡。未勾选的应用继续匹配域名规则，其余流量走默认端口。" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="{Binding Apps.Status}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <Border Classes="list-card" Margin="0,14,0,0">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ListBox ItemsSource="{Binding Apps.Entries}">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:AppEntryViewModel">
-                                        <Border Padding="8" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
-                                            <Grid ColumnDefinitions="Auto,Auto,*,300" ColumnSpacing="12" IsEnabled="{Binding CanManage}">
-                                                <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center" />
-                                                <Border Grid.Column="1" Classes="app-glyph">
-                                                    <Grid>
-                                                        <Image Source="{Binding Icon}" Width="24" Height="24"
-                                                               Stretch="Uniform" IsVisible="{Binding HasIcon}" />
-                                                        <TextBlock Text="{Binding Glyph}" IsVisible="{Binding HasNoIcon}" />
-                                                    </Grid>
-                                                </Border>
-                                                <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                                                    <TextBlock Classes="muted" Text="{Binding Details}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <Grid Grid.Column="3" ColumnDefinitions="80,*" ColumnSpacing="6"><ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" /><ComboBox Grid.Column="1"  MaxWidth="205" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}"
-                                                          IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" /></Grid>
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </ScrollViewer>
-                    </Border>
-                </DockPanel>
-            </TabItem>
-
-            <TabItem Header="域名规则">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Spacing="10">
-                            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
-                                <TextBox Text="{Binding Domains.Query}" PlaceholderText="搜索官方 MetaCubeX geosite，例如 google…" />
-                                <Button Grid.Column="1" Classes="primary" Content="{Binding Domains.RefreshText}" Command="{Binding Domains.RefreshCatalogCommand}" />
-                            <Button Grid.Column="2" Content="全选当前结果" Command="{Binding Domains.SelectAllCommand}"
-                                    IsEnabled="{Binding Domains.CanSelectVisible}" />
-                            <Button Grid.Column="3" Content="清空当前结果" Command="{Binding Domains.ClearAllCommand}" />
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding Domains.SelectedSummary}" />
-                        </Grid>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                            <TextBlock Text="规则来源" VerticalAlignment="Center" Classes="muted" />
-                            <TextBlock Grid.Column="1" Text="{Binding Domains.CatalogDirectory}" VerticalAlignment="Center"
-                                       TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Column="2" Text="{Binding Domains.CatalogCommit}" VerticalAlignment="Center" Classes="tag" />
-                        </Grid>
-                        <Grid ColumnDefinitions="*,150,Auto" ColumnSpacing="8">
-                            <TextBox Text="{Binding Domains.ManualDomain}" PlaceholderText="添加自定义域名，默认包含根域和所有子域…" />
-                            <ComboBox Grid.Column="1" ItemsSource="{Binding Domains.RouteOptions}" SelectedItem="{Binding Domains.ManualRoute}" HorizontalAlignment="Stretch" />
-                            <Button Grid.Column="2" Content="添加域名" Command="{Binding Domains.AddManualCommand}" />
-                        </Grid>
-                        <TextBlock Classes="muted" Text="勾选规则后按所选出口分流。自定义域名优先于规则集；子域名优先于父域名。" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="{Binding Domains.Status}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <Grid Margin="0,14,0,0" ColumnDefinitions="1.2*,1*" ColumnSpacing="14">
-                        <Border Classes="list-card" Grid.Column="0">
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top" Classes="section-title" Text="官方 catalog 结果" Margin="14,12" />
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ListBox ItemsSource="{Binding Domains.Results}">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:RuleEntryViewModel">
-                                                <Grid ColumnDefinitions="Auto,*,240" Margin="12,9" ColumnSpacing="10">
-                                                    <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center" />
-                                                    <StackPanel Grid.Column="1" Spacing="2">
-                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                                                        <TextBlock Classes="muted" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                    <Grid Grid.Column="2" ColumnDefinitions="80,*" ColumnSpacing="6"><ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" /><ComboBox Grid.Column="1"  MaxWidth="205" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}"
-                                                              IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" /></Grid>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
-                                </ScrollViewer>
-                            </DockPanel>
-                        </Border>
-                        <Border Classes="list-card" Grid.Column="1">
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top" Classes="section-title" Text="已启用的分流" Margin="14,12" />
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                    <StackPanel>
-                                        <ItemsControl ItemsSource="{Binding Domains.SelectedRules}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="vm:RuleEntryViewModel">
-                                                    <Grid ColumnDefinitions="Auto,*,240" Margin="12,8" ColumnSpacing="8">
-                                                        <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" />
-                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextWrapping="Wrap" />
-                                                        </StackPanel>
-                                                        <Grid Grid.Column="2" ColumnDefinitions="80,*" ColumnSpacing="6"><ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" /><ComboBox Grid.Column="1"  MaxWidth="205" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}"
-                                                                  IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" /></Grid>
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                        <TextBlock Classes="section-title" Text="自定义域名" Margin="14,14,14,6" />
-                                        <ItemsControl ItemsSource="{Binding Domains.ManualDomains}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="vm:ManualDomainViewModel">
-                                                    <Grid ColumnDefinitions="*,240,Auto" Margin="12,7" ColumnSpacing="8">
-                                                        <StackPanel VerticalAlignment="Center">
-                                                            <TextBlock Text="{Binding Domain}" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Classes="warning" Text="{Binding Routing.Status}" TextWrapping="Wrap" />
-                                                            <TextBlock Classes="warning" Text="{Binding Status}" TextWrapping="Wrap" />
-                                                        </StackPanel>
-                                                        <Grid Grid.Column="1" ColumnDefinitions="80,*" ColumnSpacing="6"><ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" /><ComboBox Grid.Column="1"  MaxWidth="205" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}"
-                                                                  IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center" /></Grid>
-                                                        <Button Grid.Column="2" Content="移除" Command="{Binding RemoveCommand}" IsEnabled="{Binding Routing.CanEdit}" />
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </ScrollViewer>
-                            </DockPanel>
-                        </Border>
-                    </Grid>
-                </DockPanel>
-            </TabItem>
-
-            <TabItem Header="连接">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Spacing="10">
-                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
-                            <TextBox Text="{Binding Connections.Query}" PlaceholderText="搜索进程、域名、IP、出口或规则…" />
-                            <Button Grid.Column="1" Content="{Binding Connections.HistoryToggleText}"
-                                    Command="{Binding Connections.ToggleHistoryCommand}" />
-                            <Button Grid.Column="2" Content="关闭选中"
-                                    Command="{Binding Connections.CloseSelectedCommand}"
-                                    IsEnabled="{Binding Connections.CanCloseSelected}" />
-                            <Button Grid.Column="3" Content="关闭全部"
-                                    Command="{Binding Connections.CloseAllCommand}" />
-                            <Button Grid.Column="4" Content="清空历史"
-                                    Command="{Binding Connections.ClearHistoryCommand}" />
-                            <TextBlock Grid.Column="5" Classes="muted" Text="{Binding Connections.ActiveSummary}"
-                                       VerticalAlignment="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <TextBlock Classes="muted" Text="{Binding Connections.MonitorStatus}" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Connections.LastUpdated}" />
-                        </Grid>
-                        <TextBlock Classes="muted" Text="{Binding Connections.ActionMessage}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <Border Classes="list-card" Margin="0,14,0,0">
-                        <DockPanel>
-                            <Grid DockPanel.Dock="Top" ColumnDefinitions="100,2*,2.2*,90,120,110,110"
-                                  ColumnSpacing="10" Margin="12,10">
-                                <TextBlock Classes="muted" Text="状态" />
-                                <TextBlock Grid.Column="1" Classes="muted" Text="进程" />
-                                <TextBlock Grid.Column="2" Classes="muted" Text="目标" />
-                                <TextBlock Grid.Column="3" Classes="muted" Text="协议" />
-                                <TextBlock Grid.Column="4" Classes="muted" Text="出口" />
-                                <TextBlock Grid.Column="5" Classes="muted" Text="速度" />
-                                <TextBlock Grid.Column="6" Classes="muted" Text="流量" />
-                            </Grid>
-                            <ListBox ItemsSource="{Binding Connections.Rows}"
-                                     SelectedItem="{Binding Connections.SelectedRow}"
-                                     DoubleTapped="OnConnectionDoubleTapped">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:ConnectionRowViewModel">
-                                        <Border Padding="12,9" BorderBrush="#E6E9F1" BorderThickness="0,0,0,1">
-                                            <Grid ColumnDefinitions="100,2*,2.2*,90,120,110,110" ColumnSpacing="10">
-                                                <TextBlock Text="{Binding Status}" VerticalAlignment="Center" />
-                                                <StackPanel Grid.Column="1" Spacing="2">
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding ProcessName}"
-                                                               TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Classes="muted" Text="{Binding ProcessPath}"
-                                                               TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <TextBlock Grid.Column="2" Text="{Binding Target}"
-                                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="3" Text="{Binding Protocol}" Classes="tag"
-                                                           VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="4" Text="{Binding Route}"
-                                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="5" Text="{Binding Speed}" Classes="muted"
-                                                           VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="6" Text="{Binding Traffic}" Classes="muted"
-                                                           VerticalAlignment="Center" />
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </DockPanel>
-                    </Border>
-                </DockPanel>
-            </TabItem>
-
-            <TabItem Header="流量">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="14">
-                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="24">
-                            <Grid Width="220" Height="220">
-                                <local:QuotaRingControl Percentage="{Binding Traffic.UsedPercent}" />
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="3">
-                                    <TextBlock Classes="card-title" Text="{Binding Traffic.UsedPercentText}" />
-                                    <TextBlock Classes="muted" Text="套餐占用" HorizontalAlignment="Center" />
-                                </StackPanel>
-                            </Grid>
-                            <StackPanel Grid.Column="1" Spacing="14" VerticalAlignment="Center">
-                                <TextBlock Classes="eyebrow" Text="默认网卡流量套餐" />
-                                <Grid ColumnDefinitions="Auto,180" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
-                                    <TextBlock Text="套餐总量（GB）" VerticalAlignment="Center" />
-                                    <TextBox Grid.Column="1" Text="{Binding Traffic.TotalInput, Mode=TwoWay}" />
-                                    <TextBlock Grid.Row="1" Text="当前剩余（GB）" VerticalAlignment="Center" />
-                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Traffic.RemainingInput, Mode=TwoWay}" />
-                                </Grid>
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Button Classes="primary" Content="保存并重新统计" Command="{Binding Traffic.SaveQuotaCommand}" />
-                                    <Button Content="清空已用流量" Command="{Binding Traffic.ClearUsageCommand}" />
-                                </StackPanel>
-                                <TextBlock Classes="card-title" Text="{Binding Traffic.Remaining}" />
-                                <TextBlock Classes="muted" Text="{Binding Traffic.RemainingPercentText}" />
-                                <TextBlock Classes="muted" Text="{Binding Traffic.UsedSummary}" />
-                                <TextBlock Classes="warning" Text="{Binding Traffic.Status}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Grid>
-                        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="14">
-                            <Border Classes="card">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="实时速度" />
-                                    <TextBlock Classes="card-title" Text="{Binding Traffic.CurrentRate}" />
-                                    <TextBlock Classes="muted" Text="来自 sing-box /traffic WebSocket" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Column="1">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="活动连接" />
-                                    <TextBlock Classes="card-title" Text="{Binding Traffic.Active}" />
-                                    <TextBlock Classes="muted" Text="来自连接监控快照" />
-                                </StackPanel>
-                            </Border>
-                            <Border Classes="card" Grid.Column="2">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Classes="eyebrow" Text="统计范围" />
-                                    <TextBlock Classes="card-title" Text="默认网卡" />
-                                    <TextBlock Classes="muted" Text="按连接出口累计上下行" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                        <Border Classes="notice">
-                            <StackPanel Spacing="6">
-                                <TextBlock Classes="section-title" Text="监控状态" />
-                                <TextBlock Text="{Binding Traffic.MonitorStatus}" />
-                                <TextBlock Classes="muted" Text="{Binding Traffic.Note}" TextWrapping="Wrap" />
-                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="4">
-                                    <TextBlock Classes="muted" Text="最后刷新：" />
-                                    <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Traffic.LastUpdated}" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <TabItem x:Name="DiagnosticsTab" Header="诊断与日志">
-                <ScrollViewer>
-                    <StackPanel Spacing="12">
-                        <WrapPanel>
-                            <Button Margin="0,0,8,0" Content="打开日志目录" Click="OnOpenLogDirectory" />
-                            <Button Content="复制诊断详情" Click="OnCopyDiagnostics" />
-                        </WrapPanel>
-                        <SelectableTextBlock Text="{Binding Diagnostics.ControllerLogPath, StringFormat='主程序日志：{0}'}" TextWrapping="Wrap" />
-                        <SelectableTextBlock Text="{Binding Diagnostics.CoreLogPath, StringFormat='sing-box 日志：{0}'}" TextWrapping="Wrap" />
-                        <TextBlock Classes="muted" Text="失败记录包含时间、阶段、错误码和异常详情；成功及重试不会清除历史。相同错误累计次数。下方保留本次运行最近 200 类失败，完整日志写入上述目录，单文件约 5 MB 并保留一份轮转文件。" TextWrapping="Wrap" />
-                        <ListBox ItemsSource="{Binding Diagnostics.Issues}" SelectedItem="{Binding Diagnostics.Selected}" MaxHeight="240">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="vm:DiagnosticIssueViewModel">
-                                    <StackPanel Spacing="3">
-                                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" MaxHeight="65" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                        <TextBox Text="{Binding Diagnostics.SelectedDetails, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160" MaxHeight="400" />
-                        <Expander Header="主程序最近日志" IsExpanded="True">
-                            <TextBox Text="{Binding Diagnostics.ControllerLog, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="350" />
-                        </Expander>
-                        <Expander Header="sing-box 最近日志">
-                            <TextBox Text="{Binding Diagnostics.CoreLog, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="350" />
-                        </Expander>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-        </TabControl>
-    </DockPanel>
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.App.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.MainWindow" x:DataType="vm:MainViewModel" Title="EgressController" Width="1440" Height="900" MinWidth="1100" MinHeight="760" RequestedThemeVariant="Light">
+  <Window.DataTemplates>
+    <DataTemplate DataType="vm:RouteOptionViewModel" x:DataType="vm:RouteOptionViewModel">
+      <TextBlock Text="{Binding Label}"/>
+    </DataTemplate>
+  </Window.DataTemplates>
+  <Grid ColumnDefinitions="220,*">
+    <Border Background="{StaticResource SidebarBrush}" BorderBrush="#DEE3EC" BorderThickness="0,0,1,0">
+      <DockPanel Margin="16,24,16,16">
+        <StackPanel DockPanel.Dock="Top" Margin="8,0,0,30" Spacing="5">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Border Width="32" Height="32" Background="#5062CE" CornerRadius="9">
+              <TextBlock Text="E" FontSize="21" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock Text="Egress" FontSize="23" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </StackPanel>
+          <TextBlock Text="你的网络，由你选择" Classes="muted" Margin="42,0,0,0"/>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Spacing="12">
+          <Border Background="#DEE4ED" Height="1" Margin="8,0"/>
+          <Button Name="OpenLogsButton" Classes="quiet" Click="OnOpenLogDirectory" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <PathIcon Data="{x:Static ui:Icons.Folder}" Width="17" Height="17"/>
+              <TextBlock Text="打开日志目录"/>
+            </StackPanel>
+          </Button>
+          <Border Background="#FFF2DB" CornerRadius="8" Padding="10" IsVisible="{Binding IsPreview}">
+            <StackPanel Spacing="4">
+              <TextBlock Text="UI 开发模式" Foreground="#8B5D1C" FontWeight="SemiBold"/>
+              <TextBlock Text="模拟数据，不连接真实 TUN" FontSize="11" Foreground="#8B5D1C" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+          <TextBlock Classes="muted" Text="EgressController" Margin="12,0" FontSize="11"/>
+        </StackPanel>
+        <ListBox Name="Navigation" Classes="navList" ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}" SelectionChanged="OnNavigationChanged" ItemContainerTheme="{StaticResource NavigationItem}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:NavigationItem">
+              <Grid ColumnDefinitions="22,*" ColumnSpacing="12">
+                <PathIcon Data="{Binding Icon}" Width="17" Height="17"/>
+                <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="14" VerticalAlignment="Center"/>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+    <Grid Grid.Column="1" Margin="28,24,28,22" RowDefinitions="Auto,Auto,*">
+      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,22">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{Binding PageTitle}" Classes="page-title"/>
+          <TextBlock Text="{Binding PageDescription}" Foreground="#667184"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top" Margin="0,4,0,0">
+          <Border Classes="badge" Classes.healthy="{Binding IsTunRunning}" Classes.waiting="{Binding !IsTunRunning}">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <Ellipse Classes="state-dot" Classes.active="{Binding IsTunRunning}" Width="6" Height="6"/>
+              <TextBlock Text="{Binding TunCaption}" FontSize="12"/>
+            </StackPanel>
+          </Border>
+          <Border Classes="badge" Classes.healthy="{Binding Guard.Healthy}" Classes.waiting="{Binding Guard.Red}">
+            <TextBlock Text="{Binding GuardCaption}" FontSize="12"/>
+          </Border>
+        </StackPanel>
+      </Grid>
+      <Border Grid.Row="1" Background="#FFF1DE" CornerRadius="10" Padding="14,11" Margin="0,0,0,16" IsVisible="{Binding IsProtecting}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="15">
+          <StackPanel Spacing="3">
+            <TextBlock Text="正在保护所选应用" Foreground="#875515" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding Dashboard.StatusDetail}" Foreground="#875515" TextWrapping="Wrap"/>
+          </StackPanel>
+          <Button Grid.Column="1" Content="查看运行事件" Click="OnShowDiagnostics" VerticalAlignment="Center"/>
+        </Grid>
+      </Border>
+      <ContentControl Name="PageHost" Grid.Row="2" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+    </Grid>
+  </Grid>
 </Window>

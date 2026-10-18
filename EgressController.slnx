@@ -6,6 +6,7 @@
   <Folder Name="/probes/">
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/EgressController.Presentation/EgressController.Presentation.csproj" />
     <Project Path="src/EgressController.App/EgressController.App.csproj" />
     <Project Path="src/EgressController.Core/EgressController.Core.csproj" />
     <Project Path="src/EgressController.Guardian/EgressController.Guardian.csproj" />
@@ -29,6 +30,7 @@
     <Project Path="tests/EgressController.Windows.IntegrationTests/EgressController.Windows.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/EgressController.UiPreview/EgressController.UiPreview.csproj" />
     <Project Path="tools/EgressController.AotSmoke/EgressController.AotSmoke.csproj" />
     <Project Path="tools/TestApp.Helper/TestApp.Helper.csproj" />
     <Project Path="tools/TestApp.Parent/TestApp.Parent.csproj" />

@@ -51,7 +51,7 @@ public sealed class GuardSafetyTests
     }
 
     [Fact]
-    public void Local_system_guard_limits_all_matches_and_descendants_to_owner_sid()
+    public void Local_system_guard_limits_all_saved_path_matches_to_owner_sid()
     {
         var inner = new FakeProcesses { Snapshot = [Fixture.Process(10), Fixture.Process(11)] };
         var scoped = new UserScopedProcessControl(inner, "owner", pid => pid == 10 ? "owner" : "other user");
@@ -67,7 +67,7 @@ public sealed class GuardSafetyTests
         var inner = new FakeProcesses { Snapshot = [Fixture.Process(10, @"C:\apps\AI\new\worker.exe")] };
         var scoped = new UserScopedProcessControl(inner, "owner", _ => throw new Win32Exception(5));
         var guard = new ProcessProtection(scoped);
-        Assert.Equal(1, guard.Sweep([], new HashSet<string>(), false, "mock", Fixture.Policy.Directories));
+        Assert.Equal(1, guard.Sweep([new(@"C:\apps\AI\new\worker.exe", "AI")], new HashSet<string>(), false, "mock"));
         Assert.Empty(inner.Killed); Assert.False(Assert.Single(guard.Events).Succeeded);
     }
 

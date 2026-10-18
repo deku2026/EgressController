@@ -1,0 +1,247 @@
+<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Presentation.DesktopTheme">
+  <Styles.Resources>
+    <SolidColorBrush x:Key="WorkspaceBrush">#F5F6F9</SolidColorBrush>
+    <SolidColorBrush x:Key="SidebarBrush">#ECEFF4</SolidColorBrush>
+    <SolidColorBrush x:Key="SurfaceBrush">#FFFFFF</SolidColorBrush>
+    <SolidColorBrush x:Key="InkBrush">#202735</SolidColorBrush>
+    <SolidColorBrush x:Key="MutedBrush">#667184</SolidColorBrush>
+    <SolidColorBrush x:Key="LineBrush">#E3E7EF</SolidColorBrush>
+    <SolidColorBrush x:Key="AccentBrush">#5062CE</SolidColorBrush>
+    <SolidColorBrush x:Key="SuccessBrush">#227957</SolidColorBrush>
+    <SolidColorBrush x:Key="WarningBrush">#925D16</SolidColorBrush>
+    <SolidColorBrush x:Key="DangerBrush">#B8384A</SolidColorBrush>
+    <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="Foreground" Value="#344054"/>
+      <Setter Property="BorderBrush" Value="#D7DDE7"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="Padding" Value="13,8"/>
+      <Setter Property="MinHeight" Value="34"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="Medium"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}">
+            <ContentPresenter Foreground="{TemplateBinding Foreground}" Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:pointerover">
+        <Setter Property="Background" Value="#F0F3F9"/>
+        <Setter Property="BorderBrush" Value="#B7C2D4"/>
+      </Style>
+      <Style Selector="^:pressed">
+        <Setter Property="Background" Value="#E4E9F2"/>
+      </Style>
+      <Style Selector="^:focus-visible">
+        <Setter Property="BorderBrush" Value="#5062CE"/>
+        <Setter Property="BorderThickness" Value="2"/>
+      </Style>
+      <Style Selector="^:disabled">
+        <Setter Property="Background" Value="#EDF0F5"/>
+        <Setter Property="Foreground" Value="#7A8495"/>
+        <Setter Property="BorderBrush" Value="#E1E5EC"/>
+      </Style>
+    </ControlTheme>
+    <ControlTheme x:Key="NavigationItem" TargetType="ListBoxItem">
+      <Setter Property="Padding" Value="12,10"/>
+      <Setter Property="Margin" Value="0,2"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#546074"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="8">
+            <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:pointerover">
+        <Setter Property="Background" Value="#E1E6EE"/>
+      </Style>
+      <Style Selector="^:selected">
+        <Setter Property="Background" Value="#DEE4F6"/>
+        <Setter Property="Foreground" Value="#354AA9"/>
+      </Style>
+      <Style Selector="^:focus-visible">
+        <Setter Property="Background" Value="#D4DCF4"/>
+      </Style>
+    </ControlTheme>
+  </Styles.Resources>
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="Segoe UI, Microsoft YaHei UI"/>
+    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
+    <Setter Property="Background" Value="{StaticResource WorkspaceBrush}"/>
+  </Style>
+  <Style Selector="TextBlock.page-title">
+    <Setter Property="FontSize" Value="27"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+  </Style>
+  <Style Selector="TextBlock.section-title">
+    <Setter Property="FontSize" Value="16"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+  </Style>
+  <Style Selector="TextBlock.card-title">
+    <Setter Property="FontSize" Value="20"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+  </Style>
+  <Style Selector="TextBlock.metric">
+    <Setter Property="FontSize" Value="36"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+  </Style>
+  <Style Selector="TextBlock.muted">
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+    <Setter Property="FontSize" Value="12"/>
+  </Style>
+  <Style Selector="TextBlock.eyebrow">
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+    <Setter Property="FontSize" Value="13"/>
+  </Style>
+  <Style Selector="TextBlock.warning">
+    <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+    <Setter Property="FontSize" Value="12"/>
+  </Style>
+  <Style Selector="TextBlock.success">
+    <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+  </Style>
+  <Style Selector="TextBlock.danger">
+    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+  </Style>
+  <Style Selector="TextBlock.tag">
+    <Setter Property="Foreground" Value="#4B5E86"/>
+    <Setter Property="FontSize" Value="12"/>
+  </Style>
+  <Style Selector="TextBox">
+    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="Background" Value="White"/>
+    <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
+    <Setter Property="BorderBrush" Value="#D8DFE9"/>
+    <Setter Property="Padding" Value="11,7"/>
+  </Style>
+  <Style Selector="ComboBox">
+    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="Background" Value="White"/>
+    <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
+    <Setter Property="BorderBrush" Value="#D8DFE9"/>
+    <Setter Property="Padding" Value="10,7"/>
+  </Style>
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="#5062CE"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="BorderBrush" Value="#5062CE"/>
+  </Style>
+  <Style Selector="Button.primary:pointerover">
+    <Setter Property="Background" Value="#4355BA"/>
+    <Setter Property="Foreground" Value="White"/>
+  </Style>
+  <Style Selector="Button.primary:pressed">
+    <Setter Property="Background" Value="#3647A3"/>
+    <Setter Property="Foreground" Value="White"/>
+  </Style>
+  <Style Selector="Button.primary:disabled">
+    <Setter Property="Background" Value="#DCE1F2"/>
+    <Setter Property="Foreground" Value="#69749C"/>
+    <Setter Property="BorderBrush" Value="#DCE1F2"/>
+  </Style>
+  <Style Selector="Button.quiet">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderBrush" Value="Transparent"/>
+    <Setter Property="Foreground" Value="#59677E"/>
+  </Style>
+  <Style Selector="Button.quiet:pointerover">
+    <Setter Property="Background" Value="#E4E9F1"/>
+  </Style>
+  <Style Selector="Button.danger">
+    <Setter Property="Foreground" Value="#B8384A"/>
+    <Setter Property="BorderBrush" Value="#EACBD0"/>
+    <Setter Property="Background" Value="#FFF7F8"/>
+  </Style>
+  <Style Selector="Button.danger:pointerover">
+    <Setter Property="Background" Value="#FBE9EC"/>
+  </Style>
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="White"/>
+    <Setter Property="CornerRadius" Value="15"/>
+    <Setter Property="Padding" Value="22"/>
+    <Setter Property="BorderBrush" Value="#E6EAF1"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="BoxShadow" Value="0 4 14 0 #071E3454"/>
+  </Style>
+  <Style Selector="Border.list-card">
+    <Setter Property="Background" Value="White"/>
+    <Setter Property="CornerRadius" Value="12"/>
+    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="ClipToBounds" Value="True"/>
+  </Style>
+  <Style Selector="Border.notice">
+    <Setter Property="Background" Value="#EDF1FA"/>
+    <Setter Property="CornerRadius" Value="9"/>
+    <Setter Property="Padding" Value="14,11"/>
+  </Style>
+  <Style Selector="Border.badge">
+    <Setter Property="Background" Value="#E8EDF4"/>
+    <Setter Property="CornerRadius" Value="14"/>
+    <Setter Property="Padding" Value="11,6"/>
+  </Style>
+  <Style Selector="Border.badge.healthy">
+    <Setter Property="Background" Value="#E4F3EB"/>
+  </Style>
+  <Style Selector="Border.badge.waiting">
+    <Setter Property="Background" Value="#FFF0D8"/>
+  </Style>
+  <Style Selector="Border.badge.danger">
+    <Setter Property="Background" Value="#FBE8EC"/>
+  </Style>
+  <Style Selector="Border.app-glyph">
+    <Setter Property="Background" Value="#EDF0FA"/>
+    <Setter Property="CornerRadius" Value="9"/>
+    <Setter Property="Width" Value="36"/>
+    <Setter Property="Height" Value="36"/>
+  </Style>
+  <Style Selector="Border.metric-pill">
+    <Setter Property="Background" Value="#E9F4EF"/>
+    <Setter Property="CornerRadius" Value="9"/>
+    <Setter Property="Padding" Value="9,5"/>
+  </Style>
+  <Style Selector="ListBox">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderThickness" Value="0"/>
+  </Style>
+  <Style Selector="ListBoxItem">
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+  </Style>
+  <Style Selector="ListBox.navList ListBoxItem">
+    <Setter Property="Padding" Value="12,11"/>
+    <Setter Property="Margin" Value="0,3"/>
+    <Setter Property="MinHeight" Value="43"/>
+  </Style>
+  <Style Selector="ListBox.navList ListBoxItem:selected TextBlock">
+    <Setter Property="Foreground" Value="#354AA9"/>
+    <Setter Property="FontWeight" Value="Medium"/>
+  </Style>
+  <Style Selector="ListBox.navList ListBoxItem:selected PathIcon">
+    <Setter Property="Foreground" Value="#354AA9"/>
+  </Style>
+  <Style Selector="ListBox.table ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="#E9EEF9"/>
+  </Style>
+  <Style Selector="ToolTip">
+    <Setter Property="Background" Value="#263449"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="Padding" Value="10,7"/>
+  </Style>
+  <Style Selector="Ellipse.state-dot">
+    <Setter Property="Fill" Value="#8C96A6"/>
+  </Style>
+  <Style Selector="Ellipse.state-dot.active">
+    <Setter Property="Fill" Value="#3E9470"/>
+  </Style>
+</Styles>

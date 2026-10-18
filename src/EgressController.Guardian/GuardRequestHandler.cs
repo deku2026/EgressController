@@ -11,7 +11,7 @@ public sealed class GuardRequestHandler(GuardProcess peer, string registeredMain
     {
         try
         {
-            if (request.Protocol != 1) throw new InvalidDataException("不支持的守护通信版本。");
+            if (request.Protocol != GuardRequest.CurrentProtocol) throw new InvalidDataException("守护组件版本不匹配。请退出旧托盘，在主程序中卸载后重新安装守护服务，再重新打开主程序。保护名单会保留。");
             bool main = string.Equals(peer.ExecutablePath, registeredMain, StringComparison.OrdinalIgnoreCase);
             void RequireMain()
             {

@@ -24,7 +24,7 @@ public sealed partial class AppController
     private GuardHeartbeat CaptureGuardHeartbeat(GuardPolicy policy)
     {
         // No NetworkHealthState or ProtectionReadiness here: the companion monitors TUN only.
-        if (_shuttingDown || _guardTransition || !IsTunRunning || !_profileApplied)
+        if (_shuttingDown || _guardTransition || !IsTunRunning || !_profileApplied || _routingDirty)
             return new(policy.Revision, false, null, null, "TUN 尚未接管或正在变更");
         var observed = _singBox.Status;
         var status = _directSingBox.Status;

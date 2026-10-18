@@ -687,63 +687,72 @@ public sealed class EgressProfileCompilerTests
 
 
     [Fact]
-    public void Recursive_directory_routes_cover_future_exes_and_keep_proxy_owner_priority()
+    public void Saved_recursive_inventory_routes_exact_paths_and_keeps_proxy_owner_priority()
     {
         const string directory = @"C:\Apps\AI[1]+ (Preview)";
         const string owner = directory + @"\proxy.exe";
+        const string helper = directory + @"\nested\helper.exe";
         var input = Input(new() { UpstreamPorts = [7890, 7891] }, ownerPaths: [owner, owner]) with
         {
-            ApplicationRoutes = [new([], EgressRouteTarget.DefaultAdapter, [directory])]
+            ApplicationRoutes = [new([helper, owner], EgressRouteTarget.DefaultAdapter)]
         };
         using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
-        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, directory.ToUpperInvariant() + @"\new\helper.EXE"));
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, helper.ToUpperInvariant()));
+        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, directory + @"\new\helper.exe"));
         Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, directory + @"-copy\helper.exe"));
-        Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, directory + @"\helper.dll"));
         Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, owner));
         Assert.DoesNotContain("process_name", json.RootElement.GetRawText());
         Assert.Equal(2, json.RootElement.GetProperty("outbounds").EnumerateArray().Count(item => item.GetProperty("type").GetString() == "socks"));
     }
 
     [Fact]
-    public void Conflicting_nested_directory_routes_are_rejected_instead_of_depending_on_rule_order()
+    public void Conflicting_routes_for_the_same_saved_path_are_rejected_case_insensitively()
     {
         var input = Input(new()) with
         {
             ApplicationRoutes = [
-                new([], EgressRouteTarget.DefaultAdapter, [@"C:\Apps\AI"]),
-                new([], EgressRouteTarget.Default, [@"C:\Apps\AI\Child"])]
+                new([@"C:\Apps\AI\app.exe"], EgressRouteTarget.DefaultAdapter),
+                new([@"c:\apps\ai\APP.EXE"], EgressRouteTarget.Default)]
         };
-        Assert.Equal("application.directory.conflict",
+        Assert.Equal("application.conflict",
             Assert.Throws<EgressProfileCompilationException>(() => new EgressProfileCompiler().Compile(input)).Code);
     }
 
     [Fact]
-    public void An_exact_file_can_override_a_directory_but_proxy_owner_still_wins()
+    public void Different_saved_executables_in_one_directory_can_use_different_exits()
     {
         var input = Input(new(), ownerPaths: [@"C:\Apps\proxy.exe"]) with
         {
             ApplicationRoutes = [
-                new([], EgressRouteTarget.DefaultAdapter, [@"C:\Apps"]),
-                new([@"C:\Apps\special.exe", @"C:\Apps\proxy.exe"], EgressRouteTarget.Default)]
+                new([@"C:\Apps\home.exe", @"C:\Apps\proxy.exe"], EgressRouteTarget.DefaultAdapter),
+                new([@"C:\Apps\special.exe"], EgressRouteTarget.Default)]
         };
         using var json = JsonDocument.Parse(new EgressProfileCompiler().Compile(input).JsonBytes);
         Assert.Equal("upstream-7890", RouteForProcess(json.RootElement, @"C:\Apps\special.exe"));
         Assert.Equal("proxy-direct", RouteForProcess(json.RootElement, @"C:\Apps\proxy.exe"));
-        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\Apps\other.exe"));
+        Assert.Equal("adapter-22222222222222222222222222222222", RouteForProcess(json.RootElement, @"C:\Apps\home.exe"));
     }
 
-
     [Fact]
-    public void Rescan_of_files_already_covered_by_directory_keeps_identical_config()
+    public void Only_an_explicit_inventory_change_changes_the_compiled_config()
     {
         var compiler = new EgressProfileCompiler();
-        var input = Input(new()) with { ApplicationRoutes = [new([], EgressRouteTarget.DefaultAdapter, [@"C:\Apps\AI"])] };
-        var rescanned = input with
-        {
-            ApplicationRoutes = [new([@"C:\Apps\AI\new.exe", @"C:\Apps\AI\nested\child.exe"],
-                EgressRouteTarget.DefaultAdapter, [@"C:\Apps\AI"])]
-        };
-        Assert.Equal(compiler.Compile(input).Sha256, compiler.Compile(rescanned).Sha256);
+        var input = Input(new()) with { ApplicationRoutes = [new([@"C:\Apps\AI\app.exe", @"C:\Apps\AI\nested\helper.exe"], EgressRouteTarget.DefaultAdapter)] };
+        var reordered = input with { ApplicationRoutes = [new([@"C:\Apps\AI\nested\helper.exe", @"C:\Apps\AI\app.exe", @"C:\Apps\AI\app.exe"], EgressRouteTarget.DefaultAdapter)] };
+        var rescanned = input with { ApplicationRoutes = [new([@"C:\Apps\AI\app.exe", @"C:\Apps\AI\nested\helper.exe", @"C:\Apps\AI\new.exe"], EgressRouteTarget.DefaultAdapter)] };
+        Assert.Equal(compiler.Compile(input).Sha256, compiler.Compile(reordered).Sha256);
+        Assert.NotEqual(compiler.Compile(input).Sha256, compiler.Compile(rescanned).Sha256);
+    }
+
+    [Fact]
+    public void Inventory_order_across_adapter_targets_does_not_change_configuration()
+    {
+        var compiler = new EgressProfileCompiler();
+        var input = Input(new());
+        SingBoxApplicationRouteInput home = new([@"C:\Apps\home.exe"], EgressRouteTarget.ForAdapter(input.Profile.DefaultAdapterId!));
+        SingBoxApplicationRouteInput proxy = new([@"C:\Apps\other.exe"], EgressRouteTarget.ForAdapter(input.Profile.ProxyAdapterId!));
+        Assert.Equal(compiler.Compile(input with { ApplicationRoutes = [home, proxy] }).Sha256,
+            compiler.Compile(input with { ApplicationRoutes = [proxy, home] }).Sha256);
     }
 
     private static bool Matches(JsonElement rule, string field, string value)

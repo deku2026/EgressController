@@ -10,4 +10,5 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
   </ItemGroup>
+  <ItemGroup><ProjectReference Include="..\EgressController.Presentation\EgressController.Presentation.csproj" /></ItemGroup>
 </Project>

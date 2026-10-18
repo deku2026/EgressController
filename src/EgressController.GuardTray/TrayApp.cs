@@ -10,7 +10,12 @@ namespace EgressController.GuardTray;
 
 public sealed class TrayApp : Application
 {
-    public override void Initialize() => Styles.Add(new FluentTheme());
+    public override void Initialize()
+    {
+        RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light;
+        Styles.Add(new FluentTheme());
+        Styles.Add(new EgressController.Presentation.DesktopTheme());
+    }
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

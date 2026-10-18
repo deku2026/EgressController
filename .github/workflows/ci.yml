@@ -41,6 +41,17 @@ jobs:
         shell: pwsh
         run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
 
+      - name: Render and verify isolated UI previews
+        run: dotnet run --project tools/EgressController.UiPreview -c Release --no-build -- --screenshots artifacts/ui-preview
+
+      - name: Upload UI previews
+        uses: actions/upload-artifact@v7
+        with:
+          name: EgressController-ui-preview
+          path: artifacts/ui-preview/*.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Test release version resolver
         shell: pwsh
         run: ./build/Test-ReleaseVersion.ps1
