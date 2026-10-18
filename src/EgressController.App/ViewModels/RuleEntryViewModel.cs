@@ -6,7 +6,6 @@ using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Rules.Catalog;
-using EgressController.State.Quota;
 
 namespace EgressController.App.ViewModels;
 

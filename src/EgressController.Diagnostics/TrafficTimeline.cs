@@ -73,6 +73,6 @@ public static class TrafficUnits
         double unit = Math.Pow(1024, Math.Floor(Math.Log(peak, 1024)));
         double magnitude = Math.Pow(10, Math.Floor(Math.Log10(peak / unit)));
         double normalized = peak / unit / magnitude;
-        return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude * unit;
+        return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10) * magnitude * unit;
     }
 }

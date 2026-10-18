@@ -4,7 +4,7 @@ using EgressController.Core.Protection;
 using EgressController.Diagnostics;
 using EgressController.Guardian;
 using EgressController.Rules.Catalog;
-using EgressController.State.Quota;
+using EgressController.State.Traffic;
 using EgressController.Windows.Process;
 
 namespace EgressController.App;
@@ -42,7 +42,8 @@ public interface IAppController
     DateTimeOffset? TrafficUpdatedAtUtc { get; }
     long TrafficUp { get; }
     long TrafficDown { get; }
-    EgressQuotaSnapshot Quota { get; }
+    TrafficUsageSnapshot TrafficUsage { get; }
+    string TrafficUsageError { get; }
     DiagnosticJournal Diagnostics { get; }
     BoundedLogStore Logs { get; }
     string LogPath { get; }
@@ -71,7 +72,5 @@ public interface IAppController
     Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default);
     void ClearConnectionHistory();
     void ClearProtectionHistory();
-    void ClearQuotaUsage();
-    void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes);
     ControllerOperationResult ReportFailure(string stage, string code, string message, Exception? error = null);
 }

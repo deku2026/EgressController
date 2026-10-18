@@ -19,28 +19,28 @@
     </Grid>
     <Border Grid.Row="2" Classes="list-card">
       <Grid RowDefinitions="Auto,*">
-        <Border Padding="15,12" Background="#F9FAFC" BorderBrush="#E8ECF3" BorderThickness="0,0,0,1">
-          <Grid ColumnDefinitions="18,1.3*,1.6*,140,76,76,68" ColumnSpacing="12">
+        <Border Padding="12,10" Background="#F9FAFC" BorderBrush="#E8ECF3" BorderThickness="0,0,0,1">
+          <Grid ColumnDefinitions="12,1.3*,1.6*,130,76,76,65" ColumnSpacing="10">
             <TextBlock Grid.Column="1" Text="应用" Classes="muted"/>
             <TextBlock Grid.Column="2" Text="目标" Classes="muted"/>
             <TextBlock Grid.Column="3" Text="出口" Classes="muted"/>
-            <TextBlock Grid.Column="4" Text="上传" Classes="muted"/>
-            <TextBlock Grid.Column="5" Text="下载" Classes="muted"/>
-            <TextBlock Grid.Column="6" Text="持续时间" Classes="muted"/>
+            <TextBlock Grid.Column="4" Text="上传" Classes="muted" TextAlignment="Right" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="5" Text="下载" Classes="muted" TextAlignment="Right" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="6" Text="持续时间" Classes="muted" TextAlignment="Right" VerticalAlignment="Center"/>
           </Grid>
         </Border>
         <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Connections.Rows}" SelectedItem="{Binding Connections.SelectedRow}" DoubleTapped="OnConnectionDoubleTapped">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:ConnectionRowViewModel">
-              <Border Padding="15,13" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="18,1.3*,1.6*,140,76,76,68" ColumnSpacing="12">
+              <Border Padding="12,6" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="12,1.3*,1.6*,130,76,76,65" ColumnSpacing="10">
                   <Ellipse Width="7" Height="7" Classes="state-dot" Classes.active="{Binding IsCurrent}" VerticalAlignment="Center" Opacity="0.9" ToolTip.Tip="{Binding Status}"/>
-                  <Grid Grid.Column="1" ColumnDefinitions="26,*" ColumnSpacing="10"><ui:AppAvatar Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="25" Height="25"/><TextBlock Grid.Column="1" Text="{Binding Appearance.Name}" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/></Grid>
-                  <TextBlock Grid.Column="2" Text="{Binding Target}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Target}"/>
-                  <TextBlock Grid.Column="3" Text="{Binding Route}" ToolTip.Tip="{Binding RoutePath}" TextTrimming="CharacterEllipsis" Foreground="#5365A4"/>
-                  <TextBlock Grid.Column="4" Text="{Binding UploadText}" Classes="muted"/>
-                  <TextBlock Grid.Column="5" Text="{Binding DownloadText}" Classes="muted"/>
-                  <TextBlock Grid.Column="6" Text="{Binding Duration}" Classes="muted"/>
+                  <Grid Grid.Column="1" ColumnDefinitions="22,*" ColumnSpacing="10"><ui:AppAvatar Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="22" Height="22"/><TextBlock Grid.Column="1" Text="{Binding Appearance.Name}" FontSize="13" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/></Grid>
+                  <TextBlock Grid.Column="2" Text="{Binding Target}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Target}"/>
+                  <TextBlock Grid.Column="3" Text="{Binding Route}" VerticalAlignment="Center" ToolTip.Tip="{Binding RoutePath}" TextTrimming="CharacterEllipsis" Foreground="#5365A4"/>
+                  <TextBlock Grid.Column="4" Text="{Binding UploadText}" Classes="muted" TextAlignment="Right" VerticalAlignment="Center"/>
+                  <TextBlock Grid.Column="5" Text="{Binding DownloadText}" Classes="muted" TextAlignment="Right" VerticalAlignment="Center"/>
+                  <TextBlock Grid.Column="6" Text="{Binding Duration}" Classes="muted" TextAlignment="Right" VerticalAlignment="Center"/>
                 </Grid>
               </Border>
             </DataTemplate>

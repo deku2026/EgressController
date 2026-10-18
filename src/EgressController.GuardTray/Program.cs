@@ -39,7 +39,7 @@ internal static class Program
         }
         using var instance = new Mutex(true, @"Local\EgressController.GuardTray." + Paths.ServiceName, out bool created);
         if (!created) return 0;
-        AppBuilder.Configure<TrayApp>().With(EgressController.Presentation.DesktopFonts.Options()).UsePlatformDetect().StartWithClassicDesktopLifetime(args);
+        AppBuilder.Configure<TrayApp>().WithInterFont().With(EgressController.Presentation.DesktopFonts.Options()).UsePlatformDetect().StartWithClassicDesktopLifetime(args);
         return 0;
     }
 }

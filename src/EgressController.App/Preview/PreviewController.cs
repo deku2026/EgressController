@@ -5,7 +5,7 @@ using EgressController.Core.Protection;
 using EgressController.Diagnostics;
 using EgressController.Guardian;
 using EgressController.Rules.Catalog;
-using EgressController.State.Quota;
+using EgressController.State.Traffic;
 using EgressController.Windows.Process;
 
 namespace EgressController.App.Preview;
@@ -61,7 +61,7 @@ public sealed class PreviewController : IAppController
             RuleSets = [new() { Name = "google", Target = EgressRouteTarget.ForPort(7890) }] };
         Catalog = new(new(new string('a', 40), new string('b', 40), new[] { "google", "youtube", "openai", "anthropic", "github", "telegram", "twitter" }
             .Select(name => new SingBoxRuleCatalogEntry(name, "geosite/" + name + ".srs", new string('c', 40), 2048)).ToArray()));
-        Quota = new(500L * 1024 * 1024 * 1024, 380L * 1024 * 1024 * 1024, 62L * 1024 * 1024 * 1024, DateTimeOffset.UtcNow);
+
         Guard = new(new PreviewGuardClient(this), Diagnostics, Path.Combine(Diagnostics.DirectoryPath, "guardian"));
         if (scenario != "empty")
         {
@@ -90,6 +90,7 @@ public sealed class PreviewController : IAppController
         if (scenario == "download-timeout") Diagnostics.Report("启动资源下载", "download.timeout", DownloadStatus);
         if (scenario == "starting") Diagnostics.Info("TUN 启动", "正在准备内核，所选应用暂不能运行");
         Visuals.Update(_targets, Profile);
+        TrafficUsage = CreateUsage(scenario == "empty");
     }
     public Services.ApplicationVisualCatalog Visuals { get; }
     public bool IsPreview => true;
@@ -125,7 +126,8 @@ public sealed class PreviewController : IAppController
     public long TrafficDown => _scenario is "empty" or "starting" or "failed" ? 0 : 551 * 1024 * 1024;
     private long SimulatedUploadRate => _scenario is "ready" or "telemetry" ? (long)((104 + 28 * Math.Sin(_sample * .28) + (_sample % 17 < 3 ? 70 : 0)) * 1024) : 0;
     private long SimulatedDownloadRate => _scenario is "ready" or "telemetry" ? (long)((1320 + 310 * Math.Sin(_sample * .22) + (_sample % 23 < 5 ? 400 : 0)) * 1024) : 0;
-    public EgressQuotaSnapshot Quota { get; private set; }
+    public TrafficUsageSnapshot TrafficUsage { get; set; }
+    public string TrafficUsageError { get; set; } = "";
     public DiagnosticJournal Diagnostics { get; }
     public BoundedLogStore Logs { get; } = new();
     public string LogPath => Diagnostics.LogPath;
@@ -174,13 +176,25 @@ public sealed class PreviewController : IAppController
     public Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default) => Task.FromResult(new SingBoxCatalogUpdateResult(true, Catalog, null));
     public void ClearConnectionHistory() => ConnectionHistory.ClearClosed();
     public void ClearProtectionHistory() => _events.Clear();
-    public void ClearQuotaUsage() => Quota = Quota with { UsedBytes = 0 };
-    public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
-    {
-        if (totalGigabytes < 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes) throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "额度不能为负，剩余额度须在总额范围内。");
-        Quota = new(checked((long)Math.Round(totalGigabytes * 1073741824, MidpointRounding.AwayFromZero)), checked((long)Math.Round(remainingGigabytes * 1073741824, MidpointRounding.AwayFromZero)), 0, DateTimeOffset.UtcNow);
-    }
     public ControllerOperationResult ReportFailure(string stage, string code, string message, Exception? error = null) { Diagnostics.Report(stage, code, message, error); return new(false, message); }
+    private TrafficUsageSnapshot CreateUsage(bool empty)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (empty) return TrafficUsageSnapshot.Empty(today);
+        var entries = new List<TrafficUsage>();
+        double[] dailyMib = [264, 176, 122, 588, 70, 45, 22, 12, 80, 32];
+        for (int day = 0; day < 30; day++)
+        for (int app = 0; app < _targets.Count; app++)
+        {
+            double value = dailyMib[app] * (0.4 + (day * 13 + app * 7) % 21 / 14d);
+            double home = app is 0 or 1 or 8 ? .82 : app == 3 ? .23 : .54;
+            string path = _targets[app].CanonicalExecutable!;
+            long bytes = (long)(value * 1048576);
+            entries.Add(new(path, today.AddDays(-29 + day), TrafficExit.Home, (long)(bytes * home * .2), (long)(bytes * home * .8)));
+            entries.Add(new(path, today.AddDays(-29 + day), TrafficExit.Other, (long)(bytes * (1 - home) * .2), (long)(bytes * (1 - home) * .8)));
+        }
+        return new(today.AddDays(-29), today, DateTimeOffset.Now.AddDays(-42), entries);
+    }
     private static NetworkAdapterInfo Adapter(Guid id, string name, string description, string address, int index) => new()
     { Identity = new(id, name), Description = description, Luid = (ulong)index, IfIndex = index, Ipv6IfIndex = index,
         IsUp = true, Addresses = [IPAddress.Parse(address)], Gateways = [], DnsServers = [], InterfaceType = 6 };

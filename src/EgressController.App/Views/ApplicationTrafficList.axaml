@@ -1,0 +1,21 @@
+<ListBox xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.App.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.Views.ApplicationTrafficList" ItemContainerTheme="{StaticResource TableRow}">
+  <ListBox.ItemTemplate>
+    <DataTemplate x:DataType="vm:ApplicationTrafficRow">
+      <Grid ColumnDefinitions="32,*" ColumnSpacing="12" Margin="0,2,12,6">
+        <ui:AppAvatar Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="32" Height="32" VerticalAlignment="Center"/>
+        <StackPanel Grid.Column="1" Spacing="5">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+            <TextBlock Text="{Binding Appearance.Name}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Grid.Column="1" Text="{Binding Amount}" Classes="number" FontWeight="SemiBold" FontSize="14"/>
+          </Grid>
+          <ui:UsageBar Home="{Binding HomeBytes}" Other="{Binding OtherBytes}" Unknown="{Binding UnknownBytes}" Maximum="{Binding Maximum}" Height="10" ToolTip.Tip="条长相对于用量最多的应用；各色段按实际用量绘制"/>
+          <WrapPanel>
+            <TextBlock Text="{Binding HomeAmount}" Classes="home number" FontSize="11.5" Margin="0,0,14,0"/>
+            <TextBlock Text="{Binding OtherAmount}" Classes="other number" FontSize="11.5" Margin="0,0,14,0"/>
+            <TextBlock Text="{Binding UnknownAmount}" Classes="muted" FontSize="11.5" IsVisible="{Binding HasUnknown}"/>
+          </WrapPanel>
+        </StackPanel>
+      </Grid>
+    </DataTemplate>
+  </ListBox.ItemTemplate>
+</ListBox>

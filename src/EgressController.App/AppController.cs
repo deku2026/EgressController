@@ -17,7 +17,7 @@ using EgressController.SingBox.Configuration;
 using EgressController.SingBox.Core;
 using EgressController.SingBox.Runtime;
 using EgressController.State.Profile;
-using EgressController.State.Quota;
+using EgressController.State.Traffic;
 using EgressController.State.SingBox;
 using EgressController.Transport.Upstream;
 using EgressController.Windows.Network;
@@ -48,7 +48,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private readonly string _dataRoot;
     private readonly string _rulesetRoot;
     private readonly EgressProfileStore _profileStore;
-    private readonly EgressQuotaStore _quotaStore;
     private readonly SingBoxStateStore _stateStore;
     private readonly INetworkAdapterService _adapterService;
     private readonly NetworkEnvironmentResolver _environmentResolver = new();
@@ -115,7 +114,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
         Directory.CreateDirectory(_rulesetRoot);
         _profileStore = new EgressProfileStore(_dataRoot);
-        _quotaStore = new EgressQuotaStore(_dataRoot);
+        _usageStore = new TrafficUsageStore(_dataRoot);
         _stateStore = new SingBoxStateStore(_dataRoot);
         _adapterService = new WindowsNetworkAdapterService();
         _profile = ApplicationPathAliases.Expand(LoadProfile(), new ExecutablePathCanonicalizer());
@@ -131,6 +130,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             SingBoxFailure.Code(error, "core." + stage), error.Message, error);
         InitializeProtection();
         InitializeGuardian();
+        var usageToken = _lifetimeCts.Token;
+        _ = Task.Run(() => TrafficUsageLoopAsync(usageToken));
     }
 
     public string DataRoot => _dataRoot;
@@ -139,7 +140,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     public string LogPath => Diagnostics.LogPath;
     public EgressProfileDocument Profile => _profile;
     public bool IsUpdatingProfile => _configurationGate.CurrentCount == 0;
-    public EgressQuotaSnapshot Quota => _quotaStore.Load();
     public SingBoxService SingBox => _singBox;
     public ConnectionHistoryStore ConnectionHistory => _connectionHistory;
     public BoundedLogStore Logs => _logs;
@@ -448,29 +448,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 routes.Remove(name);
         }
         return routes.Values.ToArray();
-    }
-
-    public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
-    {
-        const decimal bytesPerGigabyte = 1024m * 1024m * 1024m;
-        if (totalGigabytes < 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes)
-            throw new ArgumentOutOfRangeException(nameof(remainingGigabytes), "当前剩余量必须在 0 和套餐总量之间。");
-        if (totalGigabytes * bytesPerGigabyte > long.MaxValue
-            || remainingGigabytes * bytesPerGigabyte > long.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "套餐流量过大。");
-        }
-
-        long totalBytes = checked((long)Math.Round(totalGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
-        long remainingBytes = checked((long)Math.Round(remainingGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
-        _quotaStore.Configure(totalBytes, remainingBytes);
-        SetMessage("默认网卡流量套餐已保存，本地统计已重置。");
-    }
-
-    public void ClearQuotaUsage()
-    {
-        _quotaStore.ClearUsage();
-        SetMessage("已清空本地 默认网卡流量统计。");
     }
 
     public async Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default)
@@ -1146,7 +1123,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         long observedStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
-        long adapterDelta = 0;
+        var usage = new List<TrafficCounter>(snapshot.Connections.Count);
         lock (_diagnosticsStateGate)
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
@@ -1169,13 +1146,13 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                     && previous.Upload >= 0 && previous.Download >= 0
                     && previous.StartedAtUtc == startedAtUtc && connection.Upload >= previous.Upload && connection.Download >= previous.Download });
                 string? outbound = connection.Chains.FirstOrDefault();
-                if (Guid.TryParse(_profile.DefaultAdapterId, out Guid quotaAdapter)
-                    && string.Equals(outbound, EgressProfileCompiler.AdapterTag(quotaAdapter), StringComparison.OrdinalIgnoreCase))
-                {
-                    adapterDelta = SafeAdd(adapterDelta, previous is null
-                        ? SafeAdd(Math.Max(0, connection.Upload), Math.Max(0, connection.Download))
-                        : SafeAdd(SafeDelta(connection.Upload, previous.Upload), SafeDelta(connection.Download, previous.Download)));
-                }
+                string? processPath = connection.Metadata.ProcessPath;
+                if (!string.IsNullOrWhiteSpace(processPath)
+                    && !ProxyBindings.OwnerPaths.Contains(processPath, StringComparer.OrdinalIgnoreCase)
+                    && !string.Equals(processPath, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(processPath, _coreExecutable, StringComparison.OrdinalIgnoreCase))
+                    usage.Add(new(connection.Id, connection.Start, processPath,
+                        TrafficExitClassifier.Classify(outbound, _profile.DefaultAdapterId), connection.Upload, connection.Download));
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
                     observedAtUtc, observedStamp,
                     connection.Upload,
@@ -1193,8 +1170,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             _connectionsUpdatedAtUtc = observedAtUtc;
             _connectionRatesValid = true;
         }
-        if (adapterDelta > 0)
-            _quotaStore.AddUsage(adapterDelta);
+        RecordTrafficUsage(usage, observedAtUtc);
     }
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)
@@ -1204,12 +1180,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         double rate = ((double)current - previous.Value) / elapsedSeconds;
         return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
     }
-
-    private static long SafeDelta(long current, long previous)
-        => previous >= 0 && current > previous ? current - previous : 0;
-
-    private static long SafeAdd(long left, long right)
-        => left > long.MaxValue - right ? long.MaxValue : left + right;
 
     private static ConnectionObservation ToObservation(
         SingBoxConnection connection,

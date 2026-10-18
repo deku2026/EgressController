@@ -6,7 +6,6 @@ using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Rules.Catalog;
-using EgressController.State.Quota;
 
 namespace EgressController.App.ViewModels;
 
@@ -129,20 +128,4 @@ internal static class TrafficFormat
             ? $"{value.Hours:00}:{value.Minutes:00}:{value.Seconds:00}"
             : $"{value.Minutes:00}:{value.Seconds:00}";
     }
-}
-internal static class QuotaFormat
-{
-    private const decimal BytesPerGigabyte = 1024m * 1024m * 1024m;
-
-    public static bool TryParseGigabytes(string? text, out decimal value)
-        => decimal.TryParse(
-            text?.Trim(),
-            System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture,
-            out value)
-            && value >= 0
-            && value <= long.MaxValue / BytesPerGigabyte;
-
-    public static string Gigabytes(long bytes)
-        => (Math.Max(0, bytes) / BytesPerGigabyte).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 }

@@ -12,8 +12,8 @@
     </Grid>
     <Border Grid.Row="2" Classes="list-card">
       <Grid RowDefinitions="Auto,*,Auto">
-        <Border Background="#F9FAFC" BorderBrush="#E6EAF0" BorderThickness="0,0,0,1" Padding="17,12">
-          <Grid ColumnDefinitions="32,36,*,75,290" ColumnSpacing="12">
+        <Border Background="#F9FAFC" BorderBrush="#E6EAF0" BorderThickness="0,0,0,1" Padding="15,10">
+          <Grid ColumnDefinitions="28,34,*,72,230" ColumnSpacing="12">
             <TextBlock Grid.Column="2" Text="应用" Classes="muted"/>
             <TextBlock Grid.Column="3" Text="程序清单" Classes="muted"/>
             <TextBlock Grid.Column="4" Text="分流出口" Classes="muted"/>
@@ -22,21 +22,19 @@
         <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Apps.Entries}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AppEntryViewModel">
-              <Border BorderBrush="#EDF0F5" BorderThickness="0,0,0,1" Padding="17,13">
-                <Grid ColumnDefinitions="32,36,*,75,290" ColumnSpacing="12" IsEnabled="{Binding CanManage}">
+              <Border BorderBrush="#EDF0F5" BorderThickness="0,0,0,1" Padding="15,10">
+                <Grid ColumnDefinitions="28,34,*,72,230" ColumnSpacing="12" IsEnabled="{Binding CanManage}">
                   <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center"/>
                   <ui:AppAvatar Grid.Column="1" Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="32" Height="32" VerticalAlignment="Center"/>
                   <StackPanel Grid.Column="2" Spacing="5" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="SemiBold"/><TextBlock Text="{Binding KindLabel}" Classes="muted" VerticalAlignment="Center"/></StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"/><TextBlock Text="{Binding KindLabel}" Classes="muted" VerticalAlignment="Center"/></StackPanel>
                     <TextBlock Text="{Binding Command}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Details}"/>
                     <Button Content="旧辅助项出口不一致 · 统一为当前出口" Command="{Binding UnifyRouteCommand}" IsVisible="{Binding HasConflictingRoutes}" Classes="quiet"/>
                     <TextBlock Text="{Binding Routing.Status}" Classes="warning" IsVisible="{Binding Routing.HasStatus}" TextTrimming="CharacterEllipsis"/>
                   </StackPanel>
                   <TextBlock Grid.Column="3" Text="{Binding InventorySummary}" ToolTip.Tip="{Binding InventoryDetails}" Classes="muted" VerticalAlignment="Center"/>
-                  <Grid Grid.Column="4" ColumnDefinitions="75,*" ColumnSpacing="8" VerticalAlignment="Center">
-                    <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
-                  </Grid>
+                  <ComboBox Grid.Column="4" Classes="route" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+
                 </Grid>
               </Border>
             </DataTemplate>
@@ -46,7 +44,7 @@
           <TextBlock Text="没有找到应用" FontSize="18" FontWeight="Medium"/>
           <TextBlock Text="重新扫描，或调整搜索内容。" Classes="muted"/>
         </StackPanel>
-        <Border Grid.Row="2" BorderBrush="#E8EDF4" BorderThickness="0,1,0,0" Padding="17,12">
+        <Border Grid.Row="2" BorderBrush="#E8EDF4" BorderThickness="0,1,0,0" Padding="15,10">
           <TextBlock Text="勾选后保护已保存的 EXE 路径。选择出口立即应用，恢复后请手动重新打开应用。" Classes="muted" TextWrapping="Wrap"/>
         </Border>
       </Grid>

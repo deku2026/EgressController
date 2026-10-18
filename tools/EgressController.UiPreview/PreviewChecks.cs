@@ -46,12 +46,13 @@ internal static class PreviewChecks
         Complete(backend.RemoveManualDomainAsync("example.com")); Check(!backend.ManualDomains.Contains("example.com"), "Remove domain");
         Complete(vm.Domains.RefreshCatalogCommand.ExecuteAsync(null));
 
-        vm.Traffic.TotalInput = "100"; vm.Traffic.RemainingInput = "80";
-        Complete(vm.Traffic.SaveQuotaCommand.ExecuteAsync(null)); Check(backend.Quota.TotalBytes == 100L * 1073741824, "Save quota");
-        vm.Traffic.RemainingInput = "101"; Complete(vm.Traffic.SaveQuotaCommand.ExecuteAsync(null));
-        Check(backend.Quota.RemainingBytes == 80L * 1073741824, "Invalid quota changes state");
-        vm.Traffic.ClearUsageCommand.Execute(null); Check(backend.Quota.UsedBytes == 0, "Clear usage");
+        vm.Traffic.Refresh();
+        Check(vm.Traffic.Days.Count == 30 && vm.Traffic.TotalBytes > 0, "Monthly traffic");
+        long recorded = vm.Traffic.TotalBytes;
+        vm.Traffic.Query = "Claude"; Check(vm.Traffic.Applications.Count == 2, "Monthly application filter");
+        vm.Traffic.Query = "";
         Complete(vm.Connections.CloseAllCommand.ExecuteAsync(null)); Check(backend.ConnectionHistory.ActiveCount == 0, "Close connections");
+        vm.Traffic.Refresh(); Check(vm.Traffic.TotalBytes == recorded, "Closing connections must retain monthly use");
         vm.Connections.ClearHistoryCommand.Execute(null); Check(backend.ConnectionHistory.ClosedCount == 0, "Clear connection history");
         vm.Network.ClearProtectionHistoryCommand.Execute(null); Check(backend.ProtectionEvents.Count == 0, "Clear protection history");
 

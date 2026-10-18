@@ -1,14 +1,14 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:guard="using:EgressController.Guardian" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.Presentation.GuardPanel" x:DataType="guard:GuardManagementViewModel">
-  <Grid RowDefinitions="*,Auto" RowSpacing="12">
-    <ScrollViewer>
-      <StackPanel Spacing="16">
-        <Border Classes="card">
-          <StackPanel Spacing="17">
-            <Grid ColumnDefinitions="52,*" ColumnSpacing="16">
-              <ui:GuardianGlyph State="{Binding VisualState}" Width="48" Height="48" VerticalAlignment="Top"/>
-              <StackPanel Grid.Column="1" Spacing="8">
-                <TextBlock Text="{Binding StateTitle}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                <TextBlock Text="{Binding DisplayReason}" Foreground="#667184" TextWrapping="Wrap"/>
+  <Grid RowDefinitions="*,Auto" RowSpacing="12" MaxWidth="900">
+    <ScrollViewer Padding="0,0,5,0">
+      <StackPanel Spacing="12">
+        <Border Classes="card" Padding="18">
+          <StackPanel Spacing="16">
+            <Grid ColumnDefinitions="52,*" ColumnSpacing="12">
+              <ui:GuardianGlyph State="{Binding VisualState}" Width="38" Height="38" VerticalAlignment="Top"/>
+              <StackPanel Grid.Column="1" Spacing="6">
+                <TextBlock Text="{Binding StateTitle}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding DisplayReason}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
               </StackPanel>
             </Grid>
             <Border Height="1" Background="#E8ECF2"/>
@@ -18,15 +18,15 @@
             </Grid>
           </StackPanel>
         </Border>
-        <Border Classes="card">
-          <StackPanel Spacing="17">
+        <Border Classes="card" Padding="18">
+          <StackPanel Spacing="16">
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Text="守护服务" Classes="section-title" VerticalAlignment="Center"/>
               <Border Grid.Column="1" Classes="badge">
                 <TextBlock Text="{Binding ServiceState}" FontSize="12"/>
               </Border>
             </Grid>
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
               <StackPanel Spacing="5">
                 <TextBlock Text="开机启动" FontWeight="Medium"/>
                 <TextBlock Text="服务随系统启动，托盘在登录后显示" Classes="muted" TextWrapping="Wrap"/>
@@ -39,33 +39,33 @@
               <Button Content="刷新状态" Classes="quiet" Command="{Binding RefreshCommand}"/>
             </WrapPanel>
             <TextBlock Text="{Binding Message}" Classes="warning" IsVisible="{Binding HasMessage}" TextWrapping="Wrap"/>
-            <Expander Header="更多服务操作" HorizontalAlignment="Stretch">
+            <Expander Name="ServiceDetails" Header="更多服务操作" HorizontalAlignment="Stretch" Classes="subtle">
               <StackPanel Spacing="12" Margin="0,10,0,0">
                 <WrapPanel>
-                  <Button Content="安装服务" Command="{Binding InstallCommand}" IsEnabled="{Binding CanInstall}" Margin="0,0,8,8"/>
+                  <Button Name="InstallServiceButton" Content="安装服务" Command="{Binding InstallCommand}" IsEnabled="{Binding CanInstall}" Margin="0,0,8,8"/>
                   <Button Content="停止并关闭自启" Command="{Binding StopAndDisableCommand}" IsEnabled="{Binding CanEdit}" Margin="0,0,8,8"/>
                   <Button Content="强制停止" Classes="danger" Command="{Binding ForceStopCommand}" IsEnabled="{Binding CanStop}" Margin="0,0,8,8"/>
                   <Button Content="卸载服务" Classes="quiet" Command="{Binding UninstallCommand}" IsEnabled="{Binding CanUninstall}" Margin="0,0,0,8"/>
                 </WrapPanel>
                 <TextBlock Text="手动停止后，本次开机不会自动恢复。取消自启不会停止当前服务。" Classes="muted" TextWrapping="Wrap"/>
-                <SelectableTextBlock Text="{Binding Details}" FontSize="12" Foreground="#667184" TextWrapping="Wrap"/>
-                <TextBlock Text="更新组件时先退出旧托盘，卸载并重装服务，再打开主程序。名单会保留。" Classes="muted" TextWrapping="Wrap"/>
+                <SelectableTextBlock Text="{Binding Details}" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                <TextBlock Text="托盘界面随主程序更新。升级服务组件时可在这里卸载并重装，名单会保留。" Classes="muted" TextWrapping="Wrap"/>
               </StackPanel>
             </Expander>
           </StackPanel>
         </Border>
-        <Border Classes="card">
+        <Border Classes="card" Padding="18">
           <StackPanel Spacing="13">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
               <StackPanel Spacing="5">
                 <TextBlock Text="守护记录" Classes="section-title"/>
                 <TextBlock Text="{Binding RecordsHint}" Classes="muted"/>
               </StackPanel>
               <Button Grid.Column="1" Content="清空记录" Classes="quiet" Command="{Binding ClearHistoryCommand}" IsEnabled="{Binding CanClearHistory}"/>
             </Grid>
-            <StackPanel Margin="0,14" Spacing="6" IsVisible="{Binding NoRecords}">
-              <TextBlock Text="{Binding RecordsEmptyText}" FontSize="15" HorizontalAlignment="Center"/>
-              <TextBlock Text="守护终止应用的原因会显示在这里" Classes="muted" HorizontalAlignment="Center"/>
+            <StackPanel Margin="0,16" Spacing="7" IsVisible="{Binding NoRecords}">
+              <TextBlock Text="{Binding RecordsEmptyText}" FontSize="14" HorizontalAlignment="Center"/>
+              <TextBlock Text="需要保护时，终止原因与结果会记录在这里" Classes="muted" HorizontalAlignment="Center"/>
             </StackPanel>
             <ListBox ItemsSource="{Binding EventRows}" IsVisible="{Binding HasRecords}" MaxHeight="240">
               <ListBox.ItemTemplate>
@@ -97,13 +97,13 @@
         </Border>
       </StackPanel>
     </ScrollViewer>
-    <Border Background="#EBEEF5" CornerRadius="11" Padding="17,14" Grid.Row="1">
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="16,13" Grid.Row="1">
       <StackPanel Spacing="10">
         <WrapPanel>
           <Button Content="打开服务日志目录" Click="OpenServiceLogs" Margin="0,0,8,0"/>
           <Button Content="管理日志" Click="OpenManagementLogs" Classes="quiet"/>
         </WrapPanel>
-        <SelectableTextBlock Text="{Binding LogDirectory}" FontSize="11" Foreground="#667184" TextWrapping="Wrap"/>
+        <SelectableTextBlock Text="{Binding LogDirectory}" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
       </StackPanel>
     </Border>
   </Grid>

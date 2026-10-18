@@ -46,6 +46,9 @@
 - Use the supplied Surge references for hierarchy, restrained surfaces, sidebar navigation, typography and dense readable tables. Preserve Windows window controls.
 - Shared design tokens, icons and reusable controls belong in a presentation layer. Views must not create production controllers or invoke Windows service/process/network operations.
 - Provide a fully isolated, interactive UI preview mode with mock data and screenshot rendering. Enter mock safety mode before any production initialization. Preview mode must not enumerate/terminate real targets, start TUN, install services, change startup entries or write the user's real configuration.
+- Application usage is persistent across closed connections and restarts, over the last 30 local calendar days including today. Classify bytes using the observed outbound; never relabel history using a later route selection. Checkpoints and usage totals commit atomically. Statistics/storage failures cannot affect TUN or protection.
+- Remove quota and remaining-allowance UI; do not reintroduce carrier-plan estimates.
+- Use the same Inter/CJK font setup, semantic home/other colors and compact controls in the main window, companion and previews.
 - Telemetry charts must use actual observation times, a zero baseline and explicit shared numeric scale. UI refresh cannot manufacture samples; missing/stale data is not zero. Byte units and app percentages must match their real denominators.
 - Guardian icons and text must distinguish healthy, protecting, unavailable and manually stopped states; never show a green check based on a stale reply after a read error.
 - Resolve displayed adapter names/descriptions from live GUID identity; keep raw runtime tags out of primary connection/route labels.
