@@ -2,70 +2,62 @@ using EgressController.Core.Models;
 
 namespace EgressController.Launcher.Discovery;
 
-/// <summary>
-/// The product catalog is intentionally small and explicit. Discovery still inspects the
-/// normal Windows package/registry/Program Files sources, but only AI clients and browsers are
-/// exposed to the user. Once an entry is selected, every recursively discovered EXE below its
-/// ownership root is sent to the process-name compiler.
-/// </summary>
+public sealed record SupportedApplication(string Id, string Name, string[] ExecutableStems, string[] DisplayNames);
+
+/// <summary>Classify the primary executable, never a nested EXE or arbitrary substring.</summary>
 public static class SupportedApplicationCatalog
 {
-    private static readonly string[] SupportedProcessStems =
-    [
-        // AI desktop clients and local-model tools.
-        "claude", "chatgpt", "cursor", "windsurf", "codex", "gemini", "copilot",
-        "perplexity", "ollama", "lmstudio", "jan", "anythingllm", "cherrystudio",
-        "cline", "continue", "void", "trae", "lobehub", "kiro",
-
-        // Windows browsers and Chromium-family derivatives.
-        "chrome", "msedge", "edge", "firefox", "brave", "opera", "opera_gx", "vivaldi",
-        "arc", "zen", "chromium", "waterfox", "librewolf", "yandex", "qqbrowser",
-        "360chrome", "iexplore", "thorium", "floorp", "sidekick", "maxthon", "duckduckgo",
+    public static IReadOnlyList<SupportedApplication> Applications { get; } = [
+        new("claude", "Claude", ["claude"], ["Claude"]),
+        new("chatgpt", "ChatGPT", ["chatgpt"], ["ChatGPT"]),
+        new("codex", "Codex", ["codex"], ["Codex"]),
+        new("cursor", "Cursor", ["cursor"], ["Cursor"]),
+        new("windsurf", "Windsurf", ["windsurf"], ["Windsurf"]),
+        new("gemini", "Gemini", ["gemini"], ["Gemini"]),
+        new("copilot", "Copilot", ["copilot", "microsoft.copilot"], ["Copilot", "Microsoft Copilot", "Microsoft 365 Copilot"]),
+        new("perplexity", "Perplexity", ["perplexity"], ["Perplexity"]),
+        new("ollama", "Ollama", ["ollama", "ollama app"], ["Ollama"]),
+        new("lmstudio", "LM Studio", ["lmstudio", "lm studio"], ["LM Studio"]),
+        new("jan", "Jan", ["jan"], ["Jan"]),
+        new("anythingllm", "AnythingLLM", ["anythingllm"], ["AnythingLLM"]),
+        new("cherrystudio", "Cherry Studio", ["cherrystudio", "cherry studio"], ["Cherry Studio"]),
+        new("trae", "Trae", ["trae"], ["Trae"]),
+        new("kiro", "Kiro", ["kiro"], ["Kiro"]),
+        new("void", "Void", ["void"], ["Void"]),
+        new("opencode", "OpenCode", ["opencode"], ["OpenCode"]),
+        new("chrome", "Google Chrome", ["chrome"], ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary"]),
+        new("edge", "Microsoft Edge", ["msedge", "edge"], ["Microsoft Edge", "Microsoft Edge Beta", "Microsoft Edge Dev", "Microsoft Edge Canary"]),
+        new("firefox", "Firefox", ["firefox"], ["Firefox", "Mozilla Firefox", "Firefox Developer Edition", "Firefox Nightly"]),
+        new("brave", "Brave", ["brave"], ["Brave"]),
+        new("opera", "Opera", ["opera", "opera_gx"], ["Opera", "Opera GX"]),
+        new("vivaldi", "Vivaldi", ["vivaldi"], ["Vivaldi"]),
+        new("arc", "Arc", ["arc"], ["Arc"]),
+        new("zen", "Zen", ["zen"], ["Zen", "Zen Browser"]),
+        new("chromium", "Chromium", ["chromium"], ["Chromium"]),
+        new("waterfox", "Waterfox", ["waterfox"], ["Waterfox"]),
+        new("librewolf", "LibreWolf", ["librewolf"], ["LibreWolf"]),
+        new("yandex", "Yandex Browser", ["yandex"], ["Yandex Browser"]),
+        new("qqbrowser", "QQ 浏览器", ["qqbrowser"], ["QQ浏览器", "QQ Browser"]),
+        new("360chrome", "360 浏览器", ["360chrome", "360se"], ["360浏览器", "360安全浏览器", "360极速浏览器"]),
+        new("thorium", "Thorium", ["thorium"], ["Thorium"]),
+        new("floorp", "Floorp", ["floorp"], ["Floorp"]),
+        new("duckduckgo", "DuckDuckGo", ["duckduckgo"], ["DuckDuckGo"]),
     ];
 
-    private static readonly string[] SupportedNameHints =
-    [
-        "claude", "chatgpt", "cursor", "windsurf", "codex", "gemini", "copilot",
-        "perplexity", "ollama", "lm studio", "anythingllm", "cherry studio", "cline",
-        "continue", "trae", "lobehub", "browser", "chrome", "edge", "firefox", "brave",
-        "opera", "vivaldi", "arc", "chromium", "waterfox", "librewolf", "yandex",
-        "qq browser", "360浏览器", "thorium", "floorp", "sidekick", "maxthon",
-    ];
-
-    public static bool IsSupported(LaunchTarget target)
+    public static SupportedApplication? ForExecutable(string? path)
     {
-        ArgumentNullException.ThrowIfNull(target);
-        if (target.Kind is not (LaunchKind.DirectExe or LaunchKind.PackagedAumid))
-            return false;
-
-        if (EnumerateExecutableStems(target).Any(IsSupportedProcessStem))
-            return true;
-
-        string descriptiveText = string.Join(
-            ' ',
-            target.Name,
-            target.PackageFamily,
-            target.Aumid,
-            target.Source);
-        return SupportedNameHints.Any(hint => descriptiveText.Contains(hint, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        string stem = Path.GetFileNameWithoutExtension(path.Trim());
+        return Applications.FirstOrDefault(item => item.ExecutableStems.Contains(stem, StringComparer.OrdinalIgnoreCase));
     }
-
-    public static bool IsSupportedProcessStem(string value)
+    public static SupportedApplication? ForName(string? name) => Applications.FirstOrDefault(item =>
+        item.DisplayNames.Contains(name?.Trim() ?? "", StringComparer.OrdinalIgnoreCase));
+    public static SupportedApplication? Identify(LaunchTarget target)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-        string stem = Path.GetFileNameWithoutExtension(value.Trim());
-        return SupportedProcessStems.Any(candidate =>
-            string.Equals(stem, candidate, StringComparison.OrdinalIgnoreCase));
+        if (target.Kind is not (LaunchKind.DirectExe or LaunchKind.PackagedAumid or LaunchKind.CliNative)) return null;
+        string? path = target.CanonicalExecutable ?? target.Command;
+        return ForExecutable(path) ?? (string.IsNullOrEmpty(path) ? ForName(target.Name) : null);
     }
-
-    private static IEnumerable<string> EnumerateExecutableStems(LaunchTarget target)
-    {
-        if (!string.IsNullOrWhiteSpace(target.CanonicalExecutable))
-            yield return target.CanonicalExecutable;
-        if (!string.IsNullOrWhiteSpace(target.Command))
-            yield return target.Command;
-        foreach (string executable in target.OwnedExecutables)
-            yield return executable;
-    }
+    public static bool IsSupported(LaunchTarget target) => Identify(target) is not null;
+    public static bool IsSupportedProcessStem(string value) => ForExecutable(value) is not null;
 }

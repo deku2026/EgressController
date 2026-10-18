@@ -5,6 +5,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using EgressController.Guardian;
+using EgressController.Presentation;
 
 namespace EgressController.GuardTray;
 
@@ -33,7 +34,6 @@ public sealed class TrayApp : Application
                 }
                 catch (Exception error) { vm.ReportError(error.ToString()); }
             };
-            var menu = new NativeMenu();
             void Show() { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }
             void OpenMain()
             {
@@ -47,40 +47,31 @@ public sealed class TrayApp : Application
                 }
                 catch (Exception error) { vm.ReportError(error.Message); Show(); }
             }
-            var open = new NativeMenuItem("打开主程序");
-            open.Click += (_, _) => OpenMain();
             window.OpenMainRequested += OpenMain;
-            menu.Items.Add(open);
-            var manage = new NativeMenuItem("查看 / 管理守护服务");
-            manage.Click += (_, _) => Show();
-            menu.Items.Add(manage);
-            var start = new NativeMenuItem("启动守护服务");
-            start.Click += async (_, _) => { await vm.StartCommand.ExecuteAsync(null); Show(); };
-            menu.Items.Add(start);
-            var stop = new NativeMenuItem("停止守护服务");
-            stop.Click += async (_, _) => { await vm.StopCommand.ExecuteAsync(null); Show(); };
-            menu.Items.Add(stop);
-            menu.Items.Add(new NativeMenuItemSeparator());
-            var exit = new NativeMenuItem("退出小托盘（服务继续运行）");
-            exit.Click += (_, _) => { window.AllowExit = true; desktop.Shutdown(); };
-            menu.Items.Add(exit);
+            window.ExitRequested += () => { window.AllowExit = true; desktop.Shutdown(); };
             var artwork = TrayIcons.Create();
+            var nativeArtwork = Enum.GetValues<GuardVisualState>().ToDictionary(state => state, state => GuardianIcon.CreateBytes(state));
             window.Icon = artwork[GuardVisualState.Waiting];
-            var tray = new TrayIcon { Icon = artwork[GuardVisualState.Waiting], IsVisible = true, ToolTipText = "EgressController 独立守护", Menu = menu };
-            tray.Clicked += (_, _) => Show();
-            var icons = new Avalonia.Controls.TrayIcons { tray };
-            TrayIcon.SetIcons(this, icons);
+            WindowsTrayPresenter? tray = null;
+            try { tray = new WindowsTrayPresenter(Program.Paths.ServiceName, "Egress Guard", nativeArtwork[GuardVisualState.Waiting],
+                "EgressController 独立守护", Show, () => [
+                    new("打开主程序", null, "open", () => { OpenMain(); return Task.CompletedTask; }),
+                    new("守护状态与设置", vm.StateLabel, "guardian", () => { Show(); return Task.CompletedTask; }),
+                    new("启动守护", null, "protection", async () => { await vm.StartCommand.ExecuteAsync(null); Show(); }, () => vm.CanStart),
+                    new("停止守护", "本次开机不自动拉起", "power", async () => { await vm.StopCommand.ExecuteAsync(null); Show(); }, () => vm.CanStop, Danger: true),
+                    new("退出小托盘", "守护服务继续运行", "power", () => { window.AllowExit = true; desktop.Shutdown(); return Task.CompletedTask; })]);
+                tray.Failed += error => { vm.ReportError(error.Message); Show(); };
+            }
+            catch (Exception error) { window.TrayAvailable = false; vm.ReportError("通知区图标未能创建：" + error.Message); Show(); }
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             timer.Tick += async (_, _) =>
             {
                 await vm.RefreshAsync();
-                tray.Icon = artwork[vm.VisualState];
+                tray?.Update(nativeArtwork[vm.VisualState], vm.Summary.Length > 100 ? vm.Summary[..100] : vm.Summary);
                 window.Icon = artwork[vm.VisualState];
-                start.IsEnabled = vm.CanStart; stop.IsEnabled = vm.CanStop;
-                tray.ToolTipText = vm.Summary.Length > 100 ? vm.Summary[..100] : vm.Summary;
             };
             timer.Start();
-            desktop.Exit += (_, _) => { timer.Stop(); tray.Dispose(); icons.Clear(); };
+            desktop.Exit += (_, _) => { timer.Stop(); tray?.Dispose(); };
         }
         base.OnFrameworkInitializationCompleted();
     }

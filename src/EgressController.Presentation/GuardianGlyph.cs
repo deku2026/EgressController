@@ -31,13 +31,13 @@ public sealed class GuardianGlyph : Control
 public static class GuardianIcon
 {
     public static WindowIcon Create(GuardVisualState state) { using var data = new MemoryStream(CreateBytes(state)); return new WindowIcon(data); }
-    public static byte[] CreateBytes(GuardVisualState state)
+    public static byte[] CreateBytes(GuardVisualState state, bool application = false)
     {
         int[] sizes = [16, 20, 24, 32, 48, 64];
         var images = new List<byte[]>();
         foreach (int size in sizes)
         {
-            var glyph = new GuardianGlyph { Width = size, Height = size, State = state };
+            Control glyph = application ? new ApplicationGlyph { Width = size, Height = size } : new GuardianGlyph { Width = size, Height = size, State = state };
             glyph.Measure(new(size, size)); glyph.Arrange(new Rect(0, 0, size, size));
             using var bitmap = new RenderTargetBitmap(new(size, size), new(96, 96));
             bitmap.Render(glyph);
@@ -54,5 +54,16 @@ public static class GuardianIcon
         }
         foreach (var png in images) writer.Write(png);
         return stream.ToArray();
+    }
+}
+
+public sealed class ApplicationGlyph : Control
+{
+    private static readonly Geometry Letter = Geometry.Parse("M10 7H23V11H14V14H22V18H14V21H23V25H10Z");
+    public override void Render(DrawingContext context)
+    {
+        using var scale = context.PushTransform(Matrix.CreateScale(Bounds.Width / 32, Bounds.Height / 32));
+        context.DrawRectangle(new SolidColorBrush(Color.Parse("#5062CE")), null, new Rect(1, 1, 30, 30), 7, 7);
+        context.DrawGeometry(Brushes.White, null, Letter);
     }
 }

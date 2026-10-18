@@ -1,9 +1,9 @@
 namespace EgressController.Launcher.Discovery;
 
 /// <summary>
-/// Builds the executable membership snapshot used by process-tree routing. It intentionally
+/// Builds the executable membership snapshot used by exact-path routing. It intentionally
 /// walks each application root recursively, but never treats the root directory itself as an
-/// implicit process match: only paths observed in this collection are eligible as descendants.
+/// implicit process match: only paths observed in this collection are members of the saved application inventory.
 /// </summary>
 public static class ExecutableInventory
 {

@@ -1,24 +1,27 @@
 <Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Presentation.DesktopTheme">
   <Styles.Resources>
-    <SolidColorBrush x:Key="WorkspaceBrush">#F5F6F9</SolidColorBrush>
-    <SolidColorBrush x:Key="SidebarBrush">#ECEFF4</SolidColorBrush>
+    <SolidColorBrush x:Key="WorkspaceBrush">#F4F6FA</SolidColorBrush>
+    <SolidColorBrush x:Key="SidebarBrush">#EBEFF5</SolidColorBrush>
     <SolidColorBrush x:Key="SurfaceBrush">#FFFFFF</SolidColorBrush>
-    <SolidColorBrush x:Key="InkBrush">#202735</SolidColorBrush>
-    <SolidColorBrush x:Key="MutedBrush">#667184</SolidColorBrush>
+    <SolidColorBrush x:Key="InkBrush">#202C3D</SolidColorBrush>
+    <SolidColorBrush x:Key="MutedBrush">#5F6D82</SolidColorBrush>
     <SolidColorBrush x:Key="LineBrush">#E3E7EF</SolidColorBrush>
     <SolidColorBrush x:Key="AccentBrush">#5062CE</SolidColorBrush>
     <SolidColorBrush x:Key="SuccessBrush">#227957</SolidColorBrush>
     <SolidColorBrush x:Key="WarningBrush">#925D16</SolidColorBrush>
     <SolidColorBrush x:Key="DangerBrush">#B8384A</SolidColorBrush>
+    <SolidColorBrush x:Key="TextControlPlaceholderForeground">#637086</SolidColorBrush>
+    <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver">#637086</SolidColorBrush>
     <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+      <Setter Property="FocusAdorner" Value="{x:Null}"/>
       <Setter Property="Background" Value="White"/>
       <Setter Property="Foreground" Value="#344054"/>
       <Setter Property="BorderBrush" Value="#D7DDE7"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="CornerRadius" Value="8"/>
       <Setter Property="Padding" Value="13,8"/>
-      <Setter Property="MinHeight" Value="34"/>
-      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="MinHeight" Value="36"/>
+      <Setter Property="FontSize" Value="14"/>
       <Setter Property="FontWeight" Value="Medium"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -72,13 +75,13 @@
     </ControlTheme>
   </Styles.Resources>
   <Style Selector="Window">
-    <Setter Property="FontFamily" Value="Segoe UI, Microsoft YaHei UI"/>
-    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"/>
+    <Setter Property="FontSize" Value="14"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="Background" Value="{StaticResource WorkspaceBrush}"/>
   </Style>
   <Style Selector="TextBlock.page-title">
-    <Setter Property="FontSize" Value="27"/>
+    <Setter Property="FontSize" Value="26"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
   <Style Selector="TextBlock.section-title">
@@ -95,15 +98,15 @@
   </Style>
   <Style Selector="TextBlock.muted">
     <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="FontSize" Value="12.5"/>
   </Style>
   <Style Selector="TextBlock.eyebrow">
     <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="FontSize" Value="14"/>
   </Style>
   <Style Selector="TextBlock.warning">
     <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
-    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="FontSize" Value="12.5"/>
   </Style>
   <Style Selector="TextBlock.success">
     <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
@@ -113,19 +116,21 @@
   </Style>
   <Style Selector="TextBlock.tag">
     <Setter Property="Foreground" Value="#4B5E86"/>
-    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="FontSize" Value="12.5"/>
   </Style>
   <Style Selector="TextBox">
+    <Setter Property="PlaceholderForeground" Value="{StaticResource MutedBrush}"/>
     <Setter Property="MinHeight" Value="36"/>
-    <Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="CornerRadius" Value="8"/>
     <Setter Property="Background" Value="White"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="BorderBrush" Value="#D8DFE9"/>
     <Setter Property="Padding" Value="11,7"/>
   </Style>
+  <Style Selector="TextBox /template/ TextBlock#PART_Placeholder"><Setter Property="Opacity" Value="1"/></Style>
   <Style Selector="ComboBox">
     <Setter Property="MinHeight" Value="36"/>
-    <Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="CornerRadius" Value="8"/>
     <Setter Property="Background" Value="White"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="BorderBrush" Value="#D8DFE9"/>
@@ -170,8 +175,8 @@
     <Setter Property="CornerRadius" Value="15"/>
     <Setter Property="Padding" Value="22"/>
     <Setter Property="BorderBrush" Value="#E6EAF1"/>
-    <Setter Property="BorderThickness" Value="1"/>
-    <Setter Property="BoxShadow" Value="0 4 14 0 #071E3454"/>
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="BoxShadow" Value="0 5 18 0 #101E3454"/>
   </Style>
   <Style Selector="Border.list-card">
     <Setter Property="Background" Value="White"/>
@@ -244,4 +249,14 @@
   <Style Selector="Ellipse.state-dot.active">
     <Setter Property="Fill" Value="#3E9470"/>
   </Style>
+  <Style Selector="Button.menu-action"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Foreground" Value="#283344"/></Style>
+  <Style Selector="Button.menu-action:pointerover"><Setter Property="Background" Value="#EEF2FA"/></Style>
+  <Style Selector="Button.menu-action:pressed"><Setter Property="Background" Value="#E2E9F6"/></Style>
+  <Style Selector="Button.menu-action:focus-visible"><Setter Property="Background" Value="#E8EEF9"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="#5062CE"/></Style>
+  <Style Selector="Button.menu-danger"><Setter Property="Foreground" Value="#AC3349"/></Style>
+  <Style Selector="MenuFlyoutPresenter"><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="6"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Background" Value="White"/></Style>
+  <Style Selector="MenuItem"><Setter Property="CornerRadius" Value="7"/><Setter Property="MinHeight" Value="36"/></Style>
+  <Style Selector="ToolTip"><Setter Property="CornerRadius" Value="8"/><Setter Property="MaxWidth" Value="520"/></Style>
+  <Style Selector="Button.menu-action:disabled"><Setter Property="Opacity" Value="0.45"/></Style>
+  <Style Selector="TextBlock.metric"><Setter Property="FontFeatures" Value="tnum"/></Style>
 </Styles>

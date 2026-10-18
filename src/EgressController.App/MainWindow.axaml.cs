@@ -11,6 +11,8 @@ namespace EgressController.App;
 
 public partial class MainWindow : Window
 {
+    public bool TrayAvailable { get; set; } = true;
+    public Func<Task>? ExitRequested { get; set; }
     private MainViewModel? _vm;
     private DispatcherTimer? _timer;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
@@ -48,7 +50,7 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             WindowState = WindowState.Minimized;
-            Hide();
+            if (TrayAvailable) Hide();
         }
 
         base.OnClosing(e);
@@ -56,6 +58,9 @@ public partial class MainWindow : Window
 
     internal void AllowApplicationExit()
         => _applicationExitAllowed = true;
+
+    internal async void OnExitRequested(object? sender, RoutedEventArgs e)
+    { if (_vm?.IsPreview == true) return; if (ExitRequested is not null) await ExitRequested(); }
 
     internal void OnShowDiagnostics(object? sender, RoutedEventArgs e) => SelectPage("events");
     public void SelectPage(string key)

@@ -22,7 +22,7 @@ public sealed class SupportedApplicationCatalogTests
         => Assert.False(SupportedApplicationCatalog.IsSupportedProcessStem(processName));
 
     [Fact]
-    public void Unsupported_discovery_kinds_are_never_exposed()
+    public void Native_ai_CLI_is_supported()
     {
         var target = new LaunchTarget
         {
@@ -34,6 +34,6 @@ public sealed class SupportedApplicationCatalogTests
             OwnedExecutables = [@"C:\Tools\claude.exe"],
         };
 
-        Assert.False(SupportedApplicationCatalog.IsSupported(target));
+        Assert.True(SupportedApplicationCatalog.IsSupported(target));
     }
 }

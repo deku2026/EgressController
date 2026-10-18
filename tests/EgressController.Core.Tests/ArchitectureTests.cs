@@ -45,7 +45,7 @@ public class ArchitectureTests
         { "EgressController.Core", "EgressController.Windows", "EgressController.Diagnostics" },
         ["EgressController.GuardService"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
         ["EgressController.GuardTray"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian", "EgressController.Presentation" },
-        ["EgressController.Presentation"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
+        ["EgressController.Presentation"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian", "EgressController.Windows" },
     };
 
     [Fact]

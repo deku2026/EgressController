@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Security.Principal;
 using System.Xml.Linq;
 using EgressController.Core.Models;
+using EgressController.Core.Protection;
 using Windows.ApplicationModel;
 using Windows.Management.Deployment;
 
@@ -11,7 +12,7 @@ namespace EgressController.Launcher.Discovery;
 /// <summary>
 /// Discovers launchable Windows applications from the same primary sources used by
 /// BCUninstaller: the per-user Store package API, the 32/64-bit uninstall registry and
-/// App Paths. PATH/CLI entries and shortcuts are excluded. The resulting broad discovery is
+/// App Paths and native AI commands resolved by Get-Command. Shortcuts are excluded. The resulting broad discovery is
 /// filtered through <see cref="SupportedApplicationCatalog"/> so the UI only exposes AI clients
 /// and browsers; no manual EXE fallback exists.
 /// </summary>
@@ -23,15 +24,27 @@ public sealed class WindowsLaunchTargetScanner
     private const string UninstallRoot = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
     private readonly Dictionary<string, IReadOnlyList<string>> _inventoryCache = new(StringComparer.OrdinalIgnoreCase);
 
+    public IReadOnlyList<string> Notices { get; private set; } = [];
+
     public IReadOnlyList<LaunchTarget> Scan()
     {
+        RuntimeSafety.RequireLiveOperations();
         _inventoryCache.Clear();
         var registry = new LaunchTargetRegistry();
         DiscoverStorePackages(registry);
         DiscoverInstalledRegistryApps(registry);
         DiscoverAppPaths(registry);
         DiscoverProgramFilesApps(registry);
-        return registry.All().Where(SupportedApplicationCatalog.IsSupported).ToArray();
+        var notices = new List<string>();
+        try
+        {
+            var cli = new WindowsCliDiscovery(new PowerShellCommandLocationSource());
+            foreach (var target in cli.Discover()) registry.Add(target);
+            notices.AddRange(cli.Notices);
+        }
+        catch (Exception error) { notices.Add("CLI 路径查询未完成：" + error.Message); }
+        Notices = notices;
+        return ApplicationCatalogProjection.Project(registry.All());
     }
 
     /// <summary>

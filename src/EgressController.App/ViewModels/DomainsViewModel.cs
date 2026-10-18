@@ -29,7 +29,7 @@ public sealed class DomainsViewModel : ObservableObject
         SelectAllCommand = new AsyncRelayCommand(() => SetVisibleAsync(true));
         ClearAllCommand = new AsyncRelayCommand(() => SetVisibleAsync(false));
         AddManualCommand = new AsyncRelayCommand(AddManualAsync);
-        _routeOptions = RouteOptionViewModel.Create(controller.Profile);
+        _routeOptions = RouteOptionViewModel.Create(controller.Profile, controller.Adapters);
         _manualRoute = _routeOptions[0];
     }
 
@@ -111,7 +111,7 @@ public sealed class DomainsViewModel : ObservableObject
             return;
         _refreshingRoutes = true;
         var target = _manualRoute.Target;
-        _routeOptions = RouteOptionViewModel.Create(_controller.Profile);
+        _routeOptions = RouteOptionViewModel.Create(_controller.Profile, _controller.Adapters);
         _manualRoute = _routeOptions.FirstOrDefault(option => option.Target == target) ?? _routeOptions[0];
         OnPropertyChanged(nameof(RouteOptions));
         OnPropertyChanged(nameof(ManualRoute));

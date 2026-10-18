@@ -8,14 +8,14 @@ network utility, so the native title bar and window controls remain. Chinese lab
 
 | Role | Value |
 | --- | --- |
-| Workspace | `#F5F6F9` |
-| Sidebar | `#ECEFF4` |
+| Workspace | `#F4F6FA` |
+| Sidebar | `#EBEFF5` |
 | Surface | `#FFFFFF` |
-| Primary text | `#202735` |
-| Secondary text | `#667184` |
+| Primary text | `#202C3D` |
+| Secondary text | `#5F6D82` |
 | Accent | `#5062CE` |
 
-Use Segoe UI with Microsoft YaHei UI fallback for Chinese. Page titles are 27 px semibold,
+Use Segoe UI Variable Text / Segoe UI with Microsoft YaHei UI fallback for Chinese. Page titles are 26 px semibold,
 section titles 16 px semibold, body/control text 13–14 px, metrics 32–40 px. Do not add all-caps
 eyebrows or technical prose to every panel. Icons are an original consistent set of 20 px line
 geometries. The sidebar is 220 px; primary workspace padding is 28 px with a 16 px grid.
@@ -72,11 +72,11 @@ The dedicated guardian window uses the shared panel; native titlebar/tray shell 
 
 ## Follow-up: truthful telemetry and companion consistency
 
-Keep the same Windows typography and five core colors (workspace #F5F6F9, surface #FFFFFF,
-ink #202735, secondary #667184, accent #5062CE). The small guardian is a compact companion:
+Keep the same Windows typography and five core colors (workspace #F4F6FA, surface #FFFFFF,
+ink #202C3D, secondary #5F6D82, accent #5062CE). The small guardian is a compact companion:
 brand/open-main toolbar, truthful state hero, concise service/startup controls, structured history
 and an always-visible log action. Advanced destructive actions stay available in an expander.
-Native notification-area menus remain native; the shield artwork is shared with the window and
+Notification-area registration is native; its rounded Avalonia menu shares the application theme. The shield artwork is shared with the window and
 renders at multiple DPI sizes. Healthy, protecting, unavailable and manually stopped states must
 have different icon/label treatment; a green check must never appear on an unavailable service.
 
@@ -111,3 +111,32 @@ requirements from superseded conversation turns.
 ![独立守护窗口（模拟数据）](images/guardian.png)
 
 ![通知区图标的状态与尺寸](images/guardian-icons.png)
+
+## Windows polish pass
+
+Mode: **Operate**. Preserve the sidebar and information architecture. Refine the existing Surge-inspired
+world with Windows-native typography, a calmer workspace, brighter readable surfaces, restrained offset
+shadows, 36 px controls, 8 px control corners and 12–15 px panel/menu corners. Use actual product artwork
+and exact route names, not decorative badges or invented statistics.
+
+The main menu and guardian menu now share a measured rounded surface with keyboard focus, disabled and
+stop states. A Win32 notification host obtains the icon rectangle and owning monitor work area/DPI;
+menu placement uses physical pixels exactly once. This avoids the primary-screen scaling assumption
+in Avalonia 12.1.1's stock tray implementation. No private Avalonia APIs or WebView are used.
+
+Applications, connection rows, the inspector and application traffic share a bounded visual cache.
+Windows EXE resources are extracted at 64 px off the UI thread; a neutral vector is shown while loading
+or if the icon is unavailable. CLI entries reuse the product artwork with a small terminal marker.
+Complete paths and adapter descriptions remain accessible in details/tooltips.
+
+Visual review used frontend-design and Impeccable's polish/Operate guidance. Its web-oriented detector
+does not inspect AXAML; native headless rendering, compiled bindings and interaction/contrast checks
+remain the verification path. Three screenshot passes cover all nine pages at ordinary/compact sizes,
+companion states, tray menus, keyboard focus and filtered CLI rows. These are mock previews, not a live
+TUN or a real notification-area integration test.
+
+![原生 CLI 清单](images/cli.png)
+
+![主程序通知区菜单](images/tray-main.png)
+
+![守护通知区菜单](images/tray-guard.png)

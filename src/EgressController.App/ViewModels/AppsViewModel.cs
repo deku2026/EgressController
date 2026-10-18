@@ -17,6 +17,9 @@ public sealed class AppsViewModel : ObservableObject
     private string _query = string.Empty;
     private string _status = "尚未扫描";
     private bool _isScanning;
+    private string _discoveryNotice = "";
+    public string DiscoveryNotice { get => _discoveryNotice; private set { SetProperty(ref _discoveryNotice, value); OnPropertyChanged(nameof(HasDiscoveryNotice)); } }
+    public bool HasDiscoveryNotice => DiscoveryNotice.Length > 0;
 
     public AppsViewModel(IAppController controller)
     {
@@ -68,7 +71,8 @@ public sealed class AppsViewModel : ObservableObject
             _all.Clear();
             foreach (LaunchTarget target in discovered)
                 _all.Add(new AppEntryViewModel(_controller, target, RefreshVisible));
-            Status = $"扫描完成：{_all.Count} 个 Windows 应用。";
+            Status = $"扫描完成：{_all.Count(entry => entry.Target.Kind != LaunchKind.CliNative)} 个应用，{_all.Count(entry => entry.Target.Kind == LaunchKind.CliNative)} 个 CLI。";
+            DiscoveryNotice = string.Join("\n", _controller.DiscoveryNotices);
             RefreshVisible();
         }
         catch (Exception exception)

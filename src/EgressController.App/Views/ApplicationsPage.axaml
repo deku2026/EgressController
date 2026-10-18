@@ -1,4 +1,4 @@
-<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.ApplicationsPage" x:DataType="vm:MainViewModel">
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.Views.ApplicationsPage" x:DataType="vm:MainViewModel">
   <Grid RowDefinitions="Auto,Auto,*">
     <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="9" Margin="0,0,0,13">
       <TextBox Text="{Binding Apps.Query}" PlaceholderText="搜索应用名称或路径"/>
@@ -7,7 +7,7 @@
       <Button Grid.Column="3" Content="清空选择" Command="{Binding Apps.ClearAllCommand}"/>
     </Grid>
     <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,15">
-      <TextBlock Text="{Binding Apps.Status}" Classes="muted" TextWrapping="Wrap"/>
+      <StackPanel Spacing="6"><TextBlock Text="{Binding Apps.Status}" Classes="muted" TextWrapping="Wrap"/><Expander Header="扫描提示" IsVisible="{Binding Apps.HasDiscoveryNotice}"><SelectableTextBlock Text="{Binding Apps.DiscoveryNotice}" TextWrapping="Wrap"/></Expander></StackPanel>
       <TextBlock Grid.Column="1" Text="{Binding Apps.Summary}" Classes="muted"/>
     </Grid>
     <Border Grid.Row="2" Classes="list-card">
@@ -25,15 +25,11 @@
               <Border BorderBrush="#EDF0F5" BorderThickness="0,0,0,1" Padding="17,13">
                 <Grid ColumnDefinitions="32,36,*,75,290" ColumnSpacing="12" IsEnabled="{Binding CanManage}">
                   <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center"/>
-                  <Border Grid.Column="1" Classes="app-glyph" VerticalAlignment="Center">
-                    <Grid>
-                      <Image Source="{Binding Icon}" Width="25" Height="25" IsVisible="{Binding HasIcon}"/>
-                      <TextBlock Text="{Binding Initial}" IsVisible="{Binding HasNoIcon}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="17" FontWeight="SemiBold" Foreground="#5365C4"/>
-                    </Grid>
-                  </Border>
+                  <ui:AppAvatar Grid.Column="1" Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="32" Height="32" VerticalAlignment="Center"/>
                   <StackPanel Grid.Column="2" Spacing="5" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Medium"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="SemiBold"/><TextBlock Text="{Binding KindLabel}" Classes="muted" VerticalAlignment="Center"/></StackPanel>
                     <TextBlock Text="{Binding Command}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Details}"/>
+                    <Button Content="旧辅助项出口不一致 · 统一为当前出口" Command="{Binding UnifyRouteCommand}" IsVisible="{Binding HasConflictingRoutes}" Classes="quiet"/>
                     <TextBlock Text="{Binding Routing.Status}" Classes="warning" IsVisible="{Binding Routing.HasStatus}" TextTrimming="CharacterEllipsis"/>
                   </StackPanel>
                   <TextBlock Grid.Column="3" Text="{Binding InventorySummary}" ToolTip.Tip="{Binding InventoryDetails}" Classes="muted" VerticalAlignment="Center"/>

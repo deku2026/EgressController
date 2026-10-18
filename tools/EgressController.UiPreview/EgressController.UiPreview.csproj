@@ -8,4 +8,5 @@
     <PackageReference Include="Avalonia.Headless" />
     <ProjectReference Include="..\..\src\EgressController.GuardTray\EgressController.GuardTray.csproj" />
   </ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Assets/*.png" /></ItemGroup>
 </Project>

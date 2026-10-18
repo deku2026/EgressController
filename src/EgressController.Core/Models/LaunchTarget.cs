@@ -49,6 +49,9 @@ public sealed class LaunchTarget
     public string? Source { get; init; }
     public string? Publisher { get; init; }
     public string? Version { get; init; }
+    public string? CatalogId { get; init; }
+    public IReadOnlyList<string> RelatedDiscoveryKeys { get; init; } = [];
+    public IReadOnlyList<string> SelectionKeys => new[] { DiscoveryKey }.Concat(RelatedDiscoveryKeys).Distinct(StringComparer.Ordinal).ToArray();
 
     /// <summary>Stable key for merging discovery providers (see class doc). Purely lexical — no cwd/
     /// I/O dependence so it is unit-testable and AOT-safe.</summary>

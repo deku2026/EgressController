@@ -89,6 +89,32 @@ internal static class RenderChecks
         Save(window, Path.Combine(directory, "guardian-icons.png")); window.Close();
     }
 
+    internal static void TrayMenus(string directory)
+    {
+        int called = 0;
+        foreach (bool guard in new[] { false, true })
+        {
+            TrayCommand[] commands = guard ? [
+                new("打开主程序", null, "open", () => { called++; return Task.CompletedTask; }),
+                new("守护状态与设置", "主程序在线，TUN 已接管", "guardian", () => Task.CompletedTask),
+                new("启动守护", null, "protection", () => throw new Exception("Disabled command"), () => false),
+                new("停止守护", "本次开机不自动拉起", "power", () => Task.CompletedTask, Danger: true),
+                new("退出小托盘", "守护服务继续运行", "power", () => Task.CompletedTask)] : [
+                new("打开 EgressController", null, "open", () => { called++; return Task.CompletedTask; }),
+                new("退出主程序", "独立守护继续运行", "power", () => Task.CompletedTask, Danger: true)];
+            var menu = new TrayMenuWindow(guard ? "Egress Guard" : "EgressController", commands);
+            menu.Show(); Save(menu, Path.Combine(directory, guard ? "tray-guard.png" : "tray-main.png"));
+            menu.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+            menu.KeyRelease(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+            Save(menu, Path.Combine(directory, guard ? "tray-guard-focused.png" : "tray-main-focused.png"));
+            var buttons = menu.GetVisualDescendants().OfType<Button>().ToArray();
+            if (!buttons[1].IsFocused) throw new InvalidOperationException("Tray keyboard navigation failed.");
+            buttons[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            if (menu.IsVisible) throw new InvalidOperationException("Tray action did not close menu.");
+        }
+        if (called != 2) throw new InvalidOperationException("Tray actions were not dispatched.");
+    }
+
     private static double Luminance(Color color)
     {
         static double Linear(byte channel) { double value = channel / 255d; return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4); }

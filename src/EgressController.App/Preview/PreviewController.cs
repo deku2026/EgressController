@@ -29,22 +29,29 @@ public sealed class PreviewController : IAppController
         if (_scenario == "telemetry" && _sample >= 24 || _sample is >= 32 and <= 36) _traffic.Unavailable();
         else _traffic.Observe(SimulatedUploadRate, SimulatedDownloadRate);
     }
-    public PreviewController(string scenario = "ready")
+    public PreviewController(string scenario = "ready", Func<string, Avalonia.Media.Imaging.Bitmap?>? icons = null)
     {
         RuntimeSafety.EnableMockOnly();
+        Visuals = new(true, icons);
         _scenario = scenario;
         _traffic = new(_clock);
         Diagnostics = new(@"C:\EgressPreview\logs\protection.log", _ => { });
-        Adapters = [Adapter(HomeId, "Ethernet", "USB 家宽", "192.0.2.10", 7), Adapter(ProxyId, "Wi-Fi", "无线网络", "198.51.100.10", 12)];
+        Adapters = [Adapter(HomeId, "Ethernet", "Apple Mobile Device Ethernet", "192.0.2.10", 7), Adapter(ProxyId, "Wi-Fi", "无线网络", "198.51.100.10", 12)];
         Profile = new EgressProfileDocument { DefaultAdapterId = HomeId.ToString(), ProxyAdapterId = ProxyId.ToString(),
             UpstreamPorts = [7890, 7891], UpstreamPort = 7890 }.NormalizeAndValidate();
-        string[] names = ["ChatGPT", "Claude", "Cursor", "Google Chrome", "Microsoft Edge", "Windsurf", "Firefox", "LM Studio"];
+        string[] names = ["ChatGPT", "Claude", "Codex", "Google Chrome", "Microsoft Edge", "Windsurf", "Firefox", "LM Studio"];
         foreach (string name in names)
         {
             string path = @"C:\Applications\" + name + @"\" + name.Replace(" ", "") + ".exe";
-            _targets.Add(new() { Id = "preview:" + name, Name = name, Kind = LaunchKind.DirectExe,
+            _targets.Add(new() { Id = "preview:" + name, Name = name, CatalogId = EgressController.Launcher.Discovery.SupportedApplicationCatalog.ForName(name)?.Id, Kind = LaunchKind.DirectExe,
                 Command = path, CanonicalExecutable = path, OwnedExecutables = [path, Path.Combine(Path.GetDirectoryName(path)!, "tools", "helper.exe")],
                 OwnedRoots = [Path.GetDirectoryName(path)!], Source = "UI 预览数据" });
+        }
+        foreach (string brand in new[] { "claude", "codex" })
+        {
+            string path = @"C:\Users\Demo\.local\bin\" + brand + ".exe";
+            _targets.Add(new() { Id = "cli:" + brand, SavedDiscoveryKey = "cli:" + path, Name = (brand == "claude" ? "Claude" : "Codex") + " CLI",
+                CatalogId = brand, Kind = LaunchKind.CliNative, Command = path, CanonicalExecutable = path, OwnedExecutables = [path], OwnedRoots = [], IconPath = brand, Source = "Windows CLI" });
         }
         Profile = Profile with { Applications = _targets.Take(3).Select(target => new EgressApplicationSelection
         { DiscoveryKey = target.DiscoveryKey, DisplayName = target.Name, ExecutablePaths = target.OwnedExecutables,
@@ -66,8 +73,8 @@ public sealed class PreviewController : IAppController
                 SourceIp = "172.19.0.1", SourcePort = (51000 + index).ToString(), Network = "tcp", Type = "TUN", DnsMode = "normal",
                 StartedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-index - 1), LastSeenAtUtc = DateTimeOffset.UtcNow,
                 Upload = (index + 1) * 11400, Download = (index + 1) * 234500, UploadRate = 4600 + index * 1700,
-                DownloadRate = 12800 + index * 2100, Outbound = index % 3 == 0 ? "ESIM-家宽" : "默认代理",
-                Chains = [index % 3 == 0 ? "ESIM-家宽" : "默认代理"], Rule = "ProcessPath", RulePayload = _targets[index % 4].Name,
+                DownloadRate = 12800 + index * 2100, Outbound = index % 3 == 0 ? "adapter-" + HomeId.ToString("N") : "upstream-7890",
+                Chains = [index % 3 == 0 ? "adapter-" + HomeId.ToString("N") : "upstream-7890"], Rule = "ProcessPath", RulePayload = _targets[index % 4].Name,
             }));
             _events.Add(new(DateTimeOffset.UtcNow.AddMinutes(-18), "ChatGPT", _targets[0].CanonicalExecutable!, 14200,
                 true, "启动保护：TUN 尚未接管", null));
@@ -80,7 +87,9 @@ public sealed class PreviewController : IAppController
         if (scenario is "starting" or "failed") { ConnectionHistory.ApplySnapshot([]); ConnectionHistory.ClearClosed(); }
         if (scenario == "failed") Diagnostics.Report("TUN 启动", "tun.conflict", LastTunFailure);
         if (scenario == "starting") Diagnostics.Info("TUN 启动", "正在准备内核，所选应用暂不能运行");
+        Visuals.Update(_targets, Profile);
     }
+    public Services.ApplicationVisualCatalog Visuals { get; }
     public bool IsPreview => true;
     public bool IsTunRunning => _scenario is not ("starting" or "failed");
     public bool IsUpdatingProfile => false;
@@ -122,6 +131,7 @@ public sealed class PreviewController : IAppController
     public IReadOnlyList<string> SelectedRuleNames => Profile.RuleSets.Select(item => item.Name).ToArray();
     public IReadOnlyList<string> ManualDomains => Profile.Domains.Select(item => item.Name).ToArray();
     public IReadOnlyList<NetworkAdapterInfo> RefreshAdapters() => Adapters;
+    public IReadOnlyList<string> DiscoveryNotices => [];
     public IReadOnlyList<LaunchTarget> ScanTargets() => _targets;
     private Task<ControllerOperationResult> Save(EgressProfileDocument value) { Profile = value.NormalizeAndValidate(); LastMessage = "预览配置已更新"; return Task.FromResult(ControllerOperationResult.Success()); }
     public Task<ControllerOperationResult> SetAdapterRolesAsync(string? directId, string? proxyId) => Save(Profile.SetAdapterRoles(directId, proxyId));
@@ -130,10 +140,12 @@ public sealed class PreviewController : IAppController
     {
         var next = Profile.Applications.ToDictionary(item => item.DiscoveryKey);
         foreach (var target in targets)
-            if (!enabled) next.Remove(target.DiscoveryKey);
-            else next[target.DiscoveryKey] = EgressController.Launcher.Discovery.ApplicationInventorySnapshot.Create([target])
-                .CaptureSelection(target.DiscoveryKey, route ?? routes?.GetValueOrDefault(target.DiscoveryKey) ?? EgressRouteTarget.DefaultAdapter,
-                    next.GetValueOrDefault(target.DiscoveryKey), target.OwnedRoots);
+        {
+            var previous = next.Values.Where(item => target.SelectionKeys.Contains(item.DiscoveryKey)).ToArray();
+            foreach (string alias in target.SelectionKeys) next.Remove(alias);
+            if (enabled) next[target.DiscoveryKey] = EgressController.Launcher.Discovery.ApplicationCatalogProjection.Merge(target, previous,
+                route ?? routes?.GetValueOrDefault(target.DiscoveryKey) ?? EgressRouteTarget.DefaultAdapter);
+        }
         return Save(Profile with { Applications = next.Values.ToArray() });
     }
     public Task<ControllerOperationResult> SetRuleSetAsync(string name, bool enabled, EgressRouteTarget? route = null, CancellationToken cancellationToken = default)

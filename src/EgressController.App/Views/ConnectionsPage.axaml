@@ -1,4 +1,4 @@
-<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.ConnectionsPage" x:DataType="vm:MainViewModel">
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.Views.ConnectionsPage" x:DataType="vm:MainViewModel">
   <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="14">
     <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
       <TextBox Text="{Binding Connections.Query}" PlaceholderText="筛选应用、域名、IP 或出口"/>
@@ -20,7 +20,7 @@
     <Border Grid.Row="2" Classes="list-card">
       <Grid RowDefinitions="Auto,*">
         <Border Padding="15,12" Background="#F9FAFC" BorderBrush="#E8ECF3" BorderThickness="0,0,0,1">
-          <Grid ColumnDefinitions="18,1.3*,1.7*,108,88,88,75" ColumnSpacing="12">
+          <Grid ColumnDefinitions="18,1.3*,1.6*,140,76,76,68" ColumnSpacing="12">
             <TextBlock Grid.Column="1" Text="应用" Classes="muted"/>
             <TextBlock Grid.Column="2" Text="目标" Classes="muted"/>
             <TextBlock Grid.Column="3" Text="出口" Classes="muted"/>
@@ -33,11 +33,11 @@
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:ConnectionRowViewModel">
               <Border Padding="15,13" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="18,1.3*,1.7*,108,88,88,75" ColumnSpacing="12">
+                <Grid ColumnDefinitions="18,1.3*,1.6*,140,76,76,68" ColumnSpacing="12">
                   <Ellipse Width="7" Height="7" Classes="state-dot" Classes.active="{Binding IsCurrent}" VerticalAlignment="Center" Opacity="0.9" ToolTip.Tip="{Binding Status}"/>
-                  <TextBlock Grid.Column="1" Text="{Binding ProcessName}" FontWeight="Medium" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/>
+                  <Grid Grid.Column="1" ColumnDefinitions="26,*" ColumnSpacing="10"><ui:AppAvatar Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="25" Height="25"/><TextBlock Grid.Column="1" Text="{Binding Appearance.Name}" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/></Grid>
                   <TextBlock Grid.Column="2" Text="{Binding Target}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Target}"/>
-                  <TextBlock Grid.Column="3" Text="{Binding Route}" TextTrimming="CharacterEllipsis" Foreground="#5365A4"/>
+                  <TextBlock Grid.Column="3" Text="{Binding Route}" ToolTip.Tip="{Binding RoutePath}" TextTrimming="CharacterEllipsis" Foreground="#5365A4"/>
                   <TextBlock Grid.Column="4" Text="{Binding UploadText}" Classes="muted"/>
                   <TextBlock Grid.Column="5" Text="{Binding DownloadText}" Classes="muted"/>
                   <TextBlock Grid.Column="6" Text="{Binding Duration}" Classes="muted"/>
@@ -59,7 +59,7 @@
             <StackPanel Spacing="15">
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="5">
-                  <TextBlock Text="{Binding ProcessName}" Classes="section-title"/>
+                  <StackPanel Orientation="Horizontal" Spacing="10"><ui:AppAvatar Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="28" Height="28"/><TextBlock Text="{Binding Appearance.Name}" Classes="section-title" VerticalAlignment="Center"/></StackPanel>
                   <SelectableTextBlock Text="{Binding Target}" Foreground="#667184"/>
                 </StackPanel>
                 <Border Grid.Column="1" Classes="badge" VerticalAlignment="Top">
@@ -69,7 +69,7 @@
               <Grid ColumnDefinitions="*,*,*" ColumnSpacing="24">
                 <StackPanel Spacing="6">
                   <TextBlock Text="分流" Classes="muted"/>
-                  <SelectableTextBlock Text="{Binding RoutePath}"/>
+                  <SelectableTextBlock Text="{Binding RoutePath}" TextWrapping="Wrap"/>
                   <TextBlock Text="{Binding Reason}" Classes="muted" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="6">

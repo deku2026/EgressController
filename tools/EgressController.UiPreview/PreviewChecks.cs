@@ -23,7 +23,7 @@ internal static class PreviewChecks
         vm.Apps.Query = "";
         Complete(vm.Apps.ScanCommand.ExecuteAsync(null));
         Complete(vm.Apps.ClearAllCommand.ExecuteAsync(null)); Check(backend.Profile.Applications.Count == 0, "Clear applications");
-        Complete(vm.Apps.SelectAllCommand.ExecuteAsync(null)); Check(backend.Profile.Applications.Count == 8, "Select applications");
+        Complete(vm.Apps.SelectAllCommand.ExecuteAsync(null)); Check(backend.Profile.Applications.Count == 10, "Select applications");
 
         var ports = vm.Overview.Ports;
         ports.PortText = "not-a-port"; Complete(ports.AddCommand.ExecuteAsync(null));

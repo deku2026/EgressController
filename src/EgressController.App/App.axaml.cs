@@ -4,6 +4,8 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using EgressController.App.ViewModels;
+using EgressController.Presentation;
+using EgressController.Guardian;
 
 namespace EgressController.App;
 
@@ -12,8 +14,7 @@ public partial class App : Application
     public AppController Controller { get; private set; } = null!;
     internal static SingleInstanceGuard? InstanceGuard { get; set; }
 
-    private TrayIcon? _tray;
-    private TrayIcons? _trayIcons;
+    private WindowsTrayPresenter? _tray;
     private DispatcherTimer? _trayTimer;
     private readonly ApplicationExitCoordinator _exitCoordinator = new();
 
@@ -67,12 +68,12 @@ public partial class App : Application
             var window = new MainWindow { DataContext = new MainViewModel(Controller) };
             desktop.MainWindow = window;
             InstanceGuard?.StartActivationLoop(() => Dispatcher.UIThread.Post(() => ShowWindow(window)));
-            CreateTray(desktop, window);
+            try { CreateTray(desktop, window); }
+            catch (Exception error) { Controller.ReportFailure("托盘异常", "tray.initialize", error.Message, error); window.TrayAvailable = false; }
             desktop.Exit += (_, _) =>
             {
                 _trayTimer?.Stop();
                 _tray?.Dispose();
-                _trayIcons?.Clear();
                 Controller.DisposeAsync().AsTask().GetAwaiter().GetResult();
             };
         }
@@ -82,41 +83,23 @@ public partial class App : Application
 
     private void CreateTray(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window)
     {
-        var menu = new NativeMenu();
-        var open = new NativeMenuItem("打开 EgressController");
-        open.Click += (_, _) => ShowWindow(window);
-        var exit = new NativeMenuItem("退出主程序（独立守护继续运行）");
-        exit.Click += async (_, _) =>
+        bool exiting = false;
+        async Task Exit()
         {
-            exit.IsEnabled = false;
+            if (exiting) return; exiting = true;
             bool completed = await _exitCoordinator.ExitAsync(
-                async () => await Controller.ShutdownAsync(),
-                window.AllowApplicationExit,
-                () => desktop.Shutdown());
-            if (!completed) { exit.IsEnabled = true; ShowWindow(window); }
-        };
-        menu.Items.Add(open);
-        menu.Items.Add(new NativeMenuItemSeparator());
-        menu.Items.Add(exit);
-
-        using var iconStream = new MemoryStream(Convert.FromBase64String(
-            "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABJSURBVDhPYxBSMPlPCWZAFyAVww1g2P+fJEx7A/b/xwJek2jAgweYNtPXAHSw/yqJBlDsgoE3AAN8/f/fg1gDCGHqG0AuptgAABRIRg3R7e/MAAAAAElFTkSuQmCC"));
-        _tray = new TrayIcon
-        {
-            Icon = new WindowIcon(iconStream),
-            Menu = menu,
-            ToolTipText = "EgressController · TUN 已停止",
-            IsVisible = true,
-        };
-        _trayIcons = new TrayIcons { _tray };
-        TrayIcon.SetIcons(this, _trayIcons);
-
+                async () => await Controller.ShutdownAsync(), window.AllowApplicationExit, () => desktop.Shutdown());
+            if (!completed) { exiting = false; ShowWindow(window); }
+        }
+        window.ExitRequested = Exit;
+        byte[] artwork = GuardianIcon.CreateBytes(GuardVisualState.Healthy, application: true);
+        _tray = new WindowsTrayPresenter("EgressController.Main." + Environment.UserName, "EgressController", artwork,
+            "EgressController", () => ShowWindow(window), () => [
+                new("打开 EgressController", null, "open", () => { ShowWindow(window); return Task.CompletedTask; }),
+                new("退出主程序", "独立守护继续运行", "power", Exit, () => !exiting, true)]);
+        _tray.Failed += error => Controller.ReportFailure("托盘异常", "tray.surface", error.Message, error);
         _trayTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _trayTimer.Tick += (_, _) =>
-        {
-            if (_tray is not null)
-                _tray.ToolTipText = "EgressController · TUN " + Controller.TunStatus;
-        };
+        _trayTimer.Tick += (_, _) => _tray.Update(artwork, "EgressController · TUN " + Controller.TunStatus);
         _trayTimer.Start();
     }
 
