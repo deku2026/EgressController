@@ -99,7 +99,7 @@ public sealed partial class SingBoxCli : ISingBoxCli
                 StandardError = await stderr.ConfigureAwait(false),
             };
         }
-        catch
+        catch (Exception error)
         {
             try
             {
@@ -107,6 +107,8 @@ public sealed partial class SingBoxCli : ISingBoxCli
                     process.Kill(entireProcessTree: true);
             }
             catch { }
+            if (error is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+                throw new TimeoutException($"sing-box {string.Join(' ', arguments)} 检查超时（{_timeout.TotalSeconds:0} 秒）：{executablePath}", error);
             throw;
         }
     }

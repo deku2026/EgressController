@@ -118,6 +118,41 @@ public sealed class SingRuleCatalogTests
         }
     }
 
+    public static IEnumerable<object[]> BootstrapCases()
+    {
+        foreach (int cache in Enumerable.Range(0, 3))
+        foreach (bool online in new[] { true, false })
+        foreach (bool cancelled in new[] { true, false }) yield return [cache, online, cancelled];
+    }
+    [Theory, MemberData(nameof(BootstrapCases))]
+    public async Task Startup_catalog_matrix(int cache, bool online, bool cancelled)
+    {
+        string root = NewRoot();
+        try
+        {
+            var first = new RuleCatalogService(new FakeFetcher(BuildCatalogTree), root);
+            Assert.True((await first.UpdateAsync(TestContext.Current.CancellationToken)).Succeeded);
+            if (cache == 1) File.Delete(first.CatalogPath);
+            if (cache == 2) File.WriteAllText(first.CatalogPath, "corrupt-json");
+            int requests = 0;
+            var service = new RuleCatalogService(new FakeFetcher(uri => { requests++; return online ? BuildCatalogTree(uri) : new(false, 503, null); }), root);
+            using var token = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            if (cancelled) token.Cancel();
+            if (cancelled)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.EnsureAvailableAsync(token.Token));
+                Assert.Equal(0, requests);
+            }
+            else
+            {
+                var result = await service.EnsureAvailableAsync(token.Token);
+                Assert.Equal(cache == 0 || online, result.Succeeded);
+                Assert.Equal(cache == 0, requests == 0);
+            }
+        }
+        finally { DeleteRoot(root); }
+    }
+
     private static RemoteFetchResult BuildCatalogTree(Uri uri)
     {
         string path = uri.AbsolutePath;

@@ -169,13 +169,14 @@ public sealed class RuleArtifactStore
         {
             result = await _fetcher.FetchAsync(uri, MaxArtifactBytes, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException error)
         {
-            throw;
+            return RuleArtifactResult.Failure($"SRS {entry.Name} 下载超时（{uri.Host}）：{error.GetBaseException().Message}");
         }
         catch (Exception ex)
         {
-            return RuleArtifactResult.Failure("SRS 下载异常：" + ex.Message);
+            return RuleArtifactResult.Failure($"SRS {entry.Name} 下载异常：" + ex.Message);
         }
 
         if (!result.Succeeded)

@@ -140,3 +140,25 @@ TUN or a real notification-area integration test.
 ![主程序通知区菜单](images/tray-main.png)
 
 ![守护通知区菜单](images/tray-guard.png)
+
+## Startup recovery follow-up
+
+The installed companion now synchronizes its UI payload from the replaced release directory on main
+startup, so the shared menu design reaches existing installations as well. Its file name and install
+location remain stable; the protection service is not stopped to update the UI. The menu's visible card,
+rather than transparent shadow padding, is constrained to the owning monitor's work area. Pointer opening
+is quiet; keyboard focus remains explicit. Mock taskbar scenes cover 100%, 150% and 200% scaling.
+
+The network page shows startup resource progress and the actual default SOCKS5 endpoint. A download
+failure names the resource and route. A fresh attempt displays its current progress while retaining
+previous failures in event history. The preview's unavailable states do not seed fictional successful
+TUN/network events.
+
+![独立守护小托盘定位（服务停止）](images/tray-placement.png)
+
+![启动资源故障](images/startup-resource-failure.png)
+
+The final placement scenes use **GuardTrayCommands**, the same command factory used by the real
+independent guardian tray. Capture service-stopped and service-running states at all three DPI scales,
+including the correct shield icon and start/stop enablement. Main-application tray examples are not
+accepted as evidence for the companion-specific issue.

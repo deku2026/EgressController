@@ -41,7 +41,8 @@ internal static class Program
         RenderChecks.Buttons(directory);
         RenderChecks.GuardIcons(directory);
         RenderChecks.TrayMenus(directory);
-        foreach (var scenario in new[] { "ready", "offline", "starting", "empty", "telemetry", "failed" })
+        RenderChecks.TrayPlacement(directory);
+        foreach (var scenario in new[] { "ready", "offline", "starting", "empty", "telemetry", "failed", "download-timeout" })
         {
             var controller = new PreviewController(scenario, PreviewIcons.Load);
             var vm = new MainViewModel(controller);

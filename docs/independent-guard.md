@@ -143,3 +143,12 @@ service installation, boot, tray rendering or live TUN test; those are intention
 Termination is reactive. Scheduling delays, startup before the service runs, inaccessible processes,
 service failure or explicit user disablement remain protection gaps; no zero-packet guarantee or kernel
 firewall claim is made. Unselected applications are outside this mechanism.
+
+## Companion payload updates
+
+The release directory and the installed tray are separate copies. Main startup compares their complete
+file-content digests. A changed tray is staged and rehashed before stopping only the exact installed
+tray instances (full path plus creation-time checks). The directory is then replaced at the same path;
+failed publication attempts restore the previous directory. Guard service state, saved policies,
+autostart preference and the manual-stop marker are not changed by this UI update. Service protocol
+upgrades remain an explicit service reinstall; compatible UI updates do not interrupt protection.

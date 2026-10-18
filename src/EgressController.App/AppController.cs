@@ -74,7 +74,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private readonly Dictionary<string, ConnectionRateSample> _connectionRateSamples = new(StringComparer.Ordinal);
 
     private HttpRemoteFetcher _remoteFetcher = null!;
-    private HttpClient _releaseHttpClient = null!;
+    private DefaultProxyDownloadTransport _downloadTransport = null!;
+    public string DownloadStatus => _downloadTransport.Status;
     private RuleCatalogService _catalogService = null!;
     private RuleArtifactStore _artifactStore = null!;
     private SingBoxCoreManager _coreManager = null!;
@@ -127,7 +128,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             () => { if (!_shuttingDown) _guardTransition = false; });
         _singBox.Output += OnSingBoxOutput;
         _singBox.FailureReported += (stage, error) => Diagnostics.Report("内核生命周期 · " + stage,
-            error is SingBoxServiceException service ? service.Code : "core." + stage, error.Message, error);
+            SingBoxFailure.Code(error, "core." + stage), error.Message, error);
         InitializeProtection();
         InitializeGuardian();
     }
@@ -154,7 +155,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     public string TunStatus => _singBox.Status.State switch
     {
         SingBoxServiceState.Running => "运行中",
-        SingBoxServiceState.Preparing or SingBoxServiceState.Applying or SingBoxServiceState.Starting => "应用中…",
+        SingBoxServiceState.Preparing => "准备启动资源",
+        SingBoxServiceState.Applying or SingBoxServiceState.Starting => "应用中…",
         SingBoxServiceState.Stopping => "停止中…",
         SingBoxServiceState.Failed => "失败",
         _ => "已停止",
@@ -494,6 +496,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             SingBoxApplyResult result = await _singBox.StartAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
+                if (result.ErrorCode == "operation.cancelled") cancellationToken.ThrowIfCancellationRequested();
                 if (IsTunRunning)
                 {
                     StartDiagnostics(LoadControllerEndpoint());
@@ -645,7 +648,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         try { await _singBox.DisposeAsync().ConfigureAwait(false); }
         catch (Exception error) { ReportFailure("退出清理", "core.dispose", error.Message, error); }
         _remoteFetcher.Dispose();
-        _releaseHttpClient.Dispose();
         Visuals.Dispose();
         Diagnostics.Info("退出", "EgressController stopped.");
         _lifetimeCts.Dispose();
@@ -658,6 +660,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private async Task<SingBoxRuntimeCandidate> PrepareRuntimeAsync(EgressProfileDocument desiredProfile, CancellationToken cancellationToken)
     {
         EgressProfileDocument profile = desiredProfile.NormalizeAndValidate();
+        using var downloadScope = _downloadTransport.UseDefaultPort(profile.UpstreamPorts.Contains(profile.UpstreamPort) ? profile.UpstreamPort : null);
 
         RefreshAdapters();
         // Only migrate persisted intent. Interface discovery must never choose either role.
@@ -711,14 +714,15 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     {
         if (profile.RuleSets.Count == 0)
             return Array.Empty<SingBoxRuleSetInput>();
-        SingBoxRuleCatalog catalog = Catalog
-            ?? throw new ControllerPreparationException("rules.catalog", "已选择 SRS，但本地没有可用的 sing catalog。");
+        var available = await _catalogService.EnsureAvailableAsync(cancellationToken).ConfigureAwait(false);
+        SingBoxRuleCatalog catalog = available.Catalog
+            ?? throw new ControllerPreparationException("rules.catalog", "无法准备所选规则的目录：" + available.Error);
         RuleArtifactBatchResult result = await _artifactStore.EnsureManyAsync(
             catalog.Snapshot,
             profile.RuleSets.Select(route => route.Name),
             cancellationToken: cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded)
-            throw new ControllerPreparationException("rules.download", string.Join("；", result.Failures.Values));
+            throw new ControllerPreparationException("rules.download", string.Join("；", result.Failures.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => item.Value)));
         return profile.RuleSets.Select(route => route.Name)
             .Select(name => new SingBoxRuleSetInput(name, result.Paths[name]))
             .ToArray();
@@ -863,17 +867,15 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private void ConfigureControlPlane()
     {
         _remoteFetcher?.Dispose();
-        _releaseHttpClient?.Dispose();
-        _releaseHttpClient = new HttpClient(new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(8) })
-            { Timeout = TimeSpan.FromSeconds(30) };
-        _releaseHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("EgressController/1.0");
-        _remoteFetcher = new HttpRemoteFetcher(_releaseHttpClient);
+        _downloadTransport = new(() => { var current = Volatile.Read(ref _profile); return current.UpstreamPorts.Contains(current.UpstreamPort) ? current.UpstreamPort : null; }, lifetime: _lifetimeCts.Token);
+        _downloadTransport.Activity += message => { if (_singBox?.Status.State == SingBoxServiceState.Preparing) Diagnostics.Info("启动资源下载", message); };
+        _remoteFetcher = new HttpRemoteFetcher(_downloadTransport);
         string rulesDirectory = Path.Combine(_rulesetRoot, "rules");
         _catalogService = new RuleCatalogService(_remoteFetcher, rulesDirectory);
         _artifactStore = new RuleArtifactStore(rulesDirectory, _remoteFetcher);
         _coreManager = new SingBoxCoreManager(
             _rulesetRoot,
-            new SingBoxReleaseClient(_releaseHttpClient),
+            new SingBoxReleaseClient(_downloadTransport),
             new SingBoxCli(),
             _stateStore);
         LoadCachedCatalog();

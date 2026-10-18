@@ -186,7 +186,7 @@ public sealed partial class AppController
                     if (error is not null) _singBox.ReportTakeoverFailure(error, observed);
                 }
                 // Independent from the companion's main/TUN lease and tray badge.
-                var readiness = ProtectionReadiness.Evaluate(IsTunRunning, LastTunFailure.Length == 0 ? null : LastTunFailure,
+                var readiness = ProtectionReadiness.Evaluate(IsTunRunning, Services.TunStartupIssue.Current(_singBox.Status, DownloadStatus),
                     _profileApplied && !_routingDirty, _protectionError, _takeoverError, _networkHealth.Readiness);
                 SweepProtection(readiness);
                 if (_inventoryReady && _protectionError is null)

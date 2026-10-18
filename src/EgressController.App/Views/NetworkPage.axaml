@@ -1,6 +1,14 @@
 <local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.NetworkPage" x:DataType="vm:MainViewModel">
   <ScrollViewer>
     <StackPanel Spacing="18">
+      <Border Classes="card" IsVisible="{Binding Overview.NeedsStartupResources}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="启动资源" Classes="section-title"/>
+          <TextBlock Text="{Binding Overview.DownloadRoute}" Classes="muted"/>
+          <SelectableTextBlock Text="{Binding Overview.DownloadStatus}" TextWrapping="Wrap"/>
+          <TextBlock Text="优先使用已校验缓存。下载失败时保持保护，自动重试。" Classes="muted"/>
+        </StackPanel>
+      </Border>
       <Grid ColumnDefinitions="*,*" ColumnSpacing="18">
         <Border Classes="card">
           <StackPanel Spacing="18">

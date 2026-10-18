@@ -44,12 +44,31 @@ public sealed class WindowsGuardPlatform(GuardPaths paths, string sourceDirector
     public void StartTray()
     {
         RuntimeSafety.RequireLiveOperations();
+        using var mutex = new Mutex(false, @"Local\EgressController.TrayUpdate." + paths.ServiceName);
+        bool acquired;
+        try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(30)); } catch (AbandonedMutexException) { acquired = true; }
+        if (!acquired) throw new TimeoutException("正在同步守护托盘，请稍后重试。");
+        try
+        {
+            try { GuardTrayUpdater.EnsureCurrent(new WindowsGuardTrayUpdate(paths, sourceDirectory)); }
+            catch
+            {
+                // If a staged update failed after stopping the old UI, relaunch the restored UI.
+                if (File.Exists(paths.TrayExecutable)) LaunchTray();
+                throw;
+            }
+            LaunchTray();
+        }
+        finally { mutex.ReleaseMutex(); }
+    }
+    private void LaunchTray()
+    {
         if (!File.Exists(paths.TrayExecutable)) throw new FileNotFoundException("守护托盘程序缺失。");
         var info = new ProcessStartInfo(paths.TrayExecutable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
         info.ArgumentList.Add("--owner"); info.ArgumentList.Add(paths.OwnerSid);
         using var process = System.Diagnostics.Process.Start(info);
     }
-    private static void SecureDirectory(string directory, string owner)
+    internal static void SecureDirectory(string directory, string owner)
     {
         // Reject junctions/symlinks before any elevated copy/ACL change.
         for (var parent = new DirectoryInfo(directory); parent is not null; parent = parent.Parent)
@@ -64,7 +83,7 @@ public sealed class WindowsGuardPlatform(GuardPaths paths, string sourceDirector
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(directory).SetAccessControl(security);
     }
-    private static void CopyPayload(string source, string destination, string owner)
+    internal static void CopyPayload(string source, string destination, string owner)
     {
         if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
             throw new IOException("守护发布目录不能是重解析点。");

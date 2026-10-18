@@ -116,6 +116,29 @@ public sealed class SingBoxCoreManagerTests : IDisposable
         Assert.Equal(digest, candidate.Sha256);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Startup_uses_verified_cache_before_any_release_request(bool lastGoodOnly)
+    {
+        string executable = Path.Combine(_directory, "core", "1.13.19", "sing-box.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "cached-core");
+        var state = new SingBoxStateStore(_directory);
+        var pointer = new SingBoxCorePointer { Version = "1.13.19", ExecutablePath = executable,
+            Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(executable))), VerifiedAtUtc = DateTimeOffset.UtcNow };
+        if (lastGoodOnly) state.SaveLastGood(pointer); else { state.SaveCurrent(pointer); File.WriteAllText(state.LastGoodPath, "unused-corrupt-fallback"); }
+        var manager = new SingBoxCoreManager(_directory, new NoNetworkRelease(), new FakeCli(), state);
+        var candidate = await manager.PrepareAsync(new(), TestContext.Current.CancellationToken);
+        Assert.Equal(executable, candidate.ExecutablePath);
+        if (!lastGoodOnly) Assert.Equal("unused-corrupt-fallback", File.ReadAllText(state.LastGoodPath));
+    }
+    private sealed class NoNetworkRelease : ISingBoxReleaseClient
+    {
+        public Task<SingBoxRelease> GetLatestStableAsync(CancellationToken token = default) => throw new InvalidOperationException("Startup must not request metadata");
+        public Task DownloadAsync(SingBoxReleaseAsset asset, Stream destination, CancellationToken token = default) => throw new InvalidOperationException("Startup must not download");
+    }
+
     private static byte[] MakeZip(params (string Path, string Content)[] entries)
     {
         using var output = new MemoryStream();

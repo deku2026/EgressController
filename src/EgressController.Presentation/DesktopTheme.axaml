@@ -257,6 +257,6 @@
   <Style Selector="MenuFlyoutPresenter"><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="6"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Background" Value="White"/></Style>
   <Style Selector="MenuItem"><Setter Property="CornerRadius" Value="7"/><Setter Property="MinHeight" Value="36"/></Style>
   <Style Selector="ToolTip"><Setter Property="CornerRadius" Value="8"/><Setter Property="MaxWidth" Value="520"/></Style>
-  <Style Selector="Button.menu-action:disabled"><Setter Property="Opacity" Value="0.45"/></Style>
+  <Style Selector="Button.menu-action:disabled"><Setter Property="Foreground" Value="#7A8495"/><Setter Property="Opacity" Value="0.65"/></Style>
   <Style Selector="TextBlock.metric"><Setter Property="FontFeatures" Value="tnum"/></Style>
 </Styles>

@@ -25,7 +25,9 @@ Windows 双网卡分流与应用保护工具。原生 Avalonia 界面，主程�
 首次启动默认安装守护服务并启用开机启动；小托盘在登录后出现。主程序与小托盘均可管理服务、关闭自启、停止或卸载守护。
 关闭主窗口会隐藏到托盘；明确退出主程序后，独立守护继续工作。
 
-**升级旧守护组件**：退出旧小托盘，在新版主程序中卸载后重新安装守护服务，再重新打开主程序。保护名单会保留。新版使用协议 v2，旧服务会显示明确的版本不匹配提示。
+**替换发布包后**：重新打开主程序会自动校验并同步已安装的小托盘，保持原文件名和安装路径，守护服务继续运行。服务协议不兼容时，仍需在主程序中卸载后重新安装服务；保护名单会保留。
+
+规则目录、SRS 和内核下载统一使用当前默认 SOCKS5 端口。启动优先使用已校验的本地内核和规则缓存；资源缺失时自动下载，失败会显示具体资源、端口和原因。
 
 ## 保护规则
 
@@ -57,6 +59,6 @@ dotnet run --project tools/EgressController.UiPreview -c Release -- --screenshot
 
 预览工具不会初始化生产控制器、TUN、服务、自启项或真实进程控制。CI 仅执行 mock 测试，并提供界面截图与发布包。
 
-[Windows 应用与界面](docs/windows-desktop.md) · [需求复核](docs/requirements-audit.md) · [界面与架构](docs/desktop-design.md) · [应用保护](docs/process-protection.md) · [独立守护](docs/independent-guard.md) · [日志与存储](docs/diagnostics.md)
+[启动恢复复核](docs/startup-recovery-review.md) · [Windows 应用与界面](docs/windows-desktop.md) · [需求复核](docs/requirements-audit.md) · [界面与架构](docs/desktop-design.md) · [应用保护](docs/process-protection.md) · [独立守护](docs/independent-guard.md) · [日志与存储](docs/diagnostics.md)
 
 [MIT License](LICENSE)
