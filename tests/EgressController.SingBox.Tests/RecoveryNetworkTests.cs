@@ -28,7 +28,7 @@ public sealed class RecoveryNetworkTests
     }
 
     [Fact]
-    public async Task Recovery_download_uses_its_supplied_transport_without_requiring_a_socks_listener()
+    public async Task Injected_mock_transport_enforces_size_without_external_network()
     {
         using var http = new HttpClient(new StubHandler("core-bytes"));
         using var fetcher = new HttpRemoteFetcher(http);

@@ -8,4 +8,5 @@
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
   </ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="EgressController.Guardian.Tests" /></ItemGroup>
 </Project>

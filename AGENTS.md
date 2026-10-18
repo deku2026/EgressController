@@ -24,6 +24,15 @@
 - TUN lifecycle changes require an explicit configuration change affecting the generated runtime or a confirmed core/TUN failure. Record the concrete cause before changing the core.
 - Diagnostic/file logging failures must not change the protection verdict.
 
+## Startup resources and companion updates
+
+- Catalog, SRS, release metadata and core ZIP downloads must use DefaultProxyDownloadTransport and the selected default SOCKS5 port. Never add a system/direct HTTP download client or silently fall back to an adapter.
+- Pending profile preparation uses that profile's port through a scoped snapshot; concurrent catalog requests keep the saved profile's port. Do not dispose another request's client or cancellation source.
+- Use validated local core/rule caches before remote requests. Recover missing/corrupt catalog through the same proxy path. Distinguish caller cancellation from transport/CLI timeout and retain resource/port/stage in errors.
+- A new preparation shows current progress; prior failures belong in history. Only the operation that owns its cancellation source disposes it; obsolete work cannot overwrite a replacement's state.
+- The installed tray is a separate copied payload. On main startup, compare bytes, stage/verify, replace only exact installed tray instances, and preserve rollback. Do not stop the protection service or reset user stop/startup preferences to update its UI.
+- Keep mock combination matrices for startup states, caches, selected ports, cancellation/recovery, and separate guardian/network verdicts. Use in-memory state/resource adapters for large Cartesian matrices; validate real storage integrity, atomic publication and rollback in focused boundary tests. Never weaken production durability to speed up tests.
+
 ## Diagnostics
 
 - The default file log is a bounded protection/lifecycle event log: start, stop, restart and their causes; protection transitions; process termination results; inability to enforce protection.

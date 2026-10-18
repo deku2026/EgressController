@@ -12,16 +12,20 @@ public sealed record TrayCommand(string Title, string? Detail, string Icon, Func
 
 public static class TrayMenuPlacement
 {
+    public const double ShadowPadding = 12;
     public static PixelPoint Place(NotificationAnchor anchor, Size logicalSize)
     {
         double scale = double.IsFinite(anchor.Scale) && anchor.Scale > 0 ? anchor.Scale : 1;
         int width = (int)Math.Ceiling(logicalSize.Width * scale), height = (int)Math.Ceiling(logicalSize.Height * scale);
-        int gap = (int)Math.Round(5 * scale);
-        int x = anchor.Icon.Right - width + (int)Math.Round(16 * scale);
-        int y = anchor.Icon.Top - height - gap;
-        if (y < anchor.WorkArea.Top) y = anchor.Icon.Bottom + gap;
-        x = Math.Clamp(x, anchor.WorkArea.Left, Math.Max(anchor.WorkArea.Left, anchor.WorkArea.Right - width));
-        y = Math.Clamp(y, anchor.WorkArea.Top, Math.Max(anchor.WorkArea.Top, anchor.WorkArea.Bottom - height));
+        int gap = (int)Math.Round(6 * scale);
+        int shadow = (int)Math.Round(ShadowPadding * scale);
+        int x = anchor.Icon.Right - width + shadow;
+        int y = anchor.Icon.Top - height + shadow - gap;
+        if (y + shadow < anchor.WorkArea.Top) y = anchor.Icon.Bottom - shadow + gap;
+        // Constrain the visible card, not its transparent shadow padding. Clamping the
+        // entire HWND pushes the card away from the clicked icon on a bottom taskbar.
+        x = Math.Clamp(x, anchor.WorkArea.Left - shadow, Math.Max(anchor.WorkArea.Left - shadow, anchor.WorkArea.Right - width + shadow));
+        y = Math.Clamp(y, anchor.WorkArea.Top - shadow, Math.Max(anchor.WorkArea.Top - shadow, anchor.WorkArea.Bottom - height + shadow));
         return new(x, y);
     }
 }
@@ -38,8 +42,8 @@ public sealed class TrayMenuWindow : Window
         ShowInTaskbar = false; Topmost = true; ShowActivated = true;
         TransparencyLevelHint = [WindowTransparencyLevel.Transparent]; Background = Brushes.Transparent;
         SizeToContent = SizeToContent.WidthAndHeight;
-        var panel = new StackPanel { Spacing = 3 };
-        panel.Children.Add(new TextBlock { Text = title, FontSize = 12, Foreground = new SolidColorBrush(Color.Parse("#697386")), Margin = new Thickness(12, 5, 12, 10) });
+        var panel = new StackPanel { Spacing = 2 };
+        panel.Children.Add(new TextBlock { Text = title, FontSize = 12, Foreground = new SolidColorBrush(Color.Parse("#697386")), Margin = new Thickness(12, 6, 12, 8) });
         foreach (var item in commands)
         {
             if (item.Danger) panel.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.Parse("#E5E8EF")), Margin = new Thickness(10, 5) });
@@ -51,17 +55,17 @@ public sealed class TrayMenuWindow : Window
             Grid.SetColumn(labels, 1); row.Children.Add(labels);
             var button = new Button { Content = row, HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, IsEnabled = item.Enabled?.Invoke() != false,
-                Padding = new Thickness(12, 10), MinHeight = 42 };
+                Padding = new Thickness(12, 9), MinHeight = 40 };
             Avalonia.Automation.AutomationProperties.SetName(button, item.Title);
             button.Classes.Add("menu-action"); if (item.Danger) button.Classes.Add("menu-danger");
             button.Click += async (_, _) => { Close(); try { await item.Execute(); } catch (Exception error) { ActionFailed?.Invoke(error); } };
             panel.Children.Add(button); _buttons.Add(button);
         }
-        Content = new Border { Margin = new Thickness(16), Padding = new Thickness(7), Width = 288,
+        Content = new Border { Margin = new Thickness(TrayMenuPlacement.ShadowPadding), Padding = new Thickness(7), Width = 280,
             CornerRadius = new CornerRadius(13), Background = Brushes.White,
-            BoxShadow = BoxShadows.Parse("0 7 24 0 #320E1830"), Child = panel };
+            BoxShadow = BoxShadows.Parse("0 5 18 0 #300E1830"), Child = panel };
         Deactivated += (_, _) => Close();
-        Opened += (_, _) => _buttons.FirstOrDefault(button => button.IsEnabled)?.Focus(NavigationMethod.Tab);
+        Opened += (_, _) => _buttons.FirstOrDefault(button => button.IsEnabled)?.Focus(NavigationMethod.Pointer);
         KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape) { Close(); e.Handled = true; }

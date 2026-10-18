@@ -188,6 +188,72 @@ public sealed class SingBoxServiceTests : IDisposable
         Assert.Equal(1, guards);
     }
 
+    [Fact]
+    public async Task Cleared_TUN_conflict_and_transient_proxy_failure_recover_without_environment_change()
+    {
+        var host = new FakeHost();
+        bool conflict = true;
+        int downloads = 0;
+        var transport = new EgressController.Transport.Upstream.DefaultProxyDownloadTransport(() => 7890,
+            port => { Assert.Equal(7890, port); return new HttpClient(new RecoveryHandler(() => ++downloads == 1)); });
+        using var fetcher = new EgressController.Transport.Upstream.HttpRemoteFetcher(transport);
+        await using var service = new SingBoxService(host, new SingBoxStateStore(_root));
+        async Task<SingBoxRuntimeCandidate> Prepare(CancellationToken token)
+        {
+            if (conflict) throw new SingBoxServiceException("tun.conflict", "Mihomo TUN 已启用");
+            try { await fetcher.FetchAsync(new("https://mock.invalid/openai.srs"), 1024, token); }
+            catch (EgressController.Transport.Upstream.DownloadException error) { throw new SingBoxServiceException(error.Code, error.Message); }
+            return Candidate("recovered");
+        }
+        Assert.Equal("tun.conflict", (await service.StartAsync(Prepare, TestContext.Current.CancellationToken)).ErrorCode);
+        Assert.Equal(0, downloads); Assert.Empty(host.Started);
+        conflict = false;
+        var failed = await service.StartAsync(Prepare, TestContext.Current.CancellationToken);
+        Assert.Equal("download.timeout", failed.ErrorCode); Assert.Contains("7890", failed.ErrorMessage);
+        Assert.Empty(host.Started);
+        Assert.True((await service.StartAsync(Prepare, TestContext.Current.CancellationToken)).Succeeded);
+        Assert.Equal(SingBoxServiceState.Running, service.Status.State);
+        Assert.Single(host.Started); Assert.Equal(2, downloads);
+    }
+
+    [Fact]
+    public async Task A_superseded_preparation_cannot_dispose_or_fail_the_new_operation()
+    {
+        var host = new FakeHost();
+        await using var service = new SingBoxService(host, new SingBoxStateStore(_root));
+        var oldResult = new TaskCompletionSource<SingBoxRuntimeCandidate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var old = service.StartAsync(_ => oldResult.Task, TestContext.Current.CancellationToken);
+        Assert.True((await service.StartAsync(_ => Task.FromResult(Candidate("new")), TestContext.Current.CancellationToken)).Succeeded);
+        oldResult.SetException(new IOException("late failure from obsolete download"));
+        Assert.Equal("operation.cancelled", (await old).ErrorCode);
+        Assert.Equal(SingBoxServiceState.Running, service.Status.State);
+        Assert.Null(service.LastFailure); Assert.Single(host.Started);
+    }
+
+    [Fact]
+    public async Task Failure_while_entering_preparation_does_not_leave_a_disposed_operation_for_the_next_attempt()
+    {
+        var host = new FakeHost();
+        await using var service = new SingBoxService(host, new SingBoxStateStore(_root));
+        bool fail = true;
+        service.StatusChanged += status =>
+        {
+            if (status.State == SingBoxServiceState.Preparing && fail) { fail = false; throw new IOException("mock preparation observer failed"); }
+        };
+        Assert.False((await service.StartAsync(_ => Task.FromResult(Candidate("first")), TestContext.Current.CancellationToken)).Succeeded);
+        Assert.True((await service.StartAsync(_ => Task.FromResult(Candidate("retry")), TestContext.Current.CancellationToken)).Succeeded);
+        Assert.Single(host.Started);
+    }
+
+    private sealed class RecoveryHandler(Func<bool> fails) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            if (fails()) throw new TaskCanceledException("connect timeout", new TimeoutException("ConnectTimeout"));
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("mock-rule") });
+        }
+    }
+
     private static SingBoxRuntimeCandidate Candidate(string suffix)
         => new()
         {

@@ -27,7 +27,7 @@ public sealed record SingBoxPendingApply
     public required DateTimeOffset CreatedAtUtc { get; init; }
 }
 
-public sealed class SingBoxStateStore
+public sealed class SingBoxStateStore : ISingBoxRuntimeStateStore
 {
     public SingBoxStateStore(string baseDirectory)
     {

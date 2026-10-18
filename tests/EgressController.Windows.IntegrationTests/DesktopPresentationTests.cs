@@ -24,7 +24,7 @@ public sealed class DesktopPresentationTests
     {
         var anchor = new NotificationAnchor(new(-400, 1020, -376, 1044), new(-1920, 0, 0, 1020), scale);
         var position = TrayMenuPlacement.Place(anchor, new Size(320, 180));
-        Assert.Equal(anchor.Icon.Top - (int)Math.Ceiling(180 * scale) - (int)Math.Round(5 * scale), position.Y);
+        Assert.Equal(anchor.Icon.Top - (int)Math.Ceiling(180 * scale) + (int)Math.Round(12 * scale) - (int)Math.Round(6 * scale), position.Y);
         Assert.InRange(position.X, -1920, -(int)Math.Ceiling(320 * scale));
     }
 
@@ -36,15 +36,25 @@ public sealed class DesktopPresentationTests
     public void Tray_menu_is_clamped_for_all_taskbar_edges(int x, int y)
     {
         var position = TrayMenuPlacement.Place(new(new(x, y, x + 20, y + 20), new(40, 40, 1880, 1040), 1.5), new Size(320, 300));
-        Assert.InRange(position.X, 40, 1400);
-        Assert.InRange(position.Y, 40, 590);
+        Assert.InRange(position.X + 18, 40, 1436);
+        Assert.InRange(position.Y + 18, 40, 626);
+        Assert.True(position.X + 480 - 18 <= 1880);
+        Assert.True(position.Y + 450 - 18 <= 1040);
     }
 
     [Fact]
     public void Invalid_scale_falls_back_to_one()
     {
         var anchor = new NotificationAnchor(new(500, 900, 520, 920), new(0, 0, 1000, 900), double.NaN);
-        Assert.Equal(795, TrayMenuPlacement.Place(anchor, new Size(200, 100)).Y);
+        Assert.Equal(806, TrayMenuPlacement.Place(anchor, new Size(200, 100)).Y);
+    }
+
+    [Fact]
+    public void New_preparation_reports_current_resource_progress_instead_of_a_stale_conflict()
+    {
+        var status = new EgressController.SingBox.Runtime.SingBoxServiceStatus(EgressController.SingBox.Runtime.SingBoxServiceState.Preparing, null, null, null, false);
+        string message = EgressController.App.Services.TunStartupIssue.Current(status, "通过默认端口 7890 下载 openai.srs")!;
+        Assert.Contains("7890", message); Assert.Contains("openai.srs", message); Assert.DoesNotContain("canceled", message);
     }
 
     [Fact]

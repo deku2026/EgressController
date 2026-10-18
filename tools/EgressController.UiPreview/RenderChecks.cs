@@ -115,6 +115,52 @@ internal static class RenderChecks
         if (called != 2) throw new InvalidOperationException("Tray actions were not dispatched.");
     }
 
+    internal static void TrayPlacement(string directory)
+    {
+        foreach (bool running in new[] { false, true })
+        foreach (double scale in new[] { 1d, 1.5d, 2d })
+        {
+            var backend = new EgressController.App.Preview.PreviewController(running ? "ready" : "guard-stopped");
+            backend.Guard.RefreshAsync().GetAwaiter().GetResult();
+            var commands = GuardTrayCommands.Create(backend.Guard, () => { }, () => { }, () => { });
+            if (commands.Single(item => item.Title == "启动守护").Enabled!() == running
+                || commands.Single(item => item.Title == "停止守护").Enabled!() != running)
+                throw new InvalidOperationException("Companion menu does not reflect the service state.");
+            var menu = new TrayMenuWindow("Egress Guard", commands);
+            menu.Show(); Dispatcher.UIThread.RunJobs();
+            var size = menu.Bounds.Size;
+            var surface = (Control)menu.Content!; menu.Content = null; menu.Close();
+            var canvas = new Canvas();
+            string state = running ? "服务运行" : "服务停止";
+            var caption = new TextBlock { Text = $"独立守护小托盘 · {state} · 模拟 {scale:P0} 缩放", FontSize = 19 };
+            Canvas.SetLeft(caption, 28); Canvas.SetTop(caption, 25); canvas.Children.Add(caption);
+            int barHeight = (int)(44 * scale), barTop = 900 - barHeight;
+            var taskbar = new Border { Width = 960, Height = barHeight, Background = new SolidColorBrush(Color.Parse("#E0E5ED")) };
+            Canvas.SetTop(taskbar, barTop); canvas.Children.Add(taskbar);
+            int side = (int)(24 * scale), iconLeft = 860, iconTop = barTop + (barHeight - side) / 2;
+            var icon = new GuardianGlyph { Width = side, Height = side, State = backend.Guard.VisualState };
+            Canvas.SetLeft(icon, iconLeft); Canvas.SetTop(icon, iconTop); canvas.Children.Add(icon);
+            var anchor = new EgressController.Windows.Shell.NotificationAnchor(new(iconLeft, iconTop, iconLeft + side, iconTop + side), new(0, 0, 960, barTop), scale);
+            var position = TrayMenuPlacement.Place(anchor, size);
+            var scaled = new Border { Width = size.Width, Height = size.Height, Child = surface,
+                RenderTransform = new ScaleTransform(scale, scale), RenderTransformOrigin = RelativePoint.TopLeft };
+            Canvas.SetLeft(scaled, position.X); Canvas.SetTop(scaled, position.Y); canvas.Children.Add(scaled);
+            var window = new Window { Width = 960, Height = 900, Content = canvas };
+            window.Show(); Save(window, Path.Combine(directory, $"guard-tray-placement-{(running ? "running" : "stopped")}-{(int)(scale * 100)}.png")); window.Close();
+        }
+        var model = new EgressController.App.Preview.PreviewController("guard-stopped");
+        model.Guard.RefreshAsync().GetAwaiter().GetResult();
+        int opened = 0, shown = 0, exits = 0;
+        var actions = GuardTrayCommands.Create(model.Guard, () => opened++, () => shown++, () => exits++);
+        actions.Single(item => item.Title == "打开主程序").Execute().GetAwaiter().GetResult();
+        actions.Single(item => item.Title == "启动守护").Execute().GetAwaiter().GetResult();
+        if (!model.Guard.CanStop) throw new InvalidOperationException("Companion start did not reach mock service.");
+        actions.Single(item => item.Title == "停止守护").Execute().GetAwaiter().GetResult();
+        if (!model.Guard.CanStart) throw new InvalidOperationException("Companion stop did not reach mock service.");
+        actions.Single(item => item.Title == "退出小托盘").Execute().GetAwaiter().GetResult();
+        if (opened != 1 || shown != 2 || exits != 1) throw new InvalidOperationException("Companion host actions were not dispatched.");
+    }
+
     private static double Luminance(Color color)
     {
         static double Linear(byte channel) { double value = channel / 255d; return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4); }

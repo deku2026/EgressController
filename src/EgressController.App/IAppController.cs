@@ -21,6 +21,7 @@ public interface IAppController
     string ProtectionStatus { get; }
     string LastTunFailure { get; }
     string LastMessage { get; }
+    string DownloadStatus { get; }
     IReadOnlyList<string> DiscoveryNotices { get; }
     string UpstreamSummary { get; }
     EgressProfileDocument Profile { get; }

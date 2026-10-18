@@ -47,7 +47,9 @@ public sealed class SingBoxCoreManager
         string mode = (selection.Mode ?? string.Empty).Trim().ToLowerInvariant();
         if (mode != EgressProfileSchema.ManagedCore)
             throw new SingBoxCoreException("只支持由 EgressController 管理的 sing-box core。", "core.mode");
-        return await PrepareManagedAsync(cancellationToken).ConfigureAwait(false);
+        // Starting an already installed core must not depend on GitHub being reachable.
+        var cached = await TryUseCachedCurrentAsync(cancellationToken).ConfigureAwait(false);
+        return cached ?? await PrepareManagedAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<SingBoxCoreCandidate> PrepareManagedAsync(CancellationToken cancellationToken = default)
@@ -67,7 +69,7 @@ public sealed class SingBoxCoreManager
                     return cached;
 
                 throw new SingBoxCoreException(
-                    "无法获取 sing-box stable release，且没有可验证的本地 core。",
+                    "无法获取 sing-box stable release，且没有可验证的本地 core：" + exception.Message,
                     "core.release",
                     exception);
             }
@@ -172,24 +174,18 @@ public sealed class SingBoxCoreManager
 
     private async Task<SingBoxCoreCandidate?> TryUseCachedCurrentAsync(CancellationToken cancellationToken)
     {
-        SingBoxCorePointer? current = _stateStore.LoadCurrent();
-        if (current is null || !File.Exists(current.ExecutablePath))
-            return null;
-
-        try
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            return await ValidateCandidateAsync(
-                EgressProfileSchema.ManagedCore,
-                current.Version,
-                current.ExecutablePath,
-                current.Sha256,
-                isManaged: true,
-                cancellationToken).ConfigureAwait(false);
+            var current = attempt == 0 ? _stateStore.LoadCurrent() : _stateStore.LoadLastGood();
+            if (current is null || !File.Exists(current.ExecutablePath)) continue;
+            try
+            {
+                return await ValidateCandidateAsync(EgressProfileSchema.ManagedCore, current.Version,
+                    current.ExecutablePath, current.Sha256, isManaged: true, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SingBoxCoreException) { }
         }
-        catch (SingBoxCoreException)
-        {
-            return null;
-        }
+        return null;
     }
 
     public void MarkLastGood(SingBoxCoreCandidate candidate)
@@ -240,6 +236,8 @@ public sealed class SingBoxCoreManager
             throw new SingBoxCoreException("当前 sing-box.exe SHA-256 与记录不一致。", "core.current.digest");
         SingBoxVersionInfo actualVersion = await _cli.GetVersionAsync(executablePath, cancellationToken).ConfigureAwait(false);
         EnsureSupportedVersion(actualVersion.Version, "core.version");
+        if (!string.Equals(actualVersion.Version.ToString(), version, StringComparison.Ordinal))
+            throw new SingBoxCoreException("本地内核版本与缓存记录不一致。", "core.current.version");
         await CheckMinimalConfigAsync(executablePath, cancellationToken).ConfigureAwait(false);
         return new SingBoxCoreCandidate
         {

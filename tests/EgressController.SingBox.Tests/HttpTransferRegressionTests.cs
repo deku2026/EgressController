@@ -23,7 +23,8 @@ public sealed class HttpTransferRegressionTests
             "metadata" => release.GetLatestStableAsync(TestContext.Current.CancellationToken),
             _ => release.DownloadAsync(Asset(1024), destination, TestContext.Current.CancellationToken)
         };
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transfer.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        var failure = await Assert.ThrowsAsync<DownloadException>(() => transfer.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        Assert.Equal("download.timeout", failure.Code);
         Assert.True(stream.ReadStarted);
     }
 

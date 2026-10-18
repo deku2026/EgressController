@@ -78,26 +78,31 @@ public sealed class PreviewController : IAppController
             }));
             _events.Add(new(DateTimeOffset.UtcNow.AddMinutes(-18), "ChatGPT", _targets[0].CanonicalExecutable!, 14200,
                 true, "启动保护：TUN 尚未接管", null));
+            bool startupBlocked = scenario is "starting" or "failed" or "download-timeout";
             Diagnostics.Info("TUN 启动", "自动启动受管理内核");
-            Diagnostics.Info("TUN 状态", "接管检查通过");
-            Diagnostics.Info("保护状态", "联网检测通过，允许所选应用运行");
+            Diagnostics.Info("TUN 状态", startupBlocked ? "尚未接管，正在准备启动" : "接管检查通过");
+            Diagnostics.Info("保护状态", startupBlocked ? "启动保护：TUN 尚未接管" : scenario == "offline" ? "家宽联网检测失败，持续保护所选应用" : "联网检测通过，允许所选应用运行");
         }
         else { Profile = Profile with { Applications = [], Domains = [], RuleSets = [] }; _targets.Clear(); }
         if (scenario == "offline") Diagnostics.Report("保护状态", "network.failed", "ESIM-家宽连续三次联网检测失败，正在保护所选应用。", new IOException("模拟出口不可达"));
-        if (scenario is "starting" or "failed") { ConnectionHistory.ApplySnapshot([]); ConnectionHistory.ClearClosed(); }
+        if (scenario is "starting" or "failed" or "download-timeout") { ConnectionHistory.ApplySnapshot([]); ConnectionHistory.ClearClosed(); }
         if (scenario == "failed") Diagnostics.Report("TUN 启动", "tun.conflict", LastTunFailure);
+        if (scenario == "download-timeout") Diagnostics.Report("启动资源下载", "download.timeout", DownloadStatus);
         if (scenario == "starting") Diagnostics.Info("TUN 启动", "正在准备内核，所选应用暂不能运行");
         Visuals.Update(_targets, Profile);
     }
     public Services.ApplicationVisualCatalog Visuals { get; }
     public bool IsPreview => true;
-    public bool IsTunRunning => _scenario is not ("starting" or "failed");
+    public bool IsTunRunning => _scenario is not ("starting" or "failed" or "download-timeout");
     public bool IsUpdatingProfile => false;
-    public ProtectionReadiness Protection => new(_scenario is not ("offline" or "starting" or "failed"), _scenario switch
-    { "offline" => "ESIM-家宽连续三次联网检测失败", "starting" => "等待 TUN 接管", "failed" => LastTunFailure, _ => "TUN 已接管，网络检查通过" });
+    public ProtectionReadiness Protection => new(_scenario is not ("offline" or "starting" or "failed" or "download-timeout"), _scenario switch
+    { "offline" => "ESIM-家宽连续三次联网检测失败", "starting" => "等待 TUN 接管", "failed" or "download-timeout" => LastTunFailure, _ => "TUN 已接管，网络检查通过" });
     public string TunStatus => IsTunRunning ? "运行中" : "正在启动";
     public string ProtectionStatus => Protection.Ready ? "保护已就绪，可以打开所选应用" : "正在保护：" + Protection.Reason;
-    public string LastTunFailure => _scenario == "failed" ? "TUN 启动失败：检测到另一个活动隧道 Mihomo（模拟）。请关闭该隧道后等待自动重试。" : "";
+    public string LastTunFailure => _scenario == "download-timeout" ? DownloadStatus : _scenario == "failed" ? "TUN 启动失败：检测到另一个活动隧道 Mihomo（模拟）。请关闭该隧道后等待自动重试。" : "";
+    public string DownloadStatus => _scenario == "download-timeout"
+        ? "SRS openai 下载超时：raw.githubusercontent.com/MetaCubeX/meta-rules-dat/…/openai.srs；出口：默认 SOCKS5 127.0.0.1:7890；保护保持启用，将自动重试。"
+        : "内核与所选规则已从校验缓存准备完毕";
     public string LastMessage { get; private set; } = "所有变更只作用于模拟数据";
     public string UpstreamSummary => $"127.0.0.1:{Profile.UpstreamPort} · SOCKS5";
     public EgressProfileDocument Profile { get; private set; }
@@ -110,7 +115,7 @@ public sealed class PreviewController : IAppController
     public int? ProxyDelayMilliseconds => IsTunRunning ? 126 : null;
     public string DirectInternetStatus => _scenario switch { "starting" or "failed" => "等待 TUN 接管后检测", "offline" => "ESIM-家宽：连续三次检测失败", _ => "ESIM-家宽：HTTPS 探测通过（18 ms）" };
     public string ProxyInternetStatus => !IsTunRunning ? "等待 TUN 接管后检测" : "Proxy-代理：HTTPS 探测通过（126 ms）";
-    public string NetworkMonitorStatus => _scenario switch { "starting" => "等待 TUN 接管", "failed" => LastTunFailure, "offline" => "家宽出口不可达", _ => "两个出口检测通过" };
+    public string NetworkMonitorStatus => _scenario switch { "starting" => "等待 TUN 接管", "failed" or "download-timeout" => LastTunFailure, "offline" => "家宽出口不可达", _ => "两个出口检测通过" };
     public DateTimeOffset? NetworkLastCheckedAtUtc => !IsTunRunning ? null : DateTimeOffset.UtcNow.AddSeconds(-8);
     public string DiagnosticsStatus => _scenario == "telemetry" ? "统计暂不可用：模拟 API 超时，等待下一次采样" : "统计更新正常";
     public ConnectionHistoryStore ConnectionHistory { get; } = new();

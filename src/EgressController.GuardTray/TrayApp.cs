@@ -54,12 +54,8 @@ public sealed class TrayApp : Application
             window.Icon = artwork[GuardVisualState.Waiting];
             WindowsTrayPresenter? tray = null;
             try { tray = new WindowsTrayPresenter(Program.Paths.ServiceName, "Egress Guard", nativeArtwork[GuardVisualState.Waiting],
-                "EgressController 独立守护", Show, () => [
-                    new("打开主程序", null, "open", () => { OpenMain(); return Task.CompletedTask; }),
-                    new("守护状态与设置", vm.StateLabel, "guardian", () => { Show(); return Task.CompletedTask; }),
-                    new("启动守护", null, "protection", async () => { await vm.StartCommand.ExecuteAsync(null); Show(); }, () => vm.CanStart),
-                    new("停止守护", "本次开机不自动拉起", "power", async () => { await vm.StopCommand.ExecuteAsync(null); Show(); }, () => vm.CanStop, Danger: true),
-                    new("退出小托盘", "守护服务继续运行", "power", () => { window.AllowExit = true; desktop.Shutdown(); return Task.CompletedTask; })]);
+                "EgressController 独立守护", Show, () => GuardTrayCommands.Create(vm, OpenMain, Show,
+                    () => { window.AllowExit = true; desktop.Shutdown(); }));
                 tray.Failed += error => { vm.ReportError(error.Message); Show(); };
             }
             catch (Exception error) { window.TrayAvailable = false; vm.ReportError("通知区图标未能创建：" + error.Message); Show(); }

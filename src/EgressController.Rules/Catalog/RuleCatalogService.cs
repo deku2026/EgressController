@@ -12,7 +12,7 @@ public sealed record SingBoxCatalogUpdateResult(bool Succeeded, SingBoxRuleCatal
 }
 
 /// <summary>
-/// Updates the MetaCubeX <c>sing</c> branch only when explicitly requested. The branch is first
+/// Loads a valid cached catalog for startup; downloads a missing catalog or an explicitly requested refresh. The branch is first
 /// resolved to an immutable commit, then the generated geo/geosite tree is walked by SHA. A
 /// failed refresh never replaces the last locally persisted catalog.
 /// </summary>
@@ -76,6 +76,14 @@ public sealed partial class RuleCatalogService
     public IReadOnlyList<SingBoxRuleCatalogEntry> Search(string query, int max = 50)
         => (_current ?? LoadCached(out _))?.Search(query, max)
            ?? Array.Empty<SingBoxRuleCatalogEntry>();
+
+    public async Task<SingBoxCatalogUpdateResult> EnsureAvailableAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var catalog = Current ?? LoadCached(out _);
+        return catalog is not null ? SingBoxCatalogUpdateResult.Success(catalog)
+            : await UpdateAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public async Task<SingBoxCatalogUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
     {
