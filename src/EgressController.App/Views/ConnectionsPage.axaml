@@ -34,7 +34,7 @@
             <DataTemplate x:DataType="vm:ConnectionRowViewModel">
               <Border Padding="15,13" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
                 <Grid ColumnDefinitions="18,1.3*,1.7*,108,88,88,75" ColumnSpacing="12">
-                  <Ellipse Width="7" Height="7" Classes="state-dot" Classes.active="{Binding IsActive}" VerticalAlignment="Center" Opacity="0.9" ToolTip.Tip="{Binding Status}"/>
+                  <Ellipse Width="7" Height="7" Classes="state-dot" Classes.active="{Binding IsCurrent}" VerticalAlignment="Center" Opacity="0.9" ToolTip.Tip="{Binding Status}"/>
                   <TextBlock Grid.Column="1" Text="{Binding ProcessName}" FontWeight="Medium" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/>
                   <TextBlock Grid.Column="2" Text="{Binding Target}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Target}"/>
                   <TextBlock Grid.Column="3" Text="{Binding Route}" TextTrimming="CharacterEllipsis" Foreground="#5365A4"/>

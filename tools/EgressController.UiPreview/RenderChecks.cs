@@ -6,6 +6,8 @@ using Avalonia.Logging;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using EgressController.Guardian;
+using EgressController.Presentation;
 
 namespace EgressController.UiPreview;
 
@@ -57,6 +59,34 @@ internal static class RenderChecks
                 throw new InvalidOperationException("Button text contrast is below 4.5:1.");
         }
         window.Close();
+    }
+
+    internal static void GuardIcons(string directory)
+    {
+        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14 };
+        panel.Children.Add(new TextBlock { Text = "守护图标 · 16 / 24 / 32 / 48 px", FontSize = 20 });
+        foreach (var state in Enum.GetValues<GuardVisualState>())
+        {
+            byte[] bytes = GuardianIcon.CreateBytes(state);
+            if (BitConverter.ToUInt16(bytes, 4) != 6) throw new InvalidOperationException("Expected six native icon sizes.");
+            for (int i = 0; i < 6; i++)
+            {
+                int count = BitConverter.ToInt32(bytes, 6 + i * 16 + 8), offset = BitConverter.ToInt32(bytes, 6 + i * 16 + 12);
+                if (count < 8 || offset + count > bytes.Length || bytes[offset] != 137 || bytes[offset + 1] != 80)
+                    throw new InvalidOperationException("Invalid PNG icon entry.");
+            }
+            var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 20 };
+            row.Children.Add(new TextBlock { Text = state.ToString(), Width = 100, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+            foreach (string color in new[] { "#FFFFFF", "#242936" })
+            {
+                var group = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 18 };
+                foreach (int size in new[] { 16, 24, 32, 48 }) group.Children.Add(new GuardianGlyph { State = state, Width = size, Height = size, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+                row.Children.Add(new Border { Background = new SolidColorBrush(Color.Parse(color)), Padding = new Thickness(12), CornerRadius = new CornerRadius(8), Child = group });
+            }
+            panel.Children.Add(row);
+        }
+        var window = new Window { Width = 710, Height = 530, Content = panel }; window.Show();
+        Save(window, Path.Combine(directory, "guardian-icons.png")); window.Close();
     }
 
     private static double Luminance(Color color)

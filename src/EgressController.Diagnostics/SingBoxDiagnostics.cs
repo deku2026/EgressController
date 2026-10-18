@@ -16,6 +16,7 @@ public sealed record ConnectionObservation
     public uint? ProcessId { get; init; }
     public long Upload { get; init; }
     public long Download { get; init; }
+    public bool HasRate { get; init; } = true;
     public long UploadRate { get; init; }
     public long DownloadRate { get; init; }
     public DateTimeOffset StartedAtUtc { get; init; }

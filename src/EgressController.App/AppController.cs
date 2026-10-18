@@ -62,6 +62,9 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private readonly SingBoxService _singBox;
     private readonly ConnectionHistoryStore _connectionHistory = new();
     private readonly BoundedLogStore _logs = new();
+    private readonly TrafficTimeline _trafficTimeline = new();
+    private bool _connectionRatesValid;
+    public TrafficSnapshot TrafficSnapshot => _trafficTimeline.Snapshot();
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
     private readonly object _runtimeStateGate = new();
@@ -86,8 +89,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private string _lastMessage = "就绪。";
     private long _trafficUp;
     private long _trafficDown;
-    private long _trafficUpRate;
-    private long _trafficDownRate;
     private DateTimeOffset? _connectionsUpdatedAtUtc;
     private DateTimeOffset? _trafficUpdatedAtUtc;
     private string _connectionMonitorStatus = "未启动";
@@ -159,8 +160,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     };
     public long TrafficUp => Interlocked.Read(ref _trafficUp);
     public long TrafficDown => Interlocked.Read(ref _trafficDown);
-    public long TrafficUpRate => Interlocked.Read(ref _trafficUpRate);
-    public long TrafficDownRate => Interlocked.Read(ref _trafficDownRate);
     public DateTimeOffset? ConnectionsUpdatedAtUtc
     {
         get
@@ -291,15 +290,11 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 {
                     if (enabled)
                     {
-                        selected[key] = new EgressApplicationSelection
-                        {
-                            DiscoveryKey = key,
-                            DisplayName = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.Name,
-                            ExecutablePaths = ApplicationInventorySnapshot.Create(_targets.All()).ExpandSelected([key]),
-                            DirectoryRoots = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.OwnedRoots ?? [],
-                            Target = route ?? routes?.GetValueOrDefault(key)
-                                ?? selected.GetValueOrDefault(key)?.Target ?? EgressRouteTarget.DefaultAdapter,
-                        };
+                        var saved = selected.GetValueOrDefault(key);
+                        var target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
+                        selected[key] = ApplicationInventorySnapshot.Create(_targets.All()).CaptureSelection(key,
+                            route ?? routes?.GetValueOrDefault(key) ?? saved?.Target ?? EgressRouteTarget.DefaultAdapter,
+                            saved, target?.OwnedRoots);
                     }
                     else
                     {
@@ -947,10 +942,10 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             _connectionHistory.ApplySnapshot(Array.Empty<ConnectionObservation>());
             Interlocked.Exchange(ref _trafficUp, 0);
             Interlocked.Exchange(ref _trafficDown, 0);
-            Interlocked.Exchange(ref _trafficUpRate, 0);
-            Interlocked.Exchange(ref _trafficDownRate, 0);
             _connectionsUpdatedAtUtc = null;
             _trafficUpdatedAtUtc = null;
+            _trafficTimeline.Reset();
+            _connectionRatesValid = false;
         }
         SetMonitorStatuses("未运行", "未运行");
     }
@@ -1107,8 +1102,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 var sample = await sampler.SampleAsync(token).ConfigureAwait(false);
                 if (sample.Snapshot is { } snapshot)
                 {
+                    ApplyTrafficRate(new SingBoxTrafficEvent { Up = sample.UploadRate, Down = sample.DownloadRate }, generation, sample.HasRate);
                     ApplyConnectionSnapshot(snapshot, generation);
-                    ApplyTrafficRate(new SingBoxTrafficEvent { Up = sample.UploadRate, Down = sample.DownloadRate }, generation);
                     SetConnectionMonitorConnected(generation);
                     SetTrafficMonitorConnected(generation);
                 }
@@ -1136,6 +1131,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         DateTimeOffset observedAtUtc = DateTimeOffset.UtcNow;
+        long observedStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
         long adapterDelta = 0;
@@ -1152,11 +1148,14 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 _connectionRateSamples.TryGetValue(connection.Id, out ConnectionRateSample? previous);
                 double elapsedSeconds = previous is null
                     ? 0
-                    : (observedAtUtc - previous.ObservedAtUtc).TotalSeconds;
+                    : System.Diagnostics.Stopwatch.GetElapsedTime(previous.ObservedStamp, observedStamp).TotalSeconds;
                 long uploadRate = CalculateRate(connection.Upload, previous?.Upload, elapsedSeconds);
                 long downloadRate = CalculateRate(connection.Download, previous?.Download, elapsedSeconds);
                 DateTimeOffset startedAtUtc = connection.Start ?? previous?.StartedAtUtc ?? observedAtUtc;
-                observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate));
+                observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate) with
+                { HasRate = _connectionRatesValid && previous is not null && elapsedSeconds is > 0 and <= 3
+                    && previous.Upload >= 0 && previous.Download >= 0
+                    && previous.StartedAtUtc == startedAtUtc && connection.Upload >= previous.Upload && connection.Download >= previous.Download });
                 string? outbound = connection.Chains.FirstOrDefault();
                 if (Guid.TryParse(_profile.DefaultAdapterId, out Guid quotaAdapter)
                     && string.Equals(outbound, EgressProfileCompiler.AdapterTag(quotaAdapter), StringComparison.OrdinalIgnoreCase))
@@ -1166,7 +1165,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                         : SafeAdd(SafeDelta(connection.Upload, previous.Upload), SafeDelta(connection.Download, previous.Download)));
                 }
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
-                    observedAtUtc,
+                    observedAtUtc, observedStamp,
                     connection.Upload,
                     connection.Download,
                     startedAtUtc,
@@ -1180,6 +1179,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             Interlocked.Exchange(ref _trafficDown, Math.Max(0, snapshot.DownloadTotal));
             _connectionHistory.ApplySnapshot(observations, observedAtUtc);
             _connectionsUpdatedAtUtc = observedAtUtc;
+            _connectionRatesValid = true;
         }
         if (adapterDelta > 0)
             _quotaStore.AddUsage(adapterDelta);
@@ -1187,14 +1187,14 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)
     {
-        if (previous is null || elapsedSeconds <= 0 || current <= previous.Value)
+        if (previous is null || previous < 0 || current < 0 || elapsedSeconds <= 0 || current <= previous.Value)
             return 0;
         double rate = ((double)current - previous.Value) / elapsedSeconds;
         return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
     }
 
     private static long SafeDelta(long current, long previous)
-        => current > previous ? current - previous : 0;
+        => previous >= 0 && current > previous ? current - previous : 0;
 
     private static long SafeAdd(long left, long right)
         => left > long.MaxValue - right ? long.MaxValue : left + right;
@@ -1266,15 +1266,14 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         return new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
     }
 
-    private void ApplyTrafficRate(SingBoxTrafficEvent traffic, int generation)
+    private void ApplyTrafficRate(SingBoxTrafficEvent traffic, int generation, bool available)
     {
         lock (_diagnosticsStateGate)
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
                 return;
-            Interlocked.Exchange(ref _trafficUpRate, Math.Max(0, traffic.Up));
-            Interlocked.Exchange(ref _trafficDownRate, Math.Max(0, traffic.Down));
             _trafficUpdatedAtUtc = DateTimeOffset.UtcNow;
+            _trafficTimeline.Observe(available ? traffic.Up : null, available ? traffic.Down : null);
         }
     }
 
@@ -1284,8 +1283,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
                 return;
-            Interlocked.Exchange(ref _trafficUpRate, 0);
-            Interlocked.Exchange(ref _trafficDownRate, 0);
+            _connectionRatesValid = false;
+            _trafficTimeline.Unavailable();
         }
     }
 
@@ -1366,6 +1365,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
 
 internal sealed record ConnectionRateSample(
     DateTimeOffset ObservedAtUtc,
+    long ObservedStamp,
     long Upload,
     long Download,
     DateTimeOffset StartedAtUtc,

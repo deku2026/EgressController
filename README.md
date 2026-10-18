@@ -11,7 +11,7 @@ Windows 双网卡分流与应用保护工具。原生 Avalonia 界面，主程�
 - **代理防循环**：根据端口识别代理核心的完整路径，优先绑定到 `Proxy-代理`。多个端口可以共用同一个核心。
 - **应用保护**：TUN 未接管、所选网卡不可用或联网检测确认失败时，持续终止勾选的应用。恢复后手动重开。
 - **独立守护**：主程序未运行时继续保护最近的名单。小托盘只反映主程序与 TUN 状态，联网检测由主程序独立负责。
-- **连接与流量**：概览趋势、活动与历史连接、连接详情、家宽套餐用量。统计采样失败不会重启 TUN 或关闭应用。
+- **连接与流量**：带真实数值刻度的 60 秒趋势、活动与历史连接、连接详情、家宽套餐用量。统计采样失败不会重启 TUN 或关闭应用。
 - **关键事件日志**：记录启动、停止、重启及触发应用保护的原因。侧栏始终提供“打开日志目录”，不记录每条连接的内核错误。
 
 ## 开始使用
@@ -54,6 +54,6 @@ dotnet run --project tools/EgressController.UiPreview -c Release -- --screenshot
 
 预览工具不会初始化生产控制器、TUN、服务、自启项或真实进程控制。CI 仅执行 mock 测试，并提供界面截图与发布包。
 
-[界面与架构](docs/desktop-design.md) · [应用保护](docs/process-protection.md) · [独立守护](docs/independent-guard.md) · [日志与存储](docs/diagnostics.md)
+[需求复核](docs/requirements-audit.md) · [界面与架构](docs/desktop-design.md) · [应用保护](docs/process-protection.md) · [独立守护](docs/independent-guard.md) · [日志与存储](docs/diagnostics.md)
 
 [MIT License](LICENSE)

@@ -6,16 +6,16 @@
           <StackPanel Spacing="12">
             <TextBlock Text="上传速度" Classes="eyebrow"/>
             <TextBlock Text="{Binding Dashboard.UploadRate}" Classes="metric"/>
-            <ui:TrendChart Samples="{Binding Dashboard.UploadSamples}" Stroke="#6371D6" Height="110"/>
-            <TextBlock Text="本地统计快照，每秒更新" Classes="muted"/>
+            <ui:TrendChart Samples="{Binding Dashboard.UploadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#6371D6" Height="155"/>
+            <TextBlock Text="{Binding Dashboard.TelemetryStatus}" Classes="muted"/>
           </StackPanel>
         </Border>
         <Border Grid.Column="1" Classes="card">
           <StackPanel Spacing="12">
             <TextBlock Text="下载速度" Classes="eyebrow"/>
             <TextBlock Text="{Binding Dashboard.DownloadRate}" Classes="metric"/>
-            <ui:TrendChart Samples="{Binding Dashboard.DownloadSamples}" Stroke="#55A8CF" Height="110"/>
-            <TextBlock Text="当前 TUN 会话的整体速度" Classes="muted"/>
+            <ui:TrendChart Samples="{Binding Dashboard.DownloadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#55A8CF" Height="155"/>
+            <TextBlock Text="{Binding Dashboard.SampleTime}" Classes="muted"/>
           </StackPanel>
         </Border>
       </Grid>
@@ -32,11 +32,11 @@
             <TextBlock Text="家宽流量套餐" Classes="section-title"/>
             <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
               <StackPanel Spacing="7">
-                <TextBlock Text="套餐总量 / GB" Classes="muted"/>
+                <TextBlock Text="套餐总量 / GiB" Classes="muted"/>
                 <TextBox Text="{Binding Traffic.TotalInput}"/>
               </StackPanel>
               <StackPanel Grid.Column="1" Spacing="7">
-                <TextBlock Text="当前剩余 / GB" Classes="muted"/>
+                <TextBlock Text="当前剩余 / GiB" Classes="muted"/>
                 <TextBox Text="{Binding Traffic.RemainingInput}"/>
               </StackPanel>
             </Grid>

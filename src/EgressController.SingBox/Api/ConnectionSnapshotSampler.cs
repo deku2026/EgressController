@@ -2,7 +2,7 @@ using EgressController.SingBox.Api.Models;
 
 namespace EgressController.SingBox.Api;
 
-public sealed record ConnectionSample(SingBoxConnectionsResponse? Snapshot, long UploadRate, long DownloadRate, Exception? Error);
+public sealed record ConnectionSample(SingBoxConnectionsResponse? Snapshot, long UploadRate, long DownloadRate, Exception? Error, bool HasRate = false);
 
 /// <summary>Observational only: no core lifecycle, protection, DNS or network-health dependencies.</summary>
 public sealed class ConnectionSnapshotSampler(Func<CancellationToken, Task<SingBoxConnectionsResponse>> read, TimeProvider? clock = null)
@@ -28,7 +28,10 @@ public sealed class ConnectionSnapshotSampler(Func<CancellationToken, Task<SingB
             }
             var sample = new ConnectionSample(snapshot,
                 _previous is null ? 0 : Rate(snapshot.UploadTotal, _previous.UploadTotal),
-                _previous is null ? 0 : Rate(snapshot.DownloadTotal, _previous.DownloadTotal), null);
+                _previous is null ? 0 : Rate(snapshot.DownloadTotal, _previous.DownloadTotal), null,
+                _previous is not null && seconds > 0 && seconds <= 3
+                    && _previous.UploadTotal >= 0 && _previous.DownloadTotal >= 0
+                    && snapshot.UploadTotal >= _previous.UploadTotal && snapshot.DownloadTotal >= _previous.DownloadTotal);
             _previous = snapshot; _observedAt = now;
             return sample;
         }

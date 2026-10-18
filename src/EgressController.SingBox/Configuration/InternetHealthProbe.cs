@@ -66,7 +66,7 @@ public static class InternetHealthProbe
                 .WaitAsync(budget, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             return response.Delay is >= 0
-                ? new(true, $"HTTPS 探测通过（{response.Delay} ms）")
+                ? new(true, $"HTTPS 探测通过（{response.Delay} ms）", response.Delay)
                 : new(false, "未收到有效的联网探测结果");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

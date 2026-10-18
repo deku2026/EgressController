@@ -30,8 +30,11 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public string DiscoveryKey => Target.DiscoveryKey;
     public string Name => Target.Name;
     public string Initial => Name.Length == 0 ? "?" : Name[..1].ToUpperInvariant();
-    public string InventoryDetails => string.Join("\n", Target.OwnedExecutables);
-    public string InventorySummary => $"{Target.OwnedExecutables.Count} 个 EXE";
+    private IReadOnlyList<string> InventoryPaths => EgressController.Launcher.Discovery.ApplicationInventorySnapshot.Create([Target])
+        .CaptureSelection(DiscoveryKey, Routing.SelectedRoute.Target,
+            _controller.Profile.Applications.FirstOrDefault(item => item.DiscoveryKey == DiscoveryKey), Target.OwnedRoots).ExecutablePaths;
+    public string InventoryDetails => string.Join("\n", InventoryPaths);
+    public string InventorySummary => $"{InventoryPaths.Count} 个 EXE";
     public string Command => Target.Command ?? Target.Aumid ?? "未解析";
     public string Details => Target.Kind == LaunchKind.PackagedAumid
         ? $"Package · {Target.PackageFamily} · {Target.Aumid} · EXE: {Command}"
@@ -48,8 +51,11 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public bool CanRoute => Target.CanRoute;
     public bool CanManage => CanRoute || Routing.IsSelected;
     public RouteSelectionViewModel Routing { get; }
-    public void RefreshRoute() => Routing.Refresh(_controller.Profile,
-        _controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == DiscoveryKey)?.Target);
+    public void RefreshRoute()
+    {
+        Routing.Refresh(_controller.Profile, _controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == DiscoveryKey)?.Target);
+        OnPropertyChanged(nameof(InventorySummary)); OnPropertyChanged(nameof(InventoryDetails));
+    }
 
     public void Dispose() => Icon?.Dispose();
 }

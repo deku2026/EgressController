@@ -39,6 +39,7 @@ internal static class Program
         var bindingLog = new BindingLog(); Avalonia.Logging.Logger.Sink = bindingLog;
         PreviewChecks.Run();
         RenderChecks.Buttons(directory);
+        RenderChecks.GuardIcons(directory);
         foreach (var scenario in new[] { "ready", "offline", "starting", "empty", "telemetry", "failed" })
         {
             var controller = new PreviewController(scenario);
@@ -47,7 +48,7 @@ internal static class Program
             window.Show();
             for (int i = 0; i < 60; i++) { controller.AdvanceSample(); vm.Refresh(); }
             vm.Connections.SelectedRow = vm.Connections.Rows.FirstOrDefault();
-            IEnumerable<string> pages = scenario == "ready" ? vm.Pages.Select(page => page.Key) : ["overview", "network", "apps", "guardian", "protection", "events", "connections"];
+            IEnumerable<string> pages = scenario == "ready" ? vm.Pages.Select(page => page.Key) : ["overview", "network", "apps", "guardian", "protection", "events", "connections", "traffic"];
             foreach (string page in pages)
             {
                 window.SelectPage(page);
@@ -81,8 +82,15 @@ internal static class Program
             if (vm.SelectedPage.Key != "events") throw new InvalidOperationException("Preview log-directory action escaped the mock UI.");
             window.Close();
         }
+        foreach (string state in new[] { "starting", "guard-stopped", "guard-unavailable", "guard-main-absent", "guard-records" })
+        {
+            var backend = new PreviewController(state); backend.Guard.RefreshAsync().GetAwaiter().GetResult();
+            var companion = new EgressController.GuardTray.GuardWindow(backend.Guard, preview: true) { AllowExit = true };
+            companion.Show(); RenderChecks.Save(companion, Path.Combine(directory, "companion-" + state + ".png"));
+            companion.Close();
+        }
         var trayController = new PreviewController(); trayController.Guard.RefreshAsync().GetAwaiter().GetResult();
-        var trayWindow = new EgressController.GuardTray.GuardWindow(trayController.Guard) { AllowExit = true };
+        var trayWindow = new EgressController.GuardTray.GuardWindow(trayController.Guard, preview: true) { AllowExit = true };
         trayWindow.Show(); RenderChecks.Save(trayWindow, Path.Combine(directory, "guard-window.png"));
         trayWindow.Width = 680; trayWindow.Height = 520;
         RenderChecks.Save(trayWindow, Path.Combine(directory, "guard-window-compact.png"));
@@ -93,6 +101,11 @@ internal static class Program
         trayWindow.GetVisualDescendants().OfType<Button>().First(button => button.Content as string == "打开服务日志目录")
             .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         if (requestedDirectory != trayController.Guard.LogDirectory) throw new InvalidOperationException("Guard log-directory request failed.");
+        bool openRequested = false;
+        trayWindow.OpenMainRequested += () => openRequested = true;
+        trayWindow.GetVisualDescendants().OfType<Button>().First(button => button.Content as string == "打开主程序")
+            .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        if (!openRequested) throw new InvalidOperationException("Companion main-launch request did not reach its host.");
         trayWindow.Close();
         bindingLog.Verify();
         bool blocked = false;

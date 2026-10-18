@@ -9,6 +9,30 @@ namespace EgressController.Core.Tests;
 public sealed class NetworkHealthStateTests
 {
     [Fact]
+    public void Direct_only_readiness_does_not_claim_a_proxy_probe_succeeded()
+    {
+        var state = new NetworkHealthState(); int generation = state.ObserveEnvironment(Environment(), null);
+        state.Complete(generation, NetworkHealthCheck.DirectInternet, new(true, "HTTPS OK", 18), CancellationToken.None);
+        var readiness = Ready(state);
+        Assert.True(readiness.Ready); Assert.Contains("不进行代理联网检测", readiness.Reason);
+        Assert.DoesNotContain("两张出口网卡联网正常", readiness.Reason);
+    }
+
+    [Fact]
+    public void Latency_is_a_structured_success_value_and_does_not_parse_retry_error_text()
+    {
+        var state = new NetworkHealthState(); int generation = state.ObserveEnvironment(Environment(), 7890);
+        state.Complete(generation, NetworkHealthCheck.DirectInternet, new(true, "success", 18), CancellationToken.None);
+        state.ReportProgress(generation, NetworkHealthCheck.DirectInternet, "timeout after 8000 ms, retry pending", CancellationToken.None);
+        Assert.Equal(18, state.DirectDelayMilliseconds);
+        state.Complete(generation, NetworkHealthCheck.DirectInternet, new(false, "timeout after 8000 ms", 8000), CancellationToken.None);
+        Assert.Null(state.DirectDelayMilliseconds);
+        state.Complete(generation, NetworkHealthCheck.DirectInternet, new(true, "zero latency", 0), CancellationToken.None);
+        Assert.Equal(0, state.DirectDelayMilliseconds);
+        state.Reset(); Assert.Null(state.DirectDelayMilliseconds);
+    }
+
+    [Fact]
     public void Startup_requires_both_completed_checks_even_with_confirmed_tun()
     {
         var state = new NetworkHealthState();

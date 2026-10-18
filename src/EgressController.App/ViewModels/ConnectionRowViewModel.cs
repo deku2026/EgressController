@@ -14,6 +14,7 @@ public sealed class ConnectionRowViewModel : ObservableObject
 {
     private ConnectionObservation _item;
     private bool _isActive;
+    private bool _ratesFresh = true;
 
     public ConnectionRowViewModel(ConnectionObservation item, bool active)
     {
@@ -26,7 +27,8 @@ public sealed class ConnectionRowViewModel : ObservableObject
     public bool IsActive => _isActive;
     public string UploadText => TrafficFormat.Bytes(_item.Upload);
     public string DownloadText => TrafficFormat.Bytes(_item.Download);
-    public string Status => IsActive ? "活动" : "已结束";
+    public bool IsCurrent => _isActive && _ratesFresh;
+    public string Status => !IsActive ? "已结束" : IsCurrent ? "活动" : "上次活动";
     public string ProcessName => string.IsNullOrWhiteSpace(_item.ProcessPath)
         ? "未识别进程"
         : Path.GetFileName(_item.ProcessPath);
@@ -42,7 +44,8 @@ public sealed class ConnectionRowViewModel : ObservableObject
     public string Rule => string.IsNullOrWhiteSpace(_item.Rule) ? "未提供" : _item.Rule;
     public string DnsMode => string.IsNullOrWhiteSpace(_item.DnsMode) ? "未提供" : _item.DnsMode;
     public string Traffic => TrafficFormat.Bytes(TrafficFormat.AddCounters(_item.Upload, _item.Download));
-    public string Speed => TrafficFormat.Rate(TrafficFormat.AddCounters(_item.UploadRate, _item.DownloadRate));
+    public string Speed => _isActive && _ratesFresh && _item.HasRate ? TrafficFormat.Rate(TrafficFormat.AddCounters(_item.UploadRate, _item.DownloadRate)) : "—";
+    public void SetRateFreshness(bool fresh) { _ratesFresh = fresh; OnPropertyChanged(nameof(Speed)); OnPropertyChanged(nameof(IsCurrent)); OnPropertyChanged(nameof(Status)); }
     public string Duration => TrafficFormat.Duration(DurationValue());
     public string StartedAt => _item.StartedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
     public string ClosedAt => _item.ClosedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz") ?? "仍在活动";
@@ -103,18 +106,7 @@ internal static class TrafficFormat
         return left > long.MaxValue - right ? long.MaxValue : left + right;
     }
 
-    public static string Bytes(long value)
-    {
-        double amount = Math.Max(0, value);
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        int unit = 0;
-        while (amount >= 1024 && unit < units.Length - 1)
-        {
-            amount /= 1024;
-            unit++;
-        }
-        return unit == 0 ? $"{amount:0} {units[unit]}" : $"{amount:0.##} {units[unit]}";
-    }
+    public static string Bytes(long value) => TrafficUnits.Bytes(Math.Max(0, value));
 
     public static string Rate(long value) => Bytes(value) + "/s";
 

@@ -3,7 +3,7 @@ using EgressController.Core.Models;
 namespace EgressController.Core.Protection;
 
 public enum NetworkHealthCheck { DirectInternet, ProxyInternet }
-public sealed record NetworkHealthResult(bool IsHealthy, string Detail);
+public sealed record NetworkHealthResult(bool IsHealthy, string Detail, int? DelayMilliseconds = null);
 
 /// <summary>Completed probes remain authoritative during rechecks. Live adapter or default proxy changes
 /// invalidate in-flight results; cached configuration bindings must never be observed here.</summary>
@@ -102,6 +102,8 @@ public sealed class NetworkHealthState
         }
     }
 
+    public int? DirectDelayMilliseconds { get { lock (_gate) return _directInternet is { IsHealthy: true } ? _directInternet.DelayMilliseconds : null; } }
+    public int? ProxyDelayMilliseconds { get { lock (_gate) return _proxyInternet is { IsHealthy: true } ? _proxyInternet.DelayMilliseconds : null; } }
     public string DirectStatus => GetStatus(NetworkHealthCheck.DirectInternet);
     public string ProxyStatus => GetStatus(NetworkHealthCheck.ProxyInternet);
 

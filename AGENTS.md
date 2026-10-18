@@ -5,6 +5,7 @@
 - User terminology “子进程 / 递归进程” means EXE files found by recursively scanning the selected application's directories. It does not mean Windows parent/child processes, fork/CreateProcess relationships or descendant PIDs.
 - Scan and save an explicit set of canonical EXE paths. Runtime protection matches all instances of those saved paths; PID and creation time are used only to identify an instance safely.
 - Never expand membership from ParentPid, dynamically inherit an application's route for shared tools, or restart TUN because an application/process instance starts.
+- Changing an application’s exit must preserve its saved EXE inventory, including temporarily missing/older paths. The UI, routing compiler and guardian must use the same membership.
 - Directory roots are discovery inputs, not a runtime wildcard that silently enrolls new executable paths. Explicit rescanning/selection can update the saved inventory.
 - Existing descendant tracking and its tests are not requirements. Remove that behavior instead of preserving it under a different name.
 
@@ -29,6 +30,8 @@
 - Use the supplied Surge references for hierarchy, restrained surfaces, sidebar navigation, typography and dense readable tables. Preserve Windows window controls.
 - Shared design tokens, icons and reusable controls belong in a presentation layer. Views must not create production controllers or invoke Windows service/process/network operations.
 - Provide a fully isolated, interactive UI preview mode with mock data and screenshot rendering. Enter mock safety mode before any production initialization. Preview mode must not enumerate/terminate real targets, start TUN, install services, change startup entries or write the user's real configuration.
+- Telemetry charts must use actual observation times, a zero baseline and explicit shared numeric scale. UI refresh cannot manufacture samples; missing/stale data is not zero. Byte units and app percentages must match their real denominators.
+- Guardian icons and text must distinguish healthy, protecting, unavailable and manually stopped states; never show a green check based on a stale reply after a read error.
 - Validate normal, hover, pressed, focused and disabled states. Use meaningful mock screenshots at ordinary and compact Windows window sizes, not only XAML compilation.
 
 ## Workflow and validation

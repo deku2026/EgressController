@@ -53,7 +53,8 @@ public sealed class MainViewModel : ObservableObject
     public bool IsTunRunning => Controller.IsTunRunning;
     public bool IsProtecting => !Controller.Protection.Ready;
     public string TunCaption => Controller.IsTunRunning ? "TUN 已接管" : Controller.LastTunFailure.Length > 0 ? "TUN 未就绪" : "TUN 准备中";
-    public string GuardCaption => Guard.Disabled ? "守护已停用" : Guard.Red ? "守护保护中" : "守护在线";
+    public string GuardCaption => Guard.VisualState switch
+    { EgressController.Guardian.GuardVisualState.Healthy => "守护在线", EgressController.Guardian.GuardVisualState.Disabled => "守护已停用", EgressController.Guardian.GuardVisualState.Unavailable => "守护状态异常", EgressController.Guardian.GuardVisualState.Waiting => "守护检查中", _ => "守护保护中" };
     public string ShortStatus => Controller.Protection.Ready ? "保护就绪" : "保护进行中";
     public OverviewViewModel Overview { get; }
     public AppsViewModel Apps { get; }

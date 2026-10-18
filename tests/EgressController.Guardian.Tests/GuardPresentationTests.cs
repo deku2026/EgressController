@@ -3,6 +3,25 @@ namespace EgressController.Guardian.Tests;
 public sealed class GuardPresentationTests
 {
     [Fact]
+    public async Task Read_error_overrides_a_stale_healthy_reply_in_text_and_icon()
+    {
+        var client = new Client { Snapshot = Snapshot(false) };
+        var vm = new GuardManagementViewModel(client); await vm.RefreshAsync();
+        Assert.Equal(GuardVisualState.Healthy, vm.VisualState);
+        client.Snapshot = Snapshot(false) with { Error = "mock communication unavailable" };
+        await vm.RefreshAsync();
+        Assert.Equal(GuardVisualState.Unavailable, vm.VisualState);
+        Assert.False(vm.Healthy); Assert.True(vm.Red);
+        Assert.Contains("mock communication unavailable", vm.Summary);
+        Assert.DoesNotContain("mock guard reason", vm.DisplayReason);
+        client.Snapshot = Snapshot(true); await vm.RefreshAsync();
+        Assert.Equal(GuardVisualState.Protecting, vm.VisualState);
+        client.Snapshot = Snapshot(false); await vm.RefreshAsync();
+        Assert.Equal(GuardVisualState.Healthy, vm.VisualState);
+        Assert.NotEmpty(vm.LastFailure); // Historical errors do not keep the current icon red.
+    }
+
+    [Fact]
     public async Task Tray_log_write_failure_is_visible_alongside_original_operation_error()
     {
         var log = new EgressController.Diagnostics.DiagnosticJournal(Path.GetFullPath("mock-tray.log"),

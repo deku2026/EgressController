@@ -35,18 +35,21 @@ public sealed class TrayApp : Application
             };
             var menu = new NativeMenu();
             void Show() { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }
-            var open = new NativeMenuItem("打开主程序");
-            open.Click += (_, _) =>
+            void OpenMain()
             {
                 try
                 {
+                    EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
                     string main = new GuardRegistrationStore(Program.Paths.RegistrationFile).Load()?.MainExecutable
                         ?? throw new InvalidOperationException("主程序路径未登记。");
                     if (!File.Exists(main)) throw new FileNotFoundException("主程序已移动或删除：" + main);
                     using var process = System.Diagnostics.Process.Start(new ProcessStartInfo(main) { UseShellExecute = true });
                 }
                 catch (Exception error) { vm.ReportError(error.Message); Show(); }
-            };
+            }
+            var open = new NativeMenuItem("打开主程序");
+            open.Click += (_, _) => OpenMain();
+            window.OpenMainRequested += OpenMain;
             menu.Items.Add(open);
             var manage = new NativeMenuItem("查看 / 管理守护服务");
             manage.Click += (_, _) => Show();
@@ -61,10 +64,9 @@ public sealed class TrayApp : Application
             var exit = new NativeMenuItem("退出小托盘（服务继续运行）");
             exit.Click += (_, _) => { window.AllowExit = true; desktop.Shutdown(); };
             menu.Items.Add(exit);
-            var normal = TrayIcons.Create(false, false);
-            var red = TrayIcons.Create(true, false);
-            var disabled = TrayIcons.Create(false, true);
-            var tray = new TrayIcon { Icon = red, IsVisible = true, ToolTipText = "EgressController 独立守护", Menu = menu };
+            var artwork = TrayIcons.Create();
+            window.Icon = artwork[GuardVisualState.Waiting];
+            var tray = new TrayIcon { Icon = artwork[GuardVisualState.Waiting], IsVisible = true, ToolTipText = "EgressController 独立守护", Menu = menu };
             tray.Clicked += (_, _) => Show();
             var icons = new Avalonia.Controls.TrayIcons { tray };
             TrayIcon.SetIcons(this, icons);
@@ -72,7 +74,9 @@ public sealed class TrayApp : Application
             timer.Tick += async (_, _) =>
             {
                 await vm.RefreshAsync();
-                tray.Icon = vm.Disabled ? disabled : vm.Red ? red : normal;
+                tray.Icon = artwork[vm.VisualState];
+                window.Icon = artwork[vm.VisualState];
+                start.IsEnabled = vm.CanStart; stop.IsEnabled = vm.CanStop;
                 tray.ToolTipText = vm.Summary.Length > 100 ? vm.Summary[..100] : vm.Summary;
             };
             timer.Start();

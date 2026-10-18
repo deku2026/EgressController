@@ -19,12 +19,22 @@ public sealed class PreviewController : IAppController
     private readonly List<ProtectionEvent> _events = [];
     private string _scenario;
     private int _sample;
-    public void AdvanceSample() => _sample++;
+    private readonly PreviewClock _clock = new();
+    private readonly TrafficTimeline _traffic;
+    public TrafficSnapshot TrafficSnapshot => _traffic.Snapshot();
+    public void AdvanceSample()
+    {
+        _sample++; _clock.Advance();
+        if (!IsTunRunning) return;
+        if (_scenario == "telemetry" && _sample >= 24 || _sample is >= 32 and <= 36) _traffic.Unavailable();
+        else _traffic.Observe(SimulatedUploadRate, SimulatedDownloadRate);
+    }
     public PreviewController(string scenario = "ready")
     {
         RuntimeSafety.EnableMockOnly();
         _scenario = scenario;
-        Diagnostics = new(Path.Combine(Path.GetTempPath(), "EgressController-UI-preview", "protection.log"), _ => { });
+        _traffic = new(_clock);
+        Diagnostics = new(@"C:\EgressPreview\logs\protection.log", _ => { });
         Adapters = [Adapter(HomeId, "Ethernet", "USB 家宽", "192.0.2.10", 7), Adapter(ProxyId, "Wi-Fi", "无线网络", "198.51.100.10", 12)];
         Profile = new EgressProfileDocument { DefaultAdapterId = HomeId.ToString(), ProxyAdapterId = ProxyId.ToString(),
             UpstreamPorts = [7890, 7891], UpstreamPort = 7890 }.NormalizeAndValidate();
@@ -74,7 +84,7 @@ public sealed class PreviewController : IAppController
     public bool IsPreview => true;
     public bool IsTunRunning => _scenario is not ("starting" or "failed");
     public bool IsUpdatingProfile => false;
-    public ProtectionReadiness Protection => new(_scenario is "ready" or "empty" or "telemetry", _scenario switch
+    public ProtectionReadiness Protection => new(_scenario is not ("offline" or "starting" or "failed"), _scenario switch
     { "offline" => "ESIM-家宽连续三次联网检测失败", "starting" => "等待 TUN 接管", "failed" => LastTunFailure, _ => "TUN 已接管，网络检查通过" });
     public string TunStatus => IsTunRunning ? "运行中" : "正在启动";
     public string ProtectionStatus => Protection.Ready ? "保护已就绪，可以打开所选应用" : "正在保护：" + Protection.Reason;
@@ -87,6 +97,8 @@ public sealed class PreviewController : IAppController
         [new(16800, @"C:\Applications\Proxy\mihomo.exe", DateTime.UnixEpoch)], null)).ToArray(), [@"C:\Applications\Proxy\mihomo.exe"]);
     public GuardManagementViewModel Guard { get; }
     public string GuardianConnectionStatus => "守护已连接";
+    public int? DirectDelayMilliseconds => IsTunRunning && _scenario != "offline" ? 18 : null;
+    public int? ProxyDelayMilliseconds => IsTunRunning ? 126 : null;
     public string DirectInternetStatus => _scenario switch { "starting" or "failed" => "等待 TUN 接管后检测", "offline" => "ESIM-家宽：连续三次检测失败", _ => "ESIM-家宽：HTTPS 探测通过（18 ms）" };
     public string ProxyInternetStatus => !IsTunRunning ? "等待 TUN 接管后检测" : "Proxy-代理：HTTPS 探测通过（126 ms）";
     public string NetworkMonitorStatus => _scenario switch { "starting" => "等待 TUN 接管", "failed" => LastTunFailure, "offline" => "家宽出口不可达", _ => "两个出口检测通过" };
@@ -94,11 +106,11 @@ public sealed class PreviewController : IAppController
     public string DiagnosticsStatus => _scenario == "telemetry" ? "统计暂不可用：模拟 API 超时，等待下一次采样" : "统计更新正常";
     public ConnectionHistoryStore ConnectionHistory { get; } = new();
     public DateTimeOffset? ConnectionsUpdatedAtUtc => DateTimeOffset.UtcNow;
-    public DateTimeOffset? TrafficUpdatedAtUtc => DateTimeOffset.UtcNow;
+    public DateTimeOffset? TrafficUpdatedAtUtc => TrafficSnapshot.ObservedAtUtc;
     public long TrafficUp => _scenario is "empty" or "starting" or "failed" ? 0 : 178 * 1024 * 1024;
     public long TrafficDown => _scenario is "empty" or "starting" or "failed" ? 0 : 551 * 1024 * 1024;
-    public long TrafficUpRate => _scenario == "ready" ? (long)((104 + 28 * Math.Sin(_sample * .28) + (_sample % 17 < 3 ? 70 : 0)) * 1024) : 0;
-    public long TrafficDownRate => _scenario == "ready" ? (long)((1320 + 310 * Math.Sin(_sample * .22) + (_sample % 23 < 5 ? 400 : 0)) * 1024) : 0;
+    private long SimulatedUploadRate => _scenario is "ready" or "telemetry" ? (long)((104 + 28 * Math.Sin(_sample * .28) + (_sample % 17 < 3 ? 70 : 0)) * 1024) : 0;
+    private long SimulatedDownloadRate => _scenario is "ready" or "telemetry" ? (long)((1320 + 310 * Math.Sin(_sample * .22) + (_sample % 23 < 5 ? 400 : 0)) * 1024) : 0;
     public EgressQuotaSnapshot Quota { get; private set; }
     public DiagnosticJournal Diagnostics { get; }
     public BoundedLogStore Logs { get; } = new();
@@ -119,9 +131,9 @@ public sealed class PreviewController : IAppController
         var next = Profile.Applications.ToDictionary(item => item.DiscoveryKey);
         foreach (var target in targets)
             if (!enabled) next.Remove(target.DiscoveryKey);
-            else next[target.DiscoveryKey] = new() { DiscoveryKey = target.DiscoveryKey, DisplayName = target.Name,
-                ExecutablePaths = target.OwnedExecutables, DirectoryRoots = target.OwnedRoots,
-                Target = route ?? routes?.GetValueOrDefault(target.DiscoveryKey) ?? EgressRouteTarget.DefaultAdapter };
+            else next[target.DiscoveryKey] = EgressController.Launcher.Discovery.ApplicationInventorySnapshot.Create([target])
+                .CaptureSelection(target.DiscoveryKey, route ?? routes?.GetValueOrDefault(target.DiscoveryKey) ?? EgressRouteTarget.DefaultAdapter,
+                    next.GetValueOrDefault(target.DiscoveryKey), target.OwnedRoots);
         return Save(Profile with { Applications = next.Values.ToArray() });
     }
     public Task<ControllerOperationResult> SetRuleSetAsync(string name, bool enabled, EgressRouteTarget? route = null, CancellationToken cancellationToken = default)
@@ -148,22 +160,35 @@ public sealed class PreviewController : IAppController
     public void ClearQuotaUsage() => Quota = Quota with { UsedBytes = 0 };
     public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
     {
-        if (totalGigabytes <= 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes) throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "额度必须为正，剩余额度须在总额范围内。");
-        Quota = new(checked((long)(totalGigabytes * 1073741824)), checked((long)(remainingGigabytes * 1073741824)), 0, DateTimeOffset.UtcNow);
+        if (totalGigabytes < 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes) throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "额度不能为负，剩余额度须在总额范围内。");
+        Quota = new(checked((long)Math.Round(totalGigabytes * 1073741824, MidpointRounding.AwayFromZero)), checked((long)Math.Round(remainingGigabytes * 1073741824, MidpointRounding.AwayFromZero)), 0, DateTimeOffset.UtcNow);
     }
     public ControllerOperationResult ReportFailure(string stage, string code, string message, Exception? error = null) { Diagnostics.Report(stage, code, message, error); return new(false, message); }
     private static NetworkAdapterInfo Adapter(Guid id, string name, string description, string address, int index) => new()
     { Identity = new(id, name), Description = description, Luid = (ulong)index, IfIndex = index, Ipv6IfIndex = index,
         IsUp = true, Addresses = [IPAddress.Parse(address)], Gateways = [], DnsServers = [], InterfaceType = 6 };
 
+    private sealed class PreviewClock : TimeProvider
+    {
+        private long _seconds;
+        private readonly DateTimeOffset _start = DateTimeOffset.UtcNow.AddSeconds(-60);
+        public override long TimestampFrequency => 1;
+        public override long GetTimestamp() => _seconds;
+        public override DateTimeOffset GetUtcNow() => _start.AddSeconds(_seconds);
+        public void Advance() => _seconds++;
+    }
+
     private sealed class PreviewGuardClient(PreviewController controller) : IGuardManagementClient
     {
-        private bool _running = true, _installed = true, _automatic = true;
+        private bool _running = controller._scenario != "guard-stopped", _installed = true, _automatic = true;
         public Task<GuardPanelSnapshot> ReadAsync(CancellationToken token = default) => Task.FromResult(new GuardPanelSnapshot(
             new("EgressController.Guard.Preview", !_installed ? GuardServiceState.Missing : _running ? GuardServiceState.Running : GuardServiceState.Stopped,
                 _automatic, _running ? 14800u : 0u, @"C:\Program Files\EgressController\Guard\guard-service.exe", "LocalSystem"),
-            _running ? new(!controller.IsTunRunning, controller.IsTunRunning ? "主程序在线，TUN 已接管" : "等待主程序完成 TUN 接管",
-                controller.Profile.Applications.Count, 0, "preview", []) : null, !_running, null));
+            _running ? new(!controller.IsTunRunning || controller._scenario == "guard-main-absent", controller._scenario == "guard-main-absent" ? "主程序未运行，持续保护最近保存的 EXE 清单" : controller.IsTunRunning ? "主程序在线，TUN 已接管" : "等待主程序完成 TUN 接管",
+                controller.Profile.Applications.SelectMany(app => app.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).Count(), 0, "preview", controller._scenario == "guard-records" ? [
+                    new(DateTimeOffset.UtcNow.AddMinutes(-8), "ChatGPT", @"C:\Applications\ChatGPT\ChatGPT.exe", 14200, true, "独立守护：主程序已退出", null),
+                    new(DateTimeOffset.UtcNow.AddMinutes(-12), "Claude", @"C:\Applications\Claude\tools\helper.exe", 14600, false, "独立守护：TUN 尚未接管", "模拟：无法确认该实例已退出")
+                ] : []) : null, !_running, controller._scenario == "guard-unavailable" ? "模拟：守护状态读取失败，请刷新或查看服务日志" : null));
         public Task ExecuteAsync(GuardAction action, CancellationToken token = default)
         {
             switch (action)

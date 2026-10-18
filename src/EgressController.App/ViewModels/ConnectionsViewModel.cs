@@ -20,6 +20,7 @@ public sealed class ConnectionsViewModel : ObservableObject
     private int _activeConnections;
     private string _lastUpdated = "等待 sing-box API";
     private string _actionMessage = string.Empty;
+    private TrafficSnapshot? _traffic;
     private ConnectionRowViewModel? _selectedRow;
 
     public ConnectionsViewModel(IAppController controller)
@@ -53,7 +54,7 @@ public sealed class ConnectionsViewModel : ObservableObject
     public int Count => Rows.Count;
     public long DroppedConnections { get => _droppedConnections; private set => SetProperty(ref _droppedConnections, value); }
     public string MonitorStatus => _controller.DiagnosticsStatus;
-    public string ActiveSummary => $"活动 {ActiveConnections} · ↑ {TrafficFormat.Rate(_controller.TrafficUpRate)} · ↓ {TrafficFormat.Rate(_controller.TrafficDownRate)}";
+    public string ActiveSummary => $"{(_traffic?.ObservationFresh == true ? "活动" : "上次快照")} {ActiveConnections} · ↑ {TrafficUnits.Rate(_traffic?.UploadRate)} · ↓ {TrafficUnits.Rate(_traffic?.DownloadRate)}";
     public string TotalSummary => $"当前会话 ↑ {TrafficFormat.Bytes(_controller.TrafficUp)} · ↓ {TrafficFormat.Bytes(_controller.TrafficDown)}";
     public string LastUpdated { get => _lastUpdated; private set => SetProperty(ref _lastUpdated, value); }
     public bool HasActionMessage => !string.IsNullOrWhiteSpace(ActionMessage);
@@ -89,6 +90,7 @@ public sealed class ConnectionsViewModel : ObservableObject
 
     public void Refresh()
     {
+        _traffic = _controller.TrafficSnapshot;
         IReadOnlyList<ConnectionObservation> active = _controller.ConnectionHistory.ActiveSnapshot();
         IReadOnlyList<ConnectionObservation> closed = _controller.ConnectionHistory.ClosedSnapshot();
         string query = _query.Trim();
@@ -117,6 +119,7 @@ public sealed class ConnectionsViewModel : ObservableObject
                 row.Update(item, activeRow);
             }
 
+            row.SetRateFreshness(_traffic.ObservationFresh);
             if (index < Rows.Count && ReferenceEquals(Rows[index], row))
                 continue;
             int currentIndex = Rows.IndexOf(row);

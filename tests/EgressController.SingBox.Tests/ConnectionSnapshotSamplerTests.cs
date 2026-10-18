@@ -13,7 +13,8 @@ public sealed class ConnectionSnapshotSamplerTests
         var sampler = new ConnectionSnapshotSampler(_ => ++calls == 2
             ? Task.FromException<SingBoxConnectionsResponse>(new IOException("mock transport closed"))
             : Task.FromResult(new SingBoxConnectionsResponse { UploadTotal = calls * 100, DownloadTotal = calls * 1000 }), clock);
-        Assert.NotNull((await sampler.SampleAsync(TestContext.Current.CancellationToken)).Snapshot);
+        var first = await sampler.SampleAsync(TestContext.Current.CancellationToken);
+        Assert.NotNull(first.Snapshot); Assert.False(first.HasRate);
         clock.Advance();
         var failure = await sampler.SampleAsync(TestContext.Current.CancellationToken);
         Assert.Null(failure.Snapshot); Assert.IsType<IOException>(failure.Error);
@@ -21,10 +22,11 @@ public sealed class ConnectionSnapshotSamplerTests
         clock.Advance();
         var recovery = await sampler.SampleAsync(TestContext.Current.CancellationToken);
         Assert.Null(recovery.Error); Assert.Equal(300, recovery.Snapshot!.UploadTotal);
+        Assert.False(recovery.HasRate);
         Assert.Equal(0, recovery.UploadRate); // Never manufacture a spike over missing samples.
         clock.Advance();
         var next = await sampler.SampleAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(100, next.UploadRate); Assert.Equal(1000, next.DownloadRate);
+        Assert.True(next.HasRate); Assert.Equal(100, next.UploadRate); Assert.Equal(1000, next.DownloadRate);
     }
 
     [Fact]

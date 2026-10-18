@@ -26,6 +26,9 @@ public interface IAppController
     ProxyPortSnapshot ProxyBindings { get; }
     GuardManagementViewModel Guard { get; }
     string GuardianConnectionStatus { get; }
+    int? DirectDelayMilliseconds { get; }
+    int? ProxyDelayMilliseconds { get; }
+    TrafficSnapshot TrafficSnapshot { get; }
     string DirectInternetStatus { get; }
     string ProxyInternetStatus { get; }
     string NetworkMonitorStatus { get; }
@@ -36,8 +39,6 @@ public interface IAppController
     DateTimeOffset? TrafficUpdatedAtUtc { get; }
     long TrafficUp { get; }
     long TrafficDown { get; }
-    long TrafficUpRate { get; }
-    long TrafficDownRate { get; }
     EgressQuotaSnapshot Quota { get; }
     DiagnosticJournal Diagnostics { get; }
     BoundedLogStore Logs { get; }

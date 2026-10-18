@@ -5,7 +5,7 @@
         <Border Classes="card" MinHeight="230">
           <Grid RowDefinitions="Auto,*,Auto">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="出口延迟" Classes="eyebrow" VerticalAlignment="Center"/>
+              <TextBlock Text="最近检测延迟" Classes="eyebrow" VerticalAlignment="Center"/>
               <Button Grid.Column="1" Content="检测联网" Command="{Binding Network.CheckCommand}" Padding="10,5" MinHeight="28"/>
             </Grid>
             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
@@ -28,16 +28,16 @@
           <Grid RowDefinitions="Auto,Auto,*,Auto">
             <TextBlock Text="上传" Classes="eyebrow"/>
             <TextBlock Grid.Row="1" Text="{Binding Dashboard.UploadRate}" FontSize="30" FontWeight="SemiBold" Margin="0,10,0,12"/>
-            <ui:TrendChart Grid.Row="2" Samples="{Binding Dashboard.UploadSamples}" Stroke="#6371D6" MinHeight="90"/>
-            <TextBlock Grid.Row="3" Text="最近一分钟" Classes="muted" Margin="0,10,0,0"/>
+            <ui:TrendChart Grid.Row="2" Samples="{Binding Dashboard.UploadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#6371D6" MinHeight="110"/>
+            <TextBlock Grid.Row="3" Text="{Binding Dashboard.SampleTime}" Classes="muted" Margin="0,10,0,0"/>
           </Grid>
         </Border>
         <Border Grid.Column="2" Classes="card">
           <Grid RowDefinitions="Auto,Auto,*,Auto">
             <TextBlock Text="下载" Classes="eyebrow"/>
             <TextBlock Grid.Row="1" Text="{Binding Dashboard.DownloadRate}" FontSize="30" FontWeight="SemiBold" Margin="0,10,0,12"/>
-            <ui:TrendChart Grid.Row="2" Samples="{Binding Dashboard.DownloadSamples}" Stroke="#55A8CF" MinHeight="90"/>
-            <TextBlock Grid.Row="3" Text="最近一分钟" Classes="muted" Margin="0,10,0,0"/>
+            <ui:TrendChart Grid.Row="2" Samples="{Binding Dashboard.DownloadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#55A8CF" MinHeight="110"/>
+            <TextBlock Grid.Row="3" Text="{Binding Dashboard.SampleTime}" Classes="muted" Margin="0,10,0,0"/>
           </Grid>
         </Border>
       </Grid>
@@ -47,8 +47,8 @@
             <StackPanel Spacing="18">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="活动连接" Classes="eyebrow"/>
-                <Border Grid.Column="1" Classes="badge healthy" Padding="8,4">
-                  <TextBlock Text="实时" Foreground="#227957" FontSize="11"/>
+                <Border Grid.Column="1" Classes="badge" Classes.healthy="{Binding Dashboard.ObservationFresh}" Padding="8,4">
+                  <TextBlock Text="{Binding Dashboard.FreshnessLabel}" Foreground="#667184" FontSize="11"/>
                 </Border>
               </Grid>
               <TextBlock Text="{Binding Dashboard.ActiveCount}" Classes="metric"/>
@@ -59,7 +59,7 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="4">
                   <TextBlock Text="{Binding Dashboard.ExecutableCount}" FontSize="23" FontWeight="SemiBold"/>
-                  <TextBlock Text="固定 EXE" Classes="muted"/>
+                  <TextBlock Text="固定 EXE 路径" Classes="muted"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Spacing="4">
                   <TextBlock Text="{Binding Dashboard.PortCount}" FontSize="23" FontWeight="SemiBold"/>
@@ -89,7 +89,7 @@
           <StackPanel Spacing="20">
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Text="应用流量" Classes="section-title"/>
-              <TextBlock Grid.Column="1" Text="活动连接" Classes="muted" VerticalAlignment="Center"/>
+              <TextBlock Grid.Column="1" Text="活动连接流量占比" Classes="muted" VerticalAlignment="Center"/>
             </Grid>
             <ItemsControl ItemsSource="{Binding Dashboard.Applications}">
               <ItemsControl.ItemTemplate>
@@ -101,7 +101,10 @@
                     <StackPanel Grid.Column="1" Spacing="8">
                       <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Text="{Binding Name}" FontWeight="Medium"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Amount}" Foreground="#667184"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                          <TextBlock Text="{Binding Amount}" Foreground="#667184"/>
+                          <TextBlock Text="{Binding ShareLabel}" Foreground="#667184" MinWidth="42" TextAlignment="Right"/>
+                        </StackPanel>
                       </Grid>
                       <ProgressBar Value="{Binding Share}" Maximum="100" Height="4" Foreground="#7C8BD8" Background="#EDF0F5"/>
                     </StackPanel>
