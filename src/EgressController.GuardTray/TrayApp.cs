@@ -23,6 +23,16 @@ public sealed class TrayApp : Application
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             var vm = new GuardManagementViewModel(new WindowsGuardManagementClient(Program.Paths), Program.Diagnostics, Program.Paths.LogDirectory);
             var window = new GuardWindow(vm);
+            window.OpenDirectoryRequested += path =>
+            {
+                try
+                {
+                    EgressController.Core.Protection.RuntimeSafety.RequireLiveOperations();
+                    if (!Directory.Exists(path)) throw new DirectoryNotFoundException("日志目录尚未创建：" + path);
+                    using var process = System.Diagnostics.Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                }
+                catch (Exception error) { vm.ReportError(error.ToString()); }
+            };
             var menu = new NativeMenu();
             void Show() { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }
             var open = new NativeMenuItem("打开主程序");

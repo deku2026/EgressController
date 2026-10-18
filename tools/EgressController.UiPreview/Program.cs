@@ -5,6 +5,7 @@ using Avalonia.Headless;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using EgressController.App;
 using EgressController.App.Preview;
 using EgressController.App.ViewModels;
@@ -76,6 +77,8 @@ internal static class Program
             window.KeyPress(Avalonia.Input.Key.Down, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.ArrowDown, null); window.KeyRelease(Avalonia.Input.Key.Down, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.ArrowDown, null);
             Dispatcher.UIThread.RunJobs();
             if (vm.SelectedPage.Key != "network") throw new InvalidOperationException("Keyboard navigation failed: " + vm.SelectedPage.Key);
+            window.FindControl<Button>("OpenLogsButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            if (vm.SelectedPage.Key != "events") throw new InvalidOperationException("Preview log-directory action escaped the mock UI.");
             window.Close();
         }
         var trayController = new PreviewController(); trayController.Guard.RefreshAsync().GetAwaiter().GetResult();
@@ -83,6 +86,13 @@ internal static class Program
         trayWindow.Show(); RenderChecks.Save(trayWindow, Path.Combine(directory, "guard-window.png"));
         trayWindow.Width = 680; trayWindow.Height = 520;
         RenderChecks.Save(trayWindow, Path.Combine(directory, "guard-window-compact.png"));
+        string? requestedDirectory = null;
+        trayWindow.OpenDirectoryRequested += path => requestedDirectory = path;
+        var serviceDetails = trayWindow.GetVisualDescendants().OfType<Expander>().First();
+        serviceDetails.IsExpanded = true; Dispatcher.UIThread.RunJobs();
+        trayWindow.GetVisualDescendants().OfType<Button>().First(button => button.Content as string == "打开服务日志目录")
+            .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        if (requestedDirectory != trayController.Guard.LogDirectory) throw new InvalidOperationException("Guard log-directory request failed.");
         trayWindow.Close();
         bindingLog.Verify();
         bool blocked = false;

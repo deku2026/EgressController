@@ -9,20 +9,13 @@ namespace EgressController.GuardTray;
 public sealed class GuardWindow : Window
 {
     public bool AllowExit { get; set; }
+    public event Action<string>? OpenDirectoryRequested;
     public GuardWindow(GuardManagementViewModel vm)
     {
         Title = "EgressController · 独立守护";
         Width = 900; Height = 800; MinWidth = 680; MinHeight = 520;
         var panel = new GuardPanel { DataContext = vm };
-        panel.OpenDirectoryRequested += path =>
-        {
-            try
-            {
-                if (!Directory.Exists(path)) throw new DirectoryNotFoundException("日志目录尚未创建：" + path);
-                using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-            }
-            catch (Exception error) { vm.ReportError(error.ToString()); }
-        };
+        panel.OpenDirectoryRequested += path => OpenDirectoryRequested?.Invoke(path);
         var layout = new Grid { Margin = new Thickness(28), RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 22 };
         var heading = new StackPanel { Spacing = 7 };
         heading.Children.Add(new TextBlock { Text = "独立守护", FontSize = 27, FontWeight = FontWeight.SemiBold });
