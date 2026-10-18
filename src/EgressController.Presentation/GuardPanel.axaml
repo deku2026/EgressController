@@ -1,0 +1,110 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:guard="using:EgressController.Guardian" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.Presentation.GuardPanel" x:DataType="guard:GuardManagementViewModel">
+  <Grid RowDefinitions="*,Auto" RowSpacing="12">
+    <ScrollViewer>
+      <StackPanel Spacing="16">
+        <Border Classes="card">
+          <StackPanel Spacing="17">
+            <Grid ColumnDefinitions="52,*" ColumnSpacing="16">
+              <ui:GuardianGlyph State="{Binding VisualState}" Width="48" Height="48" VerticalAlignment="Top"/>
+              <StackPanel Grid.Column="1" Spacing="8">
+                <TextBlock Text="{Binding StateTitle}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding DisplayReason}" Foreground="#667184" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Grid>
+            <Border Height="1" Background="#E8ECF2"/>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="{Binding TargetSummary}" Classes="muted"/>
+              <TextBlock Grid.Column="1" Text="{Binding LastChecked}" Classes="muted"/>
+            </Grid>
+          </StackPanel>
+        </Border>
+        <Border Classes="card">
+          <StackPanel Spacing="17">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="守护服务" Classes="section-title" VerticalAlignment="Center"/>
+              <Border Grid.Column="1" Classes="badge">
+                <TextBlock Text="{Binding ServiceState}" FontSize="12"/>
+              </Border>
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="5">
+                <TextBlock Text="开机启动" FontWeight="Medium"/>
+                <TextBlock Text="服务随系统启动，托盘在登录后显示" Classes="muted" TextWrapping="Wrap"/>
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoStart}" IsEnabled="{Binding CanEdit}" VerticalAlignment="Center" OnContent="开启" OffContent="关闭"/>
+            </Grid>
+            <WrapPanel>
+              <Button Content="启动守护" Classes="primary" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="0,0,8,0"/>
+              <Button Content="停止守护" Command="{Binding StopCommand}" IsEnabled="{Binding CanStop}" Margin="0,0,8,0"/>
+              <Button Content="刷新状态" Classes="quiet" Command="{Binding RefreshCommand}"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding Message}" Classes="warning" IsVisible="{Binding HasMessage}" TextWrapping="Wrap"/>
+            <Expander Header="更多服务操作" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="12" Margin="0,10,0,0">
+                <WrapPanel>
+                  <Button Content="安装服务" Command="{Binding InstallCommand}" IsEnabled="{Binding CanInstall}" Margin="0,0,8,8"/>
+                  <Button Content="停止并关闭自启" Command="{Binding StopAndDisableCommand}" IsEnabled="{Binding CanEdit}" Margin="0,0,8,8"/>
+                  <Button Content="强制停止" Classes="danger" Command="{Binding ForceStopCommand}" IsEnabled="{Binding CanStop}" Margin="0,0,8,8"/>
+                  <Button Content="卸载服务" Classes="quiet" Command="{Binding UninstallCommand}" IsEnabled="{Binding CanUninstall}" Margin="0,0,0,8"/>
+                </WrapPanel>
+                <TextBlock Text="手动停止后，本次开机不会自动恢复。取消自启不会停止当前服务。" Classes="muted" TextWrapping="Wrap"/>
+                <SelectableTextBlock Text="{Binding Details}" FontSize="12" Foreground="#667184" TextWrapping="Wrap"/>
+                <TextBlock Text="更新组件时先退出旧托盘，卸载并重装服务，再打开主程序。名单会保留。" Classes="muted" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Expander>
+          </StackPanel>
+        </Border>
+        <Border Classes="card">
+          <StackPanel Spacing="13">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="5">
+                <TextBlock Text="守护记录" Classes="section-title"/>
+                <TextBlock Text="{Binding RecordsHint}" Classes="muted"/>
+              </StackPanel>
+              <Button Grid.Column="1" Content="清空记录" Classes="quiet" Command="{Binding ClearHistoryCommand}" IsEnabled="{Binding CanClearHistory}"/>
+            </Grid>
+            <StackPanel Margin="0,14" Spacing="6" IsVisible="{Binding NoRecords}">
+              <TextBlock Text="{Binding RecordsEmptyText}" FontSize="15" HorizontalAlignment="Center"/>
+              <TextBlock Text="守护终止应用的原因会显示在这里" Classes="muted" HorizontalAlignment="Center"/>
+            </StackPanel>
+            <ListBox ItemsSource="{Binding EventRows}" IsVisible="{Binding HasRecords}" MaxHeight="240">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="guard:GuardEventRow">
+                  <Expander HorizontalAlignment="Stretch" Margin="0,0,0,8">
+                    <Expander.Header>
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="3">
+                          <TextBlock Text="{Binding Application}" FontWeight="Medium"/>
+                          <TextBlock Text="{Binding At}" Classes="muted"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding Result}" Classes.danger="{Binding Failed}" VerticalAlignment="Center"/>
+                      </Grid>
+                    </Expander.Header>
+                    <SelectableTextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="0,10,0,0"/>
+                  </Expander>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+        </Border>
+        <Border Classes="notice" IsVisible="{Binding HasFailure}">
+          <Expander Header="最近失败的详细原因" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="10" Margin="0,10,0,0">
+              <SelectableTextBlock Text="{Binding LastFailure}" TextWrapping="Wrap"/>
+              <SelectableTextBlock Text="{Binding LogFailure}" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Expander>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+    <Border Background="#EBEEF5" CornerRadius="11" Padding="17,14" Grid.Row="1">
+      <StackPanel Spacing="10">
+        <WrapPanel>
+          <Button Content="打开服务日志目录" Click="OpenServiceLogs" Margin="0,0,8,0"/>
+          <Button Content="管理日志" Click="OpenManagementLogs" Classes="quiet"/>
+        </WrapPanel>
+        <SelectableTextBlock Text="{Binding LogDirectory}" FontSize="11" Foreground="#667184" TextWrapping="Wrap"/>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

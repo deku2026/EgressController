@@ -45,4 +45,5 @@
     <InternalsVisibleTo Include="EgressController.Windows.IntegrationTests" />
   </ItemGroup>
 
+  <ItemGroup><ProjectReference Include="..\EgressController.Presentation\EgressController.Presentation.csproj" /></ItemGroup>
 </Project>

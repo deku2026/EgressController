@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Net.WebSockets;
 using System.Text;
 using EgressController.App.Services;
 using EgressController.Core.Contracts;
@@ -42,7 +41,7 @@ public sealed record ControllerEndpoint(int Port, string Secret)
 /// diagnostics streams and Windows discovery. Routing never depends on an application launch
 /// button; sing-box resolves the owning process for each new connection.
 /// </summary>
-public sealed partial class AppController : IAsyncDisposable
+public sealed partial class AppController : IAppController, IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly SemaphoreSlim _configurationGate = new(1, 1);
@@ -63,7 +62,9 @@ public sealed partial class AppController : IAsyncDisposable
     private readonly SingBoxService _singBox;
     private readonly ConnectionHistoryStore _connectionHistory = new();
     private readonly BoundedLogStore _logs = new();
-    private readonly LocalLogSink _localLog;
+    private readonly TrafficTimeline _trafficTimeline = new();
+    private bool _connectionRatesValid;
+    public TrafficSnapshot TrafficSnapshot => _trafficTimeline.Snapshot();
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly object _diagnosticsStateGate = new();
     private readonly object _runtimeStateGate = new();
@@ -88,14 +89,10 @@ public sealed partial class AppController : IAsyncDisposable
     private string _lastMessage = "就绪。";
     private long _trafficUp;
     private long _trafficDown;
-    private long _trafficUpRate;
-    private long _trafficDownRate;
     private DateTimeOffset? _connectionsUpdatedAtUtc;
     private DateTimeOffset? _trafficUpdatedAtUtc;
     private string _connectionMonitorStatus = "未启动";
     private string _trafficMonitorStatus = "未启动";
-    private string? _lastConnectionMonitorError;
-    private string? _lastTrafficMonitorError;
     private int _diagnosticsGeneration;
     private readonly NetworkHealthState _networkHealth = new();
     private string _networkMonitorStatus = "未启动";
@@ -109,13 +106,12 @@ public sealed partial class AppController : IAsyncDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), WindowsPackageIdentity.IsPackaged());
         _dataRoot = Path.GetFullPath(dataRoot ?? storage.Data);
         _rulesetRoot = Path.GetFullPath(rulesetRoot ?? storage.Rulesets);
-        Diagnostics = new DiagnosticJournal(Path.Combine(_dataRoot, "logs", "controller.log"));
+        Diagnostics = new DiagnosticJournal(Path.Combine(_dataRoot, "logs", "protection.log"), shouldPersist: ProtectionLogPolicy.IsRelevant);
         Diagnostics.Info("启动", "EgressController 启动；数据目录：" + _dataRoot);
         Directory.CreateDirectory(_dataRoot);
         Directory.CreateDirectory(Path.Combine(_dataRoot, "logs"));
         Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
         Directory.CreateDirectory(_rulesetRoot);
-        _localLog = new LocalLogSink(Path.Combine(_dataRoot, "logs"));
         _profileStore = new EgressProfileStore(_dataRoot);
         _quotaStore = new EgressQuotaStore(_dataRoot);
         _stateStore = new SingBoxStateStore(_dataRoot);
@@ -136,8 +132,9 @@ public sealed partial class AppController : IAsyncDisposable
     }
 
     public string DataRoot => _dataRoot;
+    public bool IsPreview => false;
     public string RulesetRoot => _rulesetRoot;
-    public string LogPath => _localLog.LogPath;
+    public string LogPath => Diagnostics.LogPath;
     public EgressProfileDocument Profile => _profile;
     public bool IsUpdatingProfile => _configurationGate.CurrentCount == 0;
     public EgressQuotaSnapshot Quota => _quotaStore.Load();
@@ -163,8 +160,6 @@ public sealed partial class AppController : IAsyncDisposable
     };
     public long TrafficUp => Interlocked.Read(ref _trafficUp);
     public long TrafficDown => Interlocked.Read(ref _trafficDown);
-    public long TrafficUpRate => Interlocked.Read(ref _trafficUpRate);
-    public long TrafficDownRate => Interlocked.Read(ref _trafficDownRate);
     public DateTimeOffset? ConnectionsUpdatedAtUtc
     {
         get
@@ -295,15 +290,11 @@ public sealed partial class AppController : IAsyncDisposable
                 {
                     if (enabled)
                     {
-                        selected[key] = new EgressApplicationSelection
-                        {
-                            DiscoveryKey = key,
-                            DisplayName = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.Name,
-                            ExecutablePaths = ApplicationInventorySnapshot.Create(_targets.All()).ExpandSelected([key]),
-                            DirectoryRoots = _targets.All().FirstOrDefault(target => target.DiscoveryKey == key)?.OwnedRoots ?? [],
-                            Target = route ?? routes?.GetValueOrDefault(key)
-                                ?? selected.GetValueOrDefault(key)?.Target ?? EgressRouteTarget.DefaultAdapter,
-                        };
+                        var saved = selected.GetValueOrDefault(key);
+                        var target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
+                        selected[key] = ApplicationInventorySnapshot.Create(_targets.All()).CaptureSelection(key,
+                            route ?? routes?.GetValueOrDefault(key) ?? saved?.Target ?? EgressRouteTarget.DefaultAdapter,
+                            saved, target?.OwnedRoots);
                     }
                     else
                     {
@@ -509,7 +500,6 @@ public sealed partial class AppController : IAsyncDisposable
             StartNetworkMonitor();
             _profileApplied = true;
             _routingDirty = false;
-            ActivatePreparedRouting();
             SetMessage("sing-box TUN 已启动。");
             return ControllerOperationResult.Success();
         }
@@ -668,9 +658,7 @@ public sealed partial class AppController : IAsyncDisposable
         IReadOnlyList<string> ownerPaths = proxyBindings.OwnerPaths;
         ValidateProtectionConflicts(profile, ownerPaths, updateExclusions: false);
         ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(_targets.All());
-        SingBoxApplicationRouteInput[] inheritedRoutes = InheritedApplicationRoutes(profile);
-        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory)
-            .Concat(inheritedRoutes).ToArray();
+        IReadOnlyList<SingBoxApplicationRouteInput> applicationRoutes = ResolveApplicationRoutes(profile, inventory);
         IReadOnlyList<SingBoxRuleSetInput> ruleSets = await EnsureRuleSetsAsync(profile, cancellationToken).ConfigureAwait(false);
         SingBoxCoreCandidate core = _preparedCore ??= await _coreManager.PrepareAsync(profile.Core, cancellationToken).ConfigureAwait(false);
         _coreExecutable = core.ExecutablePath;
@@ -703,8 +691,6 @@ public sealed partial class AppController : IAsyncDisposable
         string configPath = Path.Combine(runtimeDirectory, $"config-{compiled.Sha256}.json");
         EgressProfileCompiler.WriteNext(configPath, compiled);
         await _coreManager.CheckConfigAsync(core, configPath, cancellationToken).ConfigureAwait(false);
-        _preparedRouting = new(new ApplicationRoutingCoverage(applicationRoutes.SelectMany(route => route.ExecutablePaths),
-            applicationRoutes.SelectMany(route => route.DirectoryRoots ?? [])), InheritedRoutingKey(inheritedRoutes));
         SetRuntimeFingerprint(environment, proxyBindings);
         return SingBoxRuntimeCandidate.From(core, configPath, compiled.Sha256, endpoint.Port, endpoint.Secret);
     }
@@ -735,11 +721,10 @@ public sealed partial class AppController : IAsyncDisposable
         return snapshot;
     }
 
-    private static string ApplicationRoutingKey(EgressProfileDocument profile)
+    internal static string ApplicationRoutingKey(EgressProfileDocument profile)
         => string.Join("\n", profile.Applications.OrderBy(item => item.DiscoveryKey, StringComparer.Ordinal)
             .Select(item => item.DiscoveryKey + ":" + item.Target + ":"
-                + string.Join("|", item.ExecutablePaths.Order(StringComparer.OrdinalIgnoreCase)) + ":"
-                + string.Join("|", item.DirectoryRoots.Order(StringComparer.OrdinalIgnoreCase))));
+                + string.Join("|", item.ExecutablePaths.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))));
 
     private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
         EgressProfileDocument profile, ApplicationInventorySnapshot inventory)
@@ -753,7 +738,7 @@ public sealed partial class AppController : IAsyncDisposable
                 throw new ControllerPreparationException("application.unresolved", $"应用没有可用于分流匹配的 EXE：{target.DisplayName}。");
             routes.Add(new SingBoxApplicationRouteInput(
                 target.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                selection.Target, selection.DirectoryRoots));
+                selection.Target));
         }
         return routes;
     }
@@ -829,6 +814,7 @@ public sealed partial class AppController : IAsyncDisposable
                 RefreshProtectedInventory();
                 _profileStore.Save(previous);
             }
+            Diagnostics.Info("TUN 配置变更", "用户保存了网卡、端口或分流设置");
             SingBoxApplyResult applied = await PreparedRuntimeUpdate.ApplyAsync(_singBox,
                 token => PrepareRuntimeAsync(next, token), () => Commit(next), RestorePrevious,
                 cancellationToken).ConfigureAwait(false);
@@ -836,7 +822,6 @@ public sealed partial class AppController : IAsyncDisposable
             {
                 _profileApplied = true;
                 _routingDirty = false;
-                ActivatePreparedRouting();
                 if (applied.CoreChanged)
                 {
                     StartDiagnostics(LoadControllerEndpoint());
@@ -957,10 +942,10 @@ public sealed partial class AppController : IAsyncDisposable
             _connectionHistory.ApplySnapshot(Array.Empty<ConnectionObservation>());
             Interlocked.Exchange(ref _trafficUp, 0);
             Interlocked.Exchange(ref _trafficDown, 0);
-            Interlocked.Exchange(ref _trafficUpRate, 0);
-            Interlocked.Exchange(ref _trafficDownRate, 0);
             _connectionsUpdatedAtUtc = null;
             _trafficUpdatedAtUtc = null;
+            _trafficTimeline.Reset();
+            _connectionRatesValid = false;
         }
         SetMonitorStatuses("未运行", "未运行");
     }
@@ -1015,7 +1000,8 @@ public sealed partial class AppController : IAsyncDisposable
                 if (!changed && _profileApplied && !_routingDirty)
                     continue;
 
-                await ApplyRuntimeChangeAsync(cancellationToken).ConfigureAwait(false);
+                await ApplyRuntimeChangeAsync(_routingDirty ? "显式扫描更新了已保存 EXE 清单"
+                    : !_profileApplied ? "等待当前配置生效" : "网卡绑定或代理端口身份发生变化", cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1029,7 +1015,7 @@ public sealed partial class AppController : IAsyncDisposable
         }
     }
 
-    private async Task ApplyRuntimeChangeAsync(CancellationToken cancellationToken)
+    private async Task ApplyRuntimeChangeAsync(string cause, CancellationToken cancellationToken)
     {
         await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -1039,12 +1025,12 @@ public sealed partial class AppController : IAsyncDisposable
 
             bool previouslyApplied = _profileApplied;
             string previousRuntimeFingerprint = GetRuntimeFingerprint();
+            Diagnostics.Info("TUN 配置变更", cause);
             SingBoxApplyResult applied = await _singBox.ApplyAsync(PrepareRuntimeAsync, cancellationToken).ConfigureAwait(false);
             if (applied.Succeeded)
             {
                 _profileApplied = true;
                 _routingDirty = false;
-                ActivatePreparedRouting();
                 if (applied.CoreChanged)
                 {
                     StartDiagnostics(LoadControllerEndpoint());
@@ -1105,118 +1091,47 @@ public sealed partial class AppController : IAsyncDisposable
                 .Append(proxyBindings.RoutingFingerprint));
     }
 
-    private async Task DiagnosticsLoopAsync(
-        ControllerEndpoint endpoint,
-        int generation,
-        CancellationToken cancellationToken)
+    private async Task DiagnosticsLoopAsync(ControllerEndpoint endpoint, int generation, CancellationToken token)
     {
-        Task connections = ConnectionStreamLoopAsync(endpoint, generation, cancellationToken);
-        Task traffic = TrafficStreamLoopAsync(endpoint, generation, cancellationToken);
-        try
-        {
-            await Task.WhenAll(connections, traffic).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-    }
-
-    private async Task ConnectionStreamLoopAsync(
-        ControllerEndpoint endpoint,
-        int generation,
-        CancellationToken cancellationToken)
-    {
-        TimeSpan backoff = TimeSpan.FromMilliseconds(250);
-        while (!cancellationToken.IsCancellationRequested)
+        using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
+        var sampler = new ConnectionSnapshotSampler(api.GetConnectionsAsync);
+        while (!token.IsCancellationRequested)
         {
             try
             {
-                using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
-                ApplyConnectionSnapshot(
-                    await api.GetConnectionsAsync(cancellationToken).ConfigureAwait(false),
-                    generation);
-                using ClientWebSocket socket = await api.ConnectConnectionsWebSocketAsync(500, cancellationToken).ConfigureAwait(false);
-                backoff = TimeSpan.FromMilliseconds(250);
-                SetConnectionMonitorConnected(generation);
-                while (!cancellationToken.IsCancellationRequested)
+                var sample = await sampler.SampleAsync(token).ConfigureAwait(false);
+                if (sample.Snapshot is { } snapshot)
                 {
-                    string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-                    if (message is null)
-                        throw new SingBoxApiException("连接监控 WebSocket 已关闭。");
-                    ApplyConnectionSnapshot(SingBoxApiClient.ParseConnectionsMessage(message), generation);
+                    ApplyTrafficRate(new SingBoxTrafficEvent { Up = sample.UploadRate, Down = sample.DownloadRate }, generation, sample.HasRate);
+                    ApplyConnectionSnapshot(snapshot, generation);
+                    SetConnectionMonitorConnected(generation);
+                    SetTrafficMonitorConnected(generation);
                 }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                ReportConnectionMonitorFailure(exception, generation);
-                try
+                else
                 {
-                    await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+                    ResetTrafficRate(generation);
+                    // Display sampling has no authority over TUN or either protection decision.
+                    SetConnectionMonitorStatus("统计暂不可用：" + DescribeDiagnosticsFailure(sample.Error!), generation);
+                    SetTrafficMonitorStatus("等待下一次统计", generation);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                backoff = TimeSpan.FromMilliseconds(Math.Min(backoff.TotalMilliseconds * 2, 5_000));
+                await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
             }
-        }
-        SetConnectionMonitorStatus("已停止", generation);
-    }
-
-    private async Task TrafficStreamLoopAsync(
-        ControllerEndpoint endpoint,
-        int generation,
-        CancellationToken cancellationToken)
-    {
-        TimeSpan backoff = TimeSpan.FromMilliseconds(250);
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                using var api = new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
-                using ClientWebSocket socket = await api.ConnectTrafficWebSocketAsync(cancellationToken).ConfigureAwait(false);
-                backoff = TimeSpan.FromMilliseconds(250);
-                SetTrafficMonitorConnected(generation);
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    string? message = await SingBoxApiClient.ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-                    if (message is null)
-                        throw new SingBoxApiException("流量监控 WebSocket 已关闭。");
-                    SingBoxTrafficEvent traffic = SingBoxApiClient.ParseTrafficMessage(message);
-                    ApplyTrafficRate(traffic, generation);
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+            catch (Exception error)
             {
                 ResetTrafficRate(generation);
-                ReportTrafficMonitorFailure(exception, generation);
-                try
-                {
-                    await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                backoff = TimeSpan.FromMilliseconds(Math.Min(backoff.TotalMilliseconds * 2, 5_000));
+                SetConnectionMonitorStatus("统计显示失败：" + DescribeDiagnosticsFailure(error), generation);
+                try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             }
         }
-        ResetTrafficRate(generation);
-        SetTrafficMonitorStatus("已停止", generation);
     }
 
     private void ApplyConnectionSnapshot(SingBoxConnectionsResponse snapshot, int generation)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         DateTimeOffset observedAtUtc = DateTimeOffset.UtcNow;
+        long observedStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
         long adapterDelta = 0;
@@ -1233,11 +1148,14 @@ public sealed partial class AppController : IAsyncDisposable
                 _connectionRateSamples.TryGetValue(connection.Id, out ConnectionRateSample? previous);
                 double elapsedSeconds = previous is null
                     ? 0
-                    : (observedAtUtc - previous.ObservedAtUtc).TotalSeconds;
+                    : System.Diagnostics.Stopwatch.GetElapsedTime(previous.ObservedStamp, observedStamp).TotalSeconds;
                 long uploadRate = CalculateRate(connection.Upload, previous?.Upload, elapsedSeconds);
                 long downloadRate = CalculateRate(connection.Download, previous?.Download, elapsedSeconds);
                 DateTimeOffset startedAtUtc = connection.Start ?? previous?.StartedAtUtc ?? observedAtUtc;
-                observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate));
+                observations.Add(ToObservation(connection, observedAtUtc, startedAtUtc, uploadRate, downloadRate) with
+                { HasRate = _connectionRatesValid && previous is not null && elapsedSeconds is > 0 and <= 3
+                    && previous.Upload >= 0 && previous.Download >= 0
+                    && previous.StartedAtUtc == startedAtUtc && connection.Upload >= previous.Upload && connection.Download >= previous.Download });
                 string? outbound = connection.Chains.FirstOrDefault();
                 if (Guid.TryParse(_profile.DefaultAdapterId, out Guid quotaAdapter)
                     && string.Equals(outbound, EgressProfileCompiler.AdapterTag(quotaAdapter), StringComparison.OrdinalIgnoreCase))
@@ -1247,7 +1165,7 @@ public sealed partial class AppController : IAsyncDisposable
                         : SafeAdd(SafeDelta(connection.Upload, previous.Upload), SafeDelta(connection.Download, previous.Download)));
                 }
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
-                    observedAtUtc,
+                    observedAtUtc, observedStamp,
                     connection.Upload,
                     connection.Download,
                     startedAtUtc,
@@ -1261,6 +1179,7 @@ public sealed partial class AppController : IAsyncDisposable
             Interlocked.Exchange(ref _trafficDown, Math.Max(0, snapshot.DownloadTotal));
             _connectionHistory.ApplySnapshot(observations, observedAtUtc);
             _connectionsUpdatedAtUtc = observedAtUtc;
+            _connectionRatesValid = true;
         }
         if (adapterDelta > 0)
             _quotaStore.AddUsage(adapterDelta);
@@ -1268,14 +1187,14 @@ public sealed partial class AppController : IAsyncDisposable
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)
     {
-        if (previous is null || elapsedSeconds <= 0 || current <= previous.Value)
+        if (previous is null || previous < 0 || current < 0 || elapsedSeconds <= 0 || current <= previous.Value)
             return 0;
         double rate = ((double)current - previous.Value) / elapsedSeconds;
         return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
     }
 
     private static long SafeDelta(long current, long previous)
-        => current > previous ? current - previous : 0;
+        => previous >= 0 && current > previous ? current - previous : 0;
 
     private static long SafeAdd(long left, long right)
         => left > long.MaxValue - right ? long.MaxValue : left + right;
@@ -1347,15 +1266,14 @@ public sealed partial class AppController : IAsyncDisposable
         return new SingBoxApiClient(endpoint.Uri, endpoint.Secret);
     }
 
-    private void ApplyTrafficRate(SingBoxTrafficEvent traffic, int generation)
+    private void ApplyTrafficRate(SingBoxTrafficEvent traffic, int generation, bool available)
     {
         lock (_diagnosticsStateGate)
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
                 return;
-            Interlocked.Exchange(ref _trafficUpRate, Math.Max(0, traffic.Up));
-            Interlocked.Exchange(ref _trafficDownRate, Math.Max(0, traffic.Down));
             _trafficUpdatedAtUtc = DateTimeOffset.UtcNow;
+            _trafficTimeline.Observe(available ? traffic.Up : null, available ? traffic.Down : null);
         }
     }
 
@@ -1365,8 +1283,8 @@ public sealed partial class AppController : IAsyncDisposable
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
                 return;
-            Interlocked.Exchange(ref _trafficUpRate, 0);
-            Interlocked.Exchange(ref _trafficDownRate, 0);
+            _connectionRatesValid = false;
+            _trafficTimeline.Unavailable();
         }
     }
 
@@ -1375,9 +1293,8 @@ public sealed partial class AppController : IAsyncDisposable
         string level = CoreLogClassifier.Classify(output.Source, output.Line);
         string message = DiagnosticJournal.Redact(output.Line);
         _logs.Append(output.Source, level, message);
-        if (level is "error" or "fatal" or "warn") Diagnostics.Report("sing-box", "core." + level, message);
-        try { _localLog.Append(output.Source, level, message); }
-        catch (Exception error) { Diagnostics.Report("日志写入", "core.log.write", "无法写入：" + _localLog.LogPath, error); }
+        // Routine core output remains bounded in memory; it is not a protection event.
+        // Actual core exits/startup failures are recorded by the lifecycle owner.
     }
 
     private void SetConnectionMonitorConnected(int generation)
@@ -1387,7 +1304,6 @@ public sealed partial class AppController : IAsyncDisposable
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
                 return;
             _connectionMonitorStatus = "已连接";
-            _lastConnectionMonitorError = null;
         }
     }
 
@@ -1398,42 +1314,7 @@ public sealed partial class AppController : IAsyncDisposable
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
                 return;
             _trafficMonitorStatus = "已连接";
-            _lastTrafficMonitorError = null;
         }
-    }
-
-    private void ReportConnectionMonitorFailure(Exception exception, int generation)
-    {
-        string detail = DescribeDiagnosticsFailure(exception);
-        bool shouldLog;
-        lock (_gate)
-        {
-            if (generation != Volatile.Read(ref _diagnosticsGeneration))
-                return;
-            _connectionMonitorStatus = "重试中：" + detail;
-            shouldLog = !string.Equals(_lastConnectionMonitorError, detail, StringComparison.Ordinal);
-            _lastConnectionMonitorError = detail;
-        }
-
-        if (shouldLog && generation == Volatile.Read(ref _diagnosticsGeneration))
-            ReportFailure("连接监控", "monitor.connections", "连接监控中断：" + detail, exception);
-    }
-
-    private void ReportTrafficMonitorFailure(Exception exception, int generation)
-    {
-        string detail = DescribeDiagnosticsFailure(exception);
-        bool shouldLog;
-        lock (_gate)
-        {
-            if (generation != Volatile.Read(ref _diagnosticsGeneration))
-                return;
-            _trafficMonitorStatus = "重试中：" + detail;
-            shouldLog = !string.Equals(_lastTrafficMonitorError, detail, StringComparison.Ordinal);
-            _lastTrafficMonitorError = detail;
-        }
-
-        if (shouldLog && generation == Volatile.Read(ref _diagnosticsGeneration))
-            ReportFailure("流量监控", "monitor.traffic", "流量监控中断：" + detail, exception);
     }
 
     private static string DescribeDiagnosticsFailure(Exception exception)
@@ -1470,8 +1351,6 @@ public sealed partial class AppController : IAsyncDisposable
         {
             _connectionMonitorStatus = connectionStatus;
             _trafficMonitorStatus = trafficStatus;
-            _lastConnectionMonitorError = null;
-            _lastTrafficMonitorError = null;
         }
     }
 
@@ -1486,6 +1365,7 @@ public sealed partial class AppController : IAsyncDisposable
 
 internal sealed record ConnectionRateSample(
     DateTimeOffset ObservedAtUtc,
+    long ObservedStamp,
     long Upload,
     long Download,
     DateTimeOffset StartedAtUtc,

@@ -1,0 +1,109 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.App.ViewModels" xmlns:local="using:EgressController.App.Views" x:Class="EgressController.App.Views.RulesPage" x:DataType="vm:MainViewModel">
+  <Grid RowDefinitions="Auto,Auto,*" RowSpacing="16">
+    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+      <TextBox Text="{Binding Domains.Query}" PlaceholderText="搜索域名规则，例如 google"/>
+      <Button Grid.Column="1" Content="{Binding Domains.RefreshText}" Command="{Binding Domains.RefreshCatalogCommand}" Classes="primary"/>
+      <Button Grid.Column="2" Content="全选结果" Command="{Binding Domains.SelectAllCommand}" IsEnabled="{Binding Domains.CanSelectVisible}"/>
+      <Button Grid.Column="3" Content="清空结果" Command="{Binding Domains.ClearAllCommand}"/>
+    </Grid>
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+      <TextBlock Text="{Binding Domains.Status}" Classes="muted" TextTrimming="CharacterEllipsis"/>
+      <TextBlock Grid.Column="1" Text="{Binding Domains.SelectedSummary}" Classes="muted"/>
+    </Grid>
+    <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="18">
+      <Border Classes="list-card">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <Border Padding="20,17" Background="#F9FAFC">
+            <TextBlock Text="规则库" Classes="section-title"/>
+          </Border>
+          <ListBox Grid.Row="1" ItemsSource="{Binding Domains.Results}" Classes="table">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:RuleEntryViewModel">
+                <Border Padding="18,14" BorderBrush="#E8EDF4" BorderThickness="0,0,0,1">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Top"/>
+                    <StackPanel Grid.Column="1" Spacing="8">
+                      <TextBlock Text="{Binding Name}" FontWeight="Medium"/>
+                      <Grid ColumnDefinitions="82,*" ColumnSpacing="8">
+                        <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                      </Grid>
+                      <TextBlock Text="{Binding Routing.Status}" IsVisible="{Binding Routing.HasStatus}" Classes="warning" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Grid.Row="1" Text="规则库为空，请先更新规则。" Classes="muted" IsVisible="{Binding Domains.NoResults}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <Border Grid.Row="2" BorderBrush="#E8EDF4" BorderThickness="0,1,0,0" Padding="18,13">
+            <StackPanel Spacing="5">
+              <TextBlock Text="MetaCubeX · sing-geosite" Classes="muted"/>
+              <TextBlock Text="{Binding Domains.CatalogCommit}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Domains.CatalogDirectory}"/>
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Border>
+      <ScrollViewer Grid.Column="1">
+        <StackPanel Spacing="18">
+          <Border Classes="card">
+            <StackPanel Spacing="16">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="自定义域名" Classes="section-title"/>
+                <TextBlock Grid.Column="1" Text="优先于规则库" Classes="muted"/>
+              </Grid>
+              <TextBox Text="{Binding Domains.ManualDomain}" PlaceholderText="example.com，包含所有子域名"/>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <ComboBox ItemsSource="{Binding Domains.RouteOptions}" SelectedItem="{Binding Domains.ManualRoute}" HorizontalAlignment="Stretch"/>
+                <Button Grid.Column="1" Content="添加" Command="{Binding Domains.AddManualCommand}"/>
+              </Grid>
+              <ItemsControl ItemsSource="{Binding Domains.ManualDomains}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ManualDomainViewModel">
+                    <Border Padding="0,15,0,0" Margin="0,10,0,0" BorderBrush="#E8EDF4" BorderThickness="0,1,0,0">
+                      <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                          <TextBlock Text="{Binding Domain}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Domain}" FontWeight="Medium"/>
+                          <Button Grid.Column="1" Content="移除" Classes="quiet" Command="{Binding RemoveCommand}" IsEnabled="{Binding Routing.CanEdit}"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="82,*" ColumnSpacing="8">
+                          <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <TextBlock Text="{Binding Routing.Status}" Classes="warning" TextWrapping="Wrap" IsVisible="{Binding Routing.HasStatus}"/>
+                        <TextBlock Text="{Binding Status}" Classes="warning" TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+          <Border Classes="card">
+            <StackPanel Spacing="16">
+              <TextBlock Text="已启用规则" Classes="section-title"/>
+              <ItemsControl ItemsSource="{Binding Domains.SelectedRules}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:RuleEntryViewModel">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="0,0,0,12">
+                      <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Top"/>
+                      <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="{Binding Name}" FontWeight="Medium"/>
+                        <Grid ColumnDefinitions="82,*" ColumnSpacing="8">
+                          <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                          <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        <TextBlock Text="{Binding Routing.Status}" Classes="warning" TextWrapping="Wrap" IsVisible="{Binding Routing.HasStatus}"/>
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Text="尚未启用规则集" Classes="muted" IsVisible="{Binding Domains.NoSelectedRules}"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</local:PageView>

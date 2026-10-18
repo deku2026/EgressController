@@ -1,0 +1,77 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" xmlns:app="using:EgressController.App" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.Views.TrafficPage" x:DataType="vm:MainViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="18">
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="18">
+        <Border Classes="card">
+          <StackPanel Spacing="12">
+            <TextBlock Text="上传速度" Classes="eyebrow"/>
+            <TextBlock Text="{Binding Dashboard.UploadRate}" Classes="metric"/>
+            <ui:TrendChart Samples="{Binding Dashboard.UploadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#6371D6" Height="155"/>
+            <TextBlock Text="{Binding Dashboard.TelemetryStatus}" Classes="muted"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="card">
+          <StackPanel Spacing="12">
+            <TextBlock Text="下载速度" Classes="eyebrow"/>
+            <TextBlock Text="{Binding Dashboard.DownloadRate}" Classes="metric"/>
+            <ui:TrendChart Samples="{Binding Dashboard.DownloadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#55A8CF" Height="155"/>
+            <TextBlock Text="{Binding Dashboard.SampleTime}" Classes="muted"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+      <Border Classes="card">
+        <Grid ColumnDefinitions="200,*" ColumnSpacing="35">
+          <Grid Width="185" Height="185" VerticalAlignment="Center">
+            <app:QuotaRingControl Percentage="{Binding Traffic.UsedPercent}"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="5">
+              <TextBlock Text="{Binding Traffic.UsedPercentText}" FontSize="21" FontWeight="SemiBold"/>
+              <TextBlock Text="套餐占用" Classes="muted" HorizontalAlignment="Center"/>
+            </StackPanel>
+          </Grid>
+          <StackPanel Grid.Column="1" Spacing="18">
+            <TextBlock Text="家宽流量套餐" Classes="section-title"/>
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
+              <StackPanel Spacing="7">
+                <TextBlock Text="套餐总量 / GiB" Classes="muted"/>
+                <TextBox Text="{Binding Traffic.TotalInput}"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Spacing="7">
+                <TextBlock Text="当前剩余 / GiB" Classes="muted"/>
+                <TextBox Text="{Binding Traffic.RemainingInput}"/>
+              </StackPanel>
+            </Grid>
+            <WrapPanel>
+              <Button Content="保存并重新统计" Classes="primary" Command="{Binding Traffic.SaveQuotaCommand}" Margin="0,0,8,0"/>
+              <Button Content="清空已用流量" Command="{Binding Traffic.ClearUsageCommand}"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding Traffic.Status}" Classes="warning" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="18">
+        <Border Classes="card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="剩余流量" Classes="eyebrow"/>
+            <TextBlock Text="{Binding Traffic.Remaining}" FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding Traffic.RemainingPercentText}" Classes="muted"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="本地新增用量" Classes="eyebrow"/>
+            <TextBlock Text="{Binding Traffic.Used}" FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock Text="自上次保存套餐起累计" Classes="muted"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Classes="card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="统计出口" Classes="eyebrow"/>
+            <TextBlock Text="ESIM-家宽" FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding Dashboard.DirectAdapter}" Classes="muted"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+      <TextBlock Text="套餐用量按家宽出口连接估算，仅用于本地记录。" Classes="muted"/>
+    </StackPanel>
+  </ScrollViewer>
+</local:PageView>

@@ -8,6 +8,8 @@ namespace EgressController.App;
 
 public sealed partial class AppController
 {
+    public int? DirectDelayMilliseconds => _networkHealth.DirectDelayMilliseconds;
+    public int? ProxyDelayMilliseconds => _networkHealth.ProxyDelayMilliseconds;
     public string DirectInternetStatus => _networkHealth.DirectStatus;
     public string ProxyInternetStatus => _networkHealth.ProxyStatus;
 

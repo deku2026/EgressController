@@ -4,6 +4,15 @@ using EgressController.Diagnostics;
 
 namespace EgressController.App.ViewModels;
 
+public sealed record RuntimeEventViewModel(CoreLogEntry Entry)
+{
+    public string Time => Entry.TimestampUtc.ToLocalTime().ToString("HH:mm:ss");
+    public string Stage => Entry.Source;
+    public string Message => Entry.Message.Split('\n')[0];
+    public string Detail => $"{Entry.TimestampUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n{Entry.Source}\n\n{Entry.Message}";
+    public bool Failed => Entry.Level is "error" or "fatal";
+}
+
 public sealed class DiagnosticIssueViewModel(DiagnosticIssue issue)
 {
     public DiagnosticIssue Issue => issue;
@@ -20,10 +29,19 @@ public sealed class DiagnosticsViewModel(DiagnosticJournal journal, BoundedLogSt
     private long _version = -1, _logVersion = -1, _coreVersion = -1;
     private DiagnosticIssueViewModel? _selected;
     private string _latestFailure = "", _controllerLog = "", _coreLog = "";
+    private RuntimeEventViewModel? _selectedEvent;
     public string DirectoryPath => journal.DirectoryPath;
     public string ControllerLogPath => journal.LogPath;
     public string CoreLogPath => coreLogPath;
     public ObservableCollection<DiagnosticIssueViewModel> Issues { get; } = [];
+    public ObservableCollection<RuntimeEventViewModel> Events { get; } = [];
+    public bool NoEvents => Events.Count == 0;
+    public RuntimeEventViewModel? SelectedEvent
+    {
+        get => _selectedEvent;
+        set { if (SetProperty(ref _selectedEvent, value)) OnPropertyChanged(nameof(EventDetail)); }
+    }
+    public string EventDetail => SelectedEvent?.Detail ?? "选择一条事件查看原因。";
     public string LatestFailure { get => _latestFailure; private set => SetProperty(ref _latestFailure, value); }
     public bool HasFailures => Issues.Count > 0;
     public string ControllerLog { get => _controllerLog; private set => SetProperty(ref _controllerLog, value); }
@@ -34,7 +52,7 @@ public sealed class DiagnosticsViewModel(DiagnosticJournal journal, BoundedLogSt
         set { if (SetProperty(ref _selected, value)) OnPropertyChanged(nameof(SelectedDetails)); }
     }
     public string SelectedDetails => Selected?.Details ?? "尚未记录失败。";
-    public string ExportText => $"主程序日志：{ControllerLogPath}\n内核日志：{CoreLogPath}\n\n"
+    public string ExportText => $"保护日志：{ControllerLogPath}\n内核输出：仅保留在内存中\n\n"
         + string.Join("\n\n", Issues.Select(issue => issue.Details)) + "\n\n主程序最近日志：\n"
         + ControllerLog + "\n\n内核最近日志：\n" + CoreLog;
 
@@ -56,6 +74,11 @@ public sealed class DiagnosticsViewModel(DiagnosticJournal journal, BoundedLogSt
         {
             _logVersion = journal.Logs.Version;
             ControllerLog = Format(journal.Logs.Snapshot());
+            var previous = SelectedEvent?.Entry;
+            Events.Clear();
+            foreach (var entry in journal.Logs.Snapshot().Where(ProtectionLogPolicy.IsRelevant).TakeLast(200).Reverse()) Events.Add(new(entry));
+            SelectedEvent = Events.FirstOrDefault(item => item.Entry == previous) ?? Events.FirstOrDefault();
+            OnPropertyChanged(nameof(NoEvents));
         }
         if (_coreVersion != coreLogs.Version)
         {

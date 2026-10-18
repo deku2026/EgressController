@@ -9,7 +9,7 @@ namespace EgressController.Core.Tests;
 public sealed class ProtectionReviewRegressionTests
 {
     private static readonly HashSet<string> Exclusions = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ProtectedExecutable[] Targets = [new(@"C:\Apps\AI\app.exe", "AI")];
+    private static readonly ProtectedExecutable[] Targets = [new(@"C:\Apps\AI\app.exe", "AI"), new(@"C:\Shared\worker.exe", "AI")];
     private static readonly GuardProcess Parent = new(new(10, DateTime.UnixEpoch), 0, Targets[0].Path);
     private static readonly GuardProcess Child = new(new(11, DateTime.UnixEpoch.AddSeconds(1)), 10, @"C:\Shared\worker.exe");
 
@@ -40,43 +40,46 @@ public sealed class ProtectionReviewRegressionTests
         processes.Failures = [new(11, "worker.exe", "access denied")];
         protection.Sweep(Targets, Exclusions, false, "handoff");
         processes.Failures = [];
-        processes.Snapshot = [Child with { Key = new(11, DateTime.UnixEpoch.AddMinutes(1)), ParentPid = 0 }];
+        processes.Snapshot = [Child with { Key = new(11, DateTime.UnixEpoch.AddMinutes(1)), ParentPid = 0, ExecutablePath = @"C:\Other\unselected.exe" }];
         Assert.Equal(0, protection.Sweep(Targets, Exclusions, false, "handoff"));
         Assert.Empty(processes.Killed);
         Assert.Empty(protection.CaptureTracking());
     }
 
     [Fact]
-    public void New_external_child_waits_for_its_route_while_existing_app_stays_ready()
+    public void Healthy_apps_and_unselected_OS_children_never_need_new_routing_or_termination()
     {
         var processes = new Processes { Snapshot = [Parent, Child] };
         var protection = new ProcessProtection(processes);
-        var oldRoutes = new ApplicationRoutingCoverage([Parent.ExecutablePath], []);
-        protection.Sweep(Targets, Exclusions, true, "ready", canRun: oldRoutes.Contains);
-        Assert.Equal(Child.Key, Assert.Single(processes.Killed));
-        Assert.Contains("分流规则尚未生效", Assert.Single(protection.Events).Reason);
-        Assert.Contains(protection.CaptureRoutingMembers(), item => item.Path == Child.ExecutablePath && item.Source == Targets[0]);
-        processes.Killed.Clear();
-        processes.Snapshot = [Child]; // parent exited, routing still inherits its selection
-        var newRoutes = new ApplicationRoutingCoverage([Parent.ExecutablePath, Child.ExecutablePath], []);
-        protection.Sweep(Targets, Exclusions, true, "ready", canRun: newRoutes.Contains);
+        protection.Sweep([Targets[0]], Exclusions, true, "ready");
         Assert.Empty(processes.Killed);
-        protection.Sweep([], Exclusions, true, "ready", canRun: newRoutes.Contains);
-        Assert.Empty(protection.CaptureRoutingMembers());
+        Assert.Equal(Parent.Key, Assert.Single(protection.CaptureTracking()).Identity);
+        protection.Sweep([Targets[0]], Exclusions, false, "TUN stopped");
+        Assert.Equal(Parent.Key, Assert.Single(processes.Killed));
     }
 
     [Fact]
-    public void Recursive_route_covers_future_executables_but_not_neighboring_directories()
+    public void New_files_inside_a_discovery_directory_wait_for_an_explicit_saved_inventory()
     {
-        var routes = new ApplicationRoutingCoverage([], [@"C:\Apps\AI"]);
-        Assert.True(routes.Contains(@"c:\apps\ai\new\worker.EXE"));
-        Assert.False(routes.Contains(@"C:\Apps\AI-copy\worker.exe"));
-        Assert.False(routes.Contains(@"C:\Apps\AI\worker.dll"));
-        var processes = new Processes { Snapshot = [Parent, Parent with { Key = new(12, DateTime.UnixEpoch), ExecutablePath = @"C:\Apps\AI\new\worker.exe" }] };
+        var newFile = Parent with { Key = new(12, DateTime.UnixEpoch), ExecutablePath = @"C:\Apps\AI\new\worker.exe" };
+        var processes = new Processes { Snapshot = [Parent, newFile] };
         var protection = new ProcessProtection(processes);
-        protection.Sweep([], Exclusions, true, "ready", [new(@"C:\Apps\AI", "AI")], routes.Contains);
+        protection.Sweep([Targets[0]], Exclusions, false, "TUN stopped");
+        Assert.Equal(Parent.Key, Assert.Single(processes.Killed));
+        processes.Killed.Clear();
+        protection.Sweep([Targets[0], new(newFile.ExecutablePath, "AI")], Exclusions, false, "TUN stopped");
+        Assert.Equal(2, processes.Killed.Count);
+    }
+
+    [Fact]
+    public void Legacy_descendant_checkpoint_cannot_expand_saved_membership()
+    {
+        var processes = new Processes { Snapshot = [Child] };
+        var protection = new ProcessProtection(processes);
+        protection.RestoreTracking([new(Child.Key, Targets[0])], []);
+        protection.Sweep([Targets[0]], Exclusions, false, "main absent");
         Assert.Empty(processes.Killed);
-        Assert.Equal(2, protection.CaptureTracking().Length);
+        Assert.Empty(protection.CaptureTracking());
     }
 
     [Fact]
@@ -90,7 +93,6 @@ public sealed class ProtectionReviewRegressionTests
         processes.Killed.Clear();
         protection.Sweep(Targets, new HashSet<string>([process.ExecutablePath], StringComparer.OrdinalIgnoreCase), false, "offline");
         Assert.Empty(processes.Killed);
-        Assert.True(new ApplicationRoutingCoverage([Parent.ExecutablePath], []).Contains(process));
     }
 
     [Fact]

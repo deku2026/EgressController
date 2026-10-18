@@ -86,13 +86,14 @@ finishes. Missing discoveries remain visible and can be deselected, never silent
    Actual address/alias changes on recovery require a checked configuration update; terminate
    selected processes before stopping the old core. Recovery routes remain available throughout.
 
-The guard expands exact executable membership, identifies instances by PID and creation time,
-and tracks descendants while healthy as well as protected. Windows verifies the creation time
+The guard matches the saved exact executable inventory and identifies instances by PID and creation time.
+Directory recursion occurs during explicit discovery. Runtime ParentPid relationships do not expand membership;
+starting an application never changes routes or restarts TUN. Unlisted new files await rescanning. Windows verifies the creation time
 on the same handle used to terminate, then waits briefly for exit. Access failures are recorded.
 Control-plane executables and SOCKS listener owners are excluded and selection conflicts are
 reported. Identical failures are retried without repeated UI records. History retains the latest
 24 hours, capped at 200; healthy guard ticks also prune expired records. Clearing history only
-clears displayed records, not identities, descendant tracking, protection or retry state.
+clears displayed records, not protection or retry state.
 
 Configured recovery communication remains permitted. This is not an operating-system kill
 switch: process termination has a detection interval and does not guarantee zero packets.
@@ -103,8 +104,8 @@ disables this independent protection. There is no persistent firewall.
 
 ## Verification without network interruption
 
-- `ProcessProtectionTests`: exact paths, all instances, recursive inventory, descendants,
-  detached descendants, PID reuse, dependency exclusions, access failures and deduplication.
+- `ProcessProtectionTests`: exact paths, all instances, saved recursive inventory, ignored OS descendants,
+  legacy checkpoint scope rejection, PID reuse, dependency exclusions, access failures and deduplication.
 - Readiness/supervisor tests: failed TUN, missing takeover routes, unapplied configuration,
   recovery, one pending startup, retry, and no startup while already running or busy.
 - Network health tests: successful/failed rechecks, no-IP/link loss for both roles, cached versus live
@@ -114,7 +115,7 @@ disables this independent protection. There is no persistent firewall.
   cancellation during retries, stale generations, port changes and reconnects.
   Fake process control verifies termination and recovery.
 - Lifecycle tests: preparation preserving TUN, protection before restart, and checked rollback.
-- History tests: pruning while healthy, count limits, clear preserving descendants and retries.
+- History tests: pruning while healthy, count limits, clear preserving protection and retries.
 - Profile/resolver/compiler tests: independent defaults, legacy migration, exactly two independent bindings,
   no fallback when absent, direct-only configuration and recovery route precedence.
 - Fake HTTP tests: authenticated outbound probes, explicit failure and bounded recovery downloads.
@@ -122,7 +123,7 @@ disables this independent protection. There is no persistent firewall.
   ambiguity, permissions, removed ports and unrelated-interface listeners.
 - View-model tests: filtered choices, saved offline cards, atomic swap/save/cancel, error
   recovery, legacy third-card repair and live binding row updates without starting the product.
-- Guardian tests: current-session main/TUN lease, persisted scopes and orphan identities,
+- Guardian tests: current-session main/TUN lease, persisted fixed scopes and ignored legacy descendant identities,
   startup/stop/uninstall intent, ownership isolation, bounded IPC frames, failed handoff and UI badges.
 
 Default builds omit live tests. `build/Invoke-Tests.ps1` and CI set `EGRESS_MOCK_ONLY=1`, which

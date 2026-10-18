@@ -1,0 +1,69 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.EventsPage" x:DataType="vm:MainViewModel">
+  <Grid RowDefinitions="Auto,*,Auto" RowSpacing="17">
+    <Border Classes="card">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+        <StackPanel Spacing="8">
+          <TextBlock Text="保护与生命周期日志" Classes="section-title"/>
+          <SelectableTextBlock Text="{Binding Diagnostics.ControllerLogPath}" Foreground="#667184" TextWrapping="Wrap"/>
+          <TextBlock Text="文件只记录启动、停止、重启和影响应用保护的原因。" Classes="muted"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Button Content="打开日志目录" Classes="primary" Click="OnOpenLogDirectory"/>
+          <Button Content="复制详情" Click="OnCopyDiagnostics"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <Grid Grid.Row="1" ColumnDefinitions="1.1*,1*" ColumnSpacing="17">
+      <Border Classes="list-card">
+        <Grid RowDefinitions="Auto,*">
+          <Border Padding="17,13" Background="#F9FAFC" BorderBrush="#E8EDF4" BorderThickness="0,0,0,1">
+            <TextBlock Text="本次运行的关键事件" FontWeight="Medium"/>
+          </Border>
+          <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Diagnostics.Events}" SelectedItem="{Binding Diagnostics.SelectedEvent}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:RuntimeEventViewModel">
+                <Border BorderBrush="#E8EDF4" BorderThickness="0,0,0,1" Padding="17,14">
+                  <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{Binding Stage}" FontWeight="Medium"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Time}" Classes="muted"/>
+                    </Grid>
+                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Foreground="#667184" MaxHeight="52"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" IsVisible="{Binding Diagnostics.NoEvents}">
+            <TextBlock Text="暂无运行事件" FontSize="17"/>
+            <TextBlock Text="TUN 状态变化时会自动记录。" Classes="muted"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+      <Border Grid.Column="1" Classes="card">
+        <Grid RowDefinitions="Auto,*" RowSpacing="16">
+          <TextBlock Text="事件详情" Classes="section-title"/>
+          <TextBox Grid.Row="1" Text="{Binding Diagnostics.EventDetail, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" BorderThickness="0" Padding="0"/>
+        </Grid>
+      </Border>
+    </Grid>
+    <Expander Grid.Row="2" Header="其他操作提示与临时诊断" HorizontalAlignment="Stretch">
+      <ScrollViewer MaxHeight="270">
+        <StackPanel Spacing="12" Margin="0,12,0,0">
+          <TextBlock Text="这里保留操作错误和内核临时输出，不会将普通连接错误写入保护日志。" Classes="muted" TextWrapping="Wrap"/>
+          <ComboBox ItemsSource="{Binding Diagnostics.Issues}" SelectedItem="{Binding Diagnostics.Selected}" HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:DiagnosticIssueViewModel">
+                <TextBlock Text="{Binding Summary}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBox Text="{Binding Diagnostics.SelectedDetails, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="160"/>
+          <Expander Header="内核临时输出（仅内存）">
+            <TextBox Text="{Binding Diagnostics.CoreLog, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="180"/>
+          </Expander>
+        </StackPanel>
+      </ScrollViewer>
+    </Expander>
+  </Grid>
+</local:PageView>

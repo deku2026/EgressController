@@ -1,0 +1,93 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.ConnectionsPage" x:DataType="vm:MainViewModel">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="14">
+    <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+      <TextBox Text="{Binding Connections.Query}" PlaceholderText="筛选应用、域名、IP 或出口"/>
+      <Button Grid.Column="1" Content="{Binding Connections.HistoryToggleText}" Command="{Binding Connections.ToggleHistoryCommand}"/>
+      <Button Grid.Column="2" Content="关闭选中" Command="{Binding Connections.CloseSelectedCommand}" IsEnabled="{Binding Connections.CanCloseSelected}"/>
+      <Button Grid.Column="3" Content="关闭全部" Command="{Binding Connections.CloseAllCommand}"/>
+      <Button Grid.Column="4" Content="清空历史" Command="{Binding Connections.ClearHistoryCommand}"/>
+    </Grid>
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="4">
+        <TextBlock Text="{Binding Connections.ActiveSummary}" Classes="muted"/>
+        <TextBlock Text="{Binding Connections.ActionMessage}" Classes="warning" IsVisible="{Binding Connections.HasActionMessage}" TextWrapping="Wrap"/>
+      </StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="{Binding Connections.MonitorStatus}" Classes="muted" MaxWidth="320" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Connections.MonitorStatus}"/>
+        <TextBlock Text="{Binding Connections.LastUpdated}" Classes="muted"/>
+      </StackPanel>
+    </Grid>
+    <Border Grid.Row="2" Classes="list-card">
+      <Grid RowDefinitions="Auto,*">
+        <Border Padding="15,12" Background="#F9FAFC" BorderBrush="#E8ECF3" BorderThickness="0,0,0,1">
+          <Grid ColumnDefinitions="18,1.3*,1.7*,108,88,88,75" ColumnSpacing="12">
+            <TextBlock Grid.Column="1" Text="应用" Classes="muted"/>
+            <TextBlock Grid.Column="2" Text="目标" Classes="muted"/>
+            <TextBlock Grid.Column="3" Text="出口" Classes="muted"/>
+            <TextBlock Grid.Column="4" Text="上传" Classes="muted"/>
+            <TextBlock Grid.Column="5" Text="下载" Classes="muted"/>
+            <TextBlock Grid.Column="6" Text="持续时间" Classes="muted"/>
+          </Grid>
+        </Border>
+        <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Connections.Rows}" SelectedItem="{Binding Connections.SelectedRow}" DoubleTapped="OnConnectionDoubleTapped">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:ConnectionRowViewModel">
+              <Border Padding="15,13" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="18,1.3*,1.7*,108,88,88,75" ColumnSpacing="12">
+                  <Ellipse Width="7" Height="7" Classes="state-dot" Classes.active="{Binding IsCurrent}" VerticalAlignment="Center" Opacity="0.9" ToolTip.Tip="{Binding Status}"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProcessName}" FontWeight="Medium" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/>
+                  <TextBlock Grid.Column="2" Text="{Binding Target}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Target}"/>
+                  <TextBlock Grid.Column="3" Text="{Binding Route}" TextTrimming="CharacterEllipsis" Foreground="#5365A4"/>
+                  <TextBlock Grid.Column="4" Text="{Binding UploadText}" Classes="muted"/>
+                  <TextBlock Grid.Column="5" Text="{Binding DownloadText}" Classes="muted"/>
+                  <TextBlock Grid.Column="6" Text="{Binding Duration}" Classes="muted"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" IsVisible="{Binding Connections.IsEmpty}">
+          <TextBlock Text="暂无连接" FontSize="18" FontWeight="Medium"/>
+          <TextBlock Text="新的连接会自动出现在这里。" Classes="muted"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <ContentControl Grid.Row="3" Content="{Binding Connections.SelectedRow}" IsVisible="{Binding Connections.HasSelection}" HorizontalContentAlignment="Stretch">
+      <ContentControl.ContentTemplate>
+        <DataTemplate x:DataType="vm:ConnectionRowViewModel">
+          <Border Classes="card">
+            <StackPanel Spacing="15">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="5">
+                  <TextBlock Text="{Binding ProcessName}" Classes="section-title"/>
+                  <SelectableTextBlock Text="{Binding Target}" Foreground="#667184"/>
+                </StackPanel>
+                <Border Grid.Column="1" Classes="badge" VerticalAlignment="Top">
+                  <TextBlock Text="{Binding Status}" FontSize="12"/>
+                </Border>
+              </Grid>
+              <Grid ColumnDefinitions="*,*,*" ColumnSpacing="24">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="分流" Classes="muted"/>
+                  <SelectableTextBlock Text="{Binding RoutePath}"/>
+                  <TextBlock Text="{Binding Reason}" Classes="muted" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="6">
+                  <TextBlock Text="目标端点" Classes="muted"/>
+                  <SelectableTextBlock Text="{Binding DestinationEndpoint}"/>
+                  <TextBlock Text="{Binding Protocol}" Classes="muted"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="6">
+                  <TextBlock Text="速度与流量" Classes="muted"/>
+                  <TextBlock Text="{Binding Speed}"/>
+                  <TextBlock Text="{Binding Traffic}" Classes="muted"/>
+                </StackPanel>
+              </Grid>
+              <SelectableTextBlock Text="{Binding ProcessPath}" Foreground="#667184" FontSize="11" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ContentControl.ContentTemplate>
+    </ContentControl>
+  </Grid>
+</local:PageView>

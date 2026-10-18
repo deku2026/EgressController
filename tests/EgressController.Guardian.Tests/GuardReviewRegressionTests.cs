@@ -6,11 +6,11 @@ namespace EgressController.Guardian.Tests;
 public sealed class GuardReviewRegressionTests
 {
     [Fact]
-    public void Unreadable_previously_known_child_prevents_successful_transition_ack()
+    public void Unreadable_saved_helper_prevents_successful_transition_ack()
     {
         var processes = new Processes();
         processes.Snapshot = [Fixture.Process(), Fixture.Process(11, @"C:\Shared\child.exe", 10, 2)];
-        var runtime = new GuardRuntime(new FakeStore(), processes, new FakeFacts(), []);
+        var runtime = new GuardRuntime(new FakeStore { Policy = Fixture.Policy with { Executables = [.. Fixture.Policy.Executables, new(@"C:\Shared\child.exe", "AI")] } }, processes, new FakeFacts(), []);
         runtime.Tick();
         processes.Snapshot = [];
         processes.Failures = [new(11, "child.exe", "mock access denied")];
@@ -21,11 +21,11 @@ public sealed class GuardReviewRegressionTests
     }
 
     [Fact]
-    public void Saved_junction_policy_keeps_revision_and_matches_resolved_directory_after_service_restart()
+    public void Saved_junction_executable_keeps_revision_and_matches_resolved_path_after_service_restart()
     {
         var policy = Fixture.Policy with
         {
-            Executables = [], Directories = [new(@"C:\Link", "AI")],
+            Executables = [new(@"C:\Link\new.exe", "AI")], Directories = [new(@"C:\Link", "AI")],
             Exclusions = [@"C:\mock\controller.exe", @"C:\Link\proxy.exe"]
         };
         var store = new FakeStore { Policy = policy };

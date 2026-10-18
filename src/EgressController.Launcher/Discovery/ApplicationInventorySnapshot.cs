@@ -1,4 +1,5 @@
 using EgressController.Core.Models;
+using EgressController.Core.Profile;
 
 namespace EgressController.Launcher.Discovery;
 
@@ -61,6 +62,23 @@ public sealed class ApplicationInventorySnapshot
 
     public bool TryGet(string discoveryKey, out ApplicationInventoryEntry? entry)
         => _byKey.TryGetValue(discoveryKey, out entry);
+
+    public EgressApplicationSelection CaptureSelection(string key, EgressRouteTarget route,
+        EgressApplicationSelection? saved = null, IReadOnlyList<string>? directoryRoots = null)
+    {
+        if (saved is not null && saved.DiscoveryKey != key)
+            throw new ArgumentException("Cannot merge executable inventories from different applications.", nameof(saved));
+        _byKey.TryGetValue(key, out var entry);
+        return new()
+        {
+            DiscoveryKey = key, DisplayName = entry?.DisplayName ?? saved?.DisplayName,
+            ExecutablePaths = (entry?.ExecutablePaths ?? []).Concat(saved?.ExecutablePaths ?? [])
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            DirectoryRoots = (directoryRoots ?? []).Concat(saved?.DirectoryRoots ?? [])
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            Target = route,
+        };
+    }
 
     public IReadOnlyList<string> ExpandSelected(IEnumerable<string> discoveryKeys)
     {

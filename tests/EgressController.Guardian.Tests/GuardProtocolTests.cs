@@ -72,8 +72,9 @@ public sealed class GuardProtocolTests
         Assert.Throws<InvalidDataException>(() => runtime.SetPolicy(Fixture.Policy with { Executables = [] }));
     }
     [Theory]
-    [InlineData("kill-any-pid", 1)]
-    [InlineData("heartbeat", 1)]
+    [InlineData("kill-any-pid", GuardRequest.CurrentProtocol)]
+    [InlineData("heartbeat", GuardRequest.CurrentProtocol)]
+    [InlineData("status", 1)]
     [InlineData("status", 99)]
     public void Unsupported_or_unhandshaken_requests_do_not_release_protection(string kind, int version)
     {

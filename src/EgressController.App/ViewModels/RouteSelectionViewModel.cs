@@ -95,7 +95,8 @@ public sealed class RouteSelectionViewModel : ObservableObject
             }
         }
     }
-    public string Status { get => _status; private set => SetProperty(ref _status, value); }
+    public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
+    public string Status { get => _status; private set { if (SetProperty(ref _status, value)) OnPropertyChanged(nameof(HasStatus)); } }
 
     public void Refresh(EgressProfileDocument profile, EgressRouteTarget? target)
     {

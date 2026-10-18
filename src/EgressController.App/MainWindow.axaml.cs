@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _timer;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
     private bool _applicationExitAllowed;
+    private readonly Dictionary<string, Control> _pages = new();
 
     public MainWindow()
     {
@@ -28,7 +29,8 @@ public partial class MainWindow : Window
         if (_vm is not null && _timer is null)
         {
             _vm.Refresh();
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            ShowSelectedPage();
+            _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _timer.Tick += (_, _) => _vm.Refresh();
             _timer.Start();
         }
@@ -42,7 +44,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (ApplicationClosePolicy.ShouldHideToTray(_applicationExitAllowed, e.CloseReason))
+        if (_vm?.IsPreview != true && ApplicationClosePolicy.ShouldHideToTray(_applicationExitAllowed, e.CloseReason))
         {
             e.Cancel = true;
             WindowState = WindowState.Minimized;
@@ -55,11 +57,55 @@ public partial class MainWindow : Window
     internal void AllowApplicationExit()
         => _applicationExitAllowed = true;
 
-    private void OnShowDiagnostics(object? sender, RoutedEventArgs e) => MainTabs.SelectedItem = DiagnosticsTab;
-
-    private void OnOpenLogDirectory(object? sender, RoutedEventArgs e)
+    internal void OnShowDiagnostics(object? sender, RoutedEventArgs e) => SelectPage("events");
+    public void SelectPage(string key)
     {
         if (_vm is null) return;
+        _vm.SelectedPage = _vm.Pages.First(page => page.Key == key);
+        ShowSelectedPage();
+    }
+    private void OnNavigationChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_vm is null || sender is not ListBox { SelectedItem: NavigationItem page }) return;
+        _vm.SelectedPage = page;
+        ShowSelectedPage();
+    }
+    private void ShowSelectedPage()
+    {
+        if (_vm is null) return;
+        string key = _vm.SelectedPage.Key;
+        if (!_pages.TryGetValue(key, out var page))
+        {
+            page = key switch
+            {
+                "network" => new Views.NetworkPage(), "apps" => new Views.ApplicationsPage(),
+                "rules" => new Views.RulesPage(), "connections" => new Views.ConnectionsPage(),
+                "traffic" => new Views.TrafficPage(), "protection" => new Views.ProtectionPage(),
+                "guardian" => new Views.GuardianPage(), "events" => new Views.EventsPage(),
+                _ => new Views.OverviewPage(),
+            };
+            page.DataContext = _vm;
+            _pages[key] = page;
+        }
+        PageHost.Content = page;
+    }
+
+    internal void OpenLogDirectoryPath(string path)
+    {
+        if (_vm is null) return;
+        if (_vm.IsPreview) { SelectPage("events"); return; }
+        try
+        {
+            Directory.CreateDirectory(path);
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception error) { _vm.Controller.ReportFailure("日志目录", "logs.open", error.Message, error); }
+    }
+
+    internal void OnOpenLogDirectory(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        if (_vm.IsPreview) { SelectPage("events"); return; }
         try
         {
             Directory.CreateDirectory(_vm.Diagnostics.DirectoryPath);
@@ -69,9 +115,10 @@ public partial class MainWindow : Window
         catch (Exception error) { _vm.Controller.ReportFailure("日志目录", "logs.open", error.Message, error); _vm.Diagnostics.Refresh(); }
     }
 
-    private async void OnCopyDiagnostics(object? sender, RoutedEventArgs e)
+    internal async void OnCopyDiagnostics(object? sender, RoutedEventArgs e)
     {
         if (_vm is null) return;
+        if (_vm.IsPreview) { SelectPage("events"); return; }
         try
         {
             _vm.Diagnostics.Refresh();
@@ -81,9 +128,10 @@ public partial class MainWindow : Window
         catch (Exception error) { _vm.Controller.ReportFailure("复制诊断", "logs.copy", error.Message, error); _vm.Diagnostics.Refresh(); }
     }
 
-    private void OnOpenGuardLogDirectory(object? sender, RoutedEventArgs e)
+    internal void OnOpenGuardLogDirectory(object? sender, RoutedEventArgs e)
     {
         if (_vm is null) return;
+        if (_vm.IsPreview) { SelectPage("events"); return; }
         try
         {
             Directory.CreateDirectory(_vm.Guard.LogDirectory);
@@ -93,7 +141,7 @@ public partial class MainWindow : Window
         catch (Exception error) { _vm.Controller.ReportFailure("守护日志目录", "guard.logs.open", error.Message, error); _vm.Diagnostics.Refresh(); }
     }
 
-    private async void OnConnectionDoubleTapped(object? sender, TappedEventArgs e)
+    internal async void OnConnectionDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (_vm?.Connections.SelectedRow is not { } row)
             return;

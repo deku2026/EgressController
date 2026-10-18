@@ -8,13 +8,13 @@ namespace EgressController.App.ViewModels;
 
 public sealed class UpstreamPortsViewModel : ObservableObject
 {
-    private readonly AppController _controller;
+    private readonly IAppController _controller;
     private EgressProfileDocument? _displayed;
     private string _portText = string.Empty;
     private string _status = string.Empty;
     private bool _busy;
 
-    public UpstreamPortsViewModel(AppController controller)
+    public UpstreamPortsViewModel(IAppController controller)
     {
         _controller = controller;
         AddCommand = new AsyncRelayCommand(AddAsync);

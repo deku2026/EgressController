@@ -95,7 +95,7 @@ public sealed class GuardPersistenceTests
         => Assert.Throws<InvalidDataException>(() => (Fixture.Policy with { Directories = [new(root, "AI")] }).Validate());
 
     [Fact]
-    public void Policy_hash_tracks_selection_and_directories_without_network_or_route_state()
+    public void Policy_hash_tracks_saved_executables_without_directory_network_or_route_state()
     {
         var selection = new EgressApplicationSelection { DiscoveryKey = @"exe:C:\apps\AI\ai.exe",
             ExecutablePaths = [@"C:\apps\AI\ai.exe"], DirectoryRoots = [@"C:\apps\AI"], DisplayName = "AI" };
@@ -108,10 +108,13 @@ public sealed class GuardPersistenceTests
         }, Fixture.Policy.MainExecutable, []);
         Assert.Equal(original.Revision, changedRoute.Revision);
         Assert.Single(original.Executables);
-        Assert.Single(original.Directories);
+        Assert.Empty(original.Directories);
         var changedDirectory = GuardPolicyMailbox.FromProfile(profile with
             { Applications = [selection with { DirectoryRoots = [@"C:\new"] }] }, Fixture.Policy.MainExecutable, []);
-        Assert.NotEqual(original.Revision, changedDirectory.Revision);
+        Assert.Equal(original.Revision, changedDirectory.Revision);
+        var changedInventory = GuardPolicyMailbox.FromProfile(profile with
+            { Applications = [selection with { ExecutablePaths = [.. selection.ExecutablePaths, @"C:\apps\AI\helper.exe"] }] }, Fixture.Policy.MainExecutable, []);
+        Assert.NotEqual(original.Revision, changedInventory.Revision);
     }
 
     [Fact]

@@ -10,7 +10,7 @@ public sealed class ProcessProtectionTests
         => new(new(pid, Started.AddSeconds(seconds)), parent, path);
 
     [Fact]
-    public void All_exact_path_instances_and_descendants_are_terminated_without_touching_same_names_elsewhere()
+    public void All_saved_recursive_EXE_instances_are_terminated_without_enrolling_OS_descendants()
     {
         var fake = new FakeProcesses([
             P(1, @"C:\Apps\A\a.exe"), P(2, @"c:\apps\a\A.EXE"),
@@ -18,20 +18,20 @@ public sealed class ProcessProtectionTests
             P(5, @"C:\Shared\child.exe", 1, 1), P(6, @"C:\Shared\grandchild.exe", 5, 2)]);
         var guard = new ProcessProtection(fake);
         guard.Sweep([new(@"C:\Apps\A\a.exe", "A"), new(@"C:\Apps\A\nested\helper.exe", "A")], NoExclusions, false, "TUN 未运行");
-        Assert.Equal(new uint[] { 1, 2, 3, 5, 6 }, fake.Killed.Select(process => process.Key.Pid).Order());
+        Assert.Equal(new uint[] { 1, 2, 3 }, fake.Killed.Select(process => process.Key.Pid).Order());
         Assert.All(guard.Events, entry => Assert.True(entry.Succeeded));
     }
 
     [Fact]
-    public void Healthy_never_terminates_but_retains_descendants_after_parent_exit()
+    public void Saved_helper_is_protected_independently_of_its_parent_lifetime()
     {
         var fake = new FakeProcesses([P(1, @"C:\a.exe"), P(2, @"C:\child.exe", 1, 1)]);
         var guard = new ProcessProtection(fake);
-        ProtectedExecutable[] targets = [new(@"C:\a.exe", "A")];
+        ProtectedExecutable[] targets = [new(@"C:\a.exe", "A"), new(@"C:\child.exe", "A")];
         guard.Sweep(targets, NoExclusions, true, "ready");
         Assert.Empty(fake.Killed);
         fake.Snapshot = [P(2, @"C:\child.exe", 1, 1)];
-        guard.Sweep(targets, NoExclusions, false, "DoH 超时");
+        guard.Sweep(targets, NoExclusions, false, "网络连续三次失败");
         Assert.Equal(2u, Assert.Single(fake.Killed).Key.Pid);
     }
 
@@ -88,7 +88,7 @@ public sealed class ProcessProtectionTests
     }
 
     [Fact]
-    public void Deselecting_an_app_drops_its_tree_even_when_another_app_has_the_same_display_name()
+    public void Deselecting_an_app_drops_its_paths_even_when_another_app_has_the_same_display_name()
     {
         var fake = new FakeProcesses([P(1, @"C:\A\app.exe"), P(2, @"C:\B\app.exe"), P(3, @"C:\child.exe", 1, 1)]);
         var guard = new ProcessProtection(fake);
@@ -133,11 +133,11 @@ public sealed class ProcessProtectionTests
     }
 
     [Fact]
-    public void Clearing_history_keeps_descendant_tracking_and_failure_retries()
+    public void Clearing_history_keeps_saved_path_failure_retries()
     {
         var fake = new FakeProcesses([P(1, @"C:\a.exe"), P(2, @"C:\child.exe", 1, 1)]) { Result = new(false, "拒绝访问") };
         var guard = new ProcessProtection(fake);
-        ProtectedExecutable[] targets = [new(@"C:\a.exe", "A")];
+        ProtectedExecutable[] targets = [new(@"C:\a.exe", "A"), new(@"C:\child.exe", "A")];
         guard.Sweep(targets, NoExclusions, false, "TUN stopped");
         Assert.Equal(2, guard.Events.Count);
         guard.ClearHistory();

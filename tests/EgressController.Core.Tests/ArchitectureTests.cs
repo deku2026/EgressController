@@ -16,6 +16,7 @@ public class ArchitectureTests
         "EgressController.State",
         "EgressController.SingBox",
         "EgressController.App",
+        "EgressController.Presentation",
         "EgressController.Guardian",
         "EgressController.GuardService",
         "EgressController.GuardTray",
@@ -38,12 +39,13 @@ public class ArchitectureTests
         {
             "EgressController.Core", "EgressController.Transport", "EgressController.Windows",
             "EgressController.Rules", "EgressController.Launcher", "EgressController.Diagnostics",
-            "EgressController.State", "EgressController.SingBox", "EgressController.Guardian",
+            "EgressController.State", "EgressController.SingBox", "EgressController.Guardian", "EgressController.Presentation",
         },
         ["EgressController.Guardian"] = new(StringComparer.OrdinalIgnoreCase)
         { "EgressController.Core", "EgressController.Windows", "EgressController.Diagnostics" },
         ["EgressController.GuardService"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
-        ["EgressController.GuardTray"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
+        ["EgressController.GuardTray"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian", "EgressController.Presentation" },
+        ["EgressController.Presentation"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
     };
 
     [Fact]
@@ -110,7 +112,7 @@ public class ArchitectureTests
 
     public static TheoryData<string> SrcProjectNames => new(SrcProjects);
     public static TheoryData<string> NonAppProjectNames
-        => new(SrcProjects.Where(name => name is not ("EgressController.App" or "EgressController.GuardTray")));
+        => new(SrcProjects.Where(name => name is not ("EgressController.App" or "EgressController.GuardTray" or "EgressController.Presentation")));
 
     private static ProjectMap LoadProjectMap() => ProjectMap.Load(FindSolutionRoot());
 

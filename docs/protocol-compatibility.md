@@ -13,7 +13,7 @@
 | DNS | sing-box 劫持普通 DNS，统一经 eSIM 使用 Cloudflare DoH；未匹配业务流量走默认端口；DoH 不做健康检测，不作为关闭程序的判断条件 |
 | 网络保护 | 每秒检查两张网卡，两个出口各每分钟访问 https://cp.cloudflare.com/generate_204；掉线或上次联网结果失败时关闭全部所选应用 |
 | 规则 | MetaCubeX `sing` 分支的 SRS，commit/blob 校验后原子缓存 |
-| 诊断 | sing-box controller API REST/WebSocket：connections、traffic、logs、DNS |
+| 诊断 | sing-box 本地 REST API：connections 快照、连接操作与联网探测；统计采样不控制 TUN |
 | 普通启动 | `WindowsLaunchService.StartPlain`，无环境变量或浏览器代理参数注入 |
 
 UDP、QUIC、原始 TCP 和不受 TUN 影响的系统流量不由 C# 单独判断；它们是否可达由

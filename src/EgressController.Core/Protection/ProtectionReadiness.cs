@@ -11,6 +11,6 @@ public sealed record ProtectionReadiness(bool Ready, string Reason)
         if (!configurationApplied) return new(false, "配置尚未成功应用，正在自动恢复");
         if (!string.IsNullOrWhiteSpace(takeoverError)) return new(false, takeoverError);
         if (!network.Ready) return network;
-        return new(true, "TUN 已接管，两张出口网卡联网正常，可以打开所选应用");
+        return new(true, "TUN 已接管；" + network.Reason + "。可以打开所选应用");
     }
 }

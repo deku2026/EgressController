@@ -43,7 +43,7 @@ public static unsafe partial class GuardServiceHost
         if (_handle == 0)
         {
             var failure = new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            new DiagnosticJournal(Path.Combine(_paths.LogDirectory, "guard-service.log"))
+            new DiagnosticJournal(Path.Combine(_paths.LogDirectory, "guard-service.log"), shouldPersist: ProtectionLogPolicy.IsRelevant)
                 .Report("服务注册", "service.register", failure.Message, failure);
             return;
         }
@@ -54,7 +54,7 @@ public static unsafe partial class GuardServiceHost
         catch (Exception exception)
         {
             error = 1;
-            new DiagnosticJournal(Path.Combine(_paths.LogDirectory, "guard-service.log"))
+            new DiagnosticJournal(Path.Combine(_paths.LogDirectory, "guard-service.log"), shouldPersist: ProtectionLogPolicy.IsRelevant)
                 .Report("服务退出", "service.fatal", exception.Message, exception);
             try { File.WriteAllText(Path.Combine(_paths.DataDirectory, "service-error.log"), DiagnosticJournal.Redact(exception.ToString())); } catch { }
         }
@@ -91,7 +91,7 @@ public static class GuardServiceWorker
     public static async Task RunAsync(GuardPaths paths, Action running, CancellationToken token)
     {
         RuntimeSafety.RequireLiveOperations();
-        var diagnostics = new DiagnosticJournal(Path.Combine(paths.LogDirectory, "guard-service.log"));
+        var diagnostics = new DiagnosticJournal(Path.Combine(paths.LogDirectory, "guard-service.log"), shouldPersist: ProtectionLogPolicy.IsRelevant);
         diagnostics.Info("服务启动", paths.ServiceName);
         var registrations = new GuardRegistrationStore(paths.RegistrationFile);
         var registration = registrations.Load() ?? throw new InvalidDataException("守护安装记录缺失。");

@@ -50,7 +50,8 @@ public sealed record GuardPolicy
 public sealed record GuardHeartbeat(string PolicyRevision, bool TunReady, ProcessKey? Core, string? CorePath, string? Reason);
 public sealed record GuardRequest
 {
-    public int Protocol { get; init; } = 1;
+    public const int CurrentProtocol = 2; // v2 requires fixed EXE membership; v1 enrolled OS descendants.
+    public int Protocol { get; init; } = CurrentProtocol;
     public string Kind { get; init; } = "";
     public Guid Session { get; init; }
     public long Sequence { get; init; }

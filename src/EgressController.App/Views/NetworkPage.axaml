@@ -1,0 +1,120 @@
+<local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" x:Class="EgressController.App.Views.NetworkPage" x:DataType="vm:MainViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="18">
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="18">
+        <Border Classes="card">
+          <StackPanel Spacing="18">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="两个网卡出口" Classes="section-title"/>
+              <Button Grid.Column="1" Content="重新扫描" Command="{Binding Overview.RefreshCommand}"/>
+            </Grid>
+            <StackPanel Spacing="7">
+              <TextBlock Text="ESIM-家宽" FontWeight="Medium"/>
+              <TextBlock Text="所选应用的默认直连出口" Classes="muted"/>
+              <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedDirect}" PlaceholderText="选择家宽网卡">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:RoleAdapterOption">
+                    <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"/>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Spacing="7">
+              <TextBlock Text="Proxy-代理" FontWeight="Medium"/>
+              <TextBlock Text="本地代理程序的固定出口" Classes="muted"/>
+              <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Overview.NetworkAdapters.Available}" SelectedItem="{Binding Overview.NetworkAdapters.SelectedProxy}" PlaceholderText="选择代理网卡">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:RoleAdapterOption">
+                    <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"/>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </StackPanel>
+            <CheckBox Content="显示离线及其他网卡" IsChecked="{Binding Overview.NetworkAdapters.ShowAll}"/>
+            <WrapPanel IsEnabled="{Binding Overview.NetworkAdapters.CanEdit}">
+              <Button Content="保存出口" Classes="primary" Command="{Binding Overview.NetworkAdapters.SaveCommand}" Margin="0,0,8,0"/>
+              <Button Content="交换" Command="{Binding Overview.NetworkAdapters.SwapCommand}" Margin="0,0,8,0"/>
+              <Button Content="取消" Classes="quiet" Command="{Binding Overview.NetworkAdapters.CancelCommand}"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding Overview.NetworkAdapters.Status}" Classes="muted" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Overview.NetworkAdapters.ConfigurationStatus}" Classes="muted" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="card">
+          <StackPanel Spacing="17">
+            <TextBlock Text="本地代理端口" Classes="section-title"/>
+            <TextBlock Text="代理程序统一使用 Proxy-代理网卡。" Classes="muted"/>
+            <ItemsControl ItemsSource="{Binding Overview.Ports.Entries}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:UpstreamPortEntryViewModel">
+                  <Border BorderBrush="#E8ECF2" BorderThickness="0,0,0,1" Padding="0,12">
+                    <StackPanel Spacing="7">
+                      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7">
+                        <TextBlock Text="{Binding Endpoint}" FontSize="15" FontWeight="Medium" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="{Binding DefaultLabel}" Command="{Binding SetDefaultCommand}" IsEnabled="{Binding CanSetDefault}" Padding="10,5"/>
+                        <Button Grid.Column="2" Content="移除" Classes="quiet" Command="{Binding RemoveCommand}" IsEnabled="{Binding CanRemove}" ToolTip.Tip="{Binding RemovalHint}" Padding="8,5"/>
+                      </Grid>
+                      <TextBlock Text="{Binding BindingSummary}" Classes="muted" TextWrapping="Wrap"/>
+                      <TextBlock Text="{Binding OwnerPath}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OwnerPath}"/>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBox Text="{Binding Overview.Ports.PortText}" PlaceholderText="输入 SOCKS5 端口">
+                <TextBox.KeyBindings>
+                  <KeyBinding Gesture="Enter" Command="{Binding Overview.Ports.AddCommand}"/>
+                </TextBox.KeyBindings>
+              </TextBox>
+              <Button Grid.Column="1" Content="添加端口" Command="{Binding Overview.Ports.AddCommand}"/>
+            </Grid>
+            <TextBlock Text="{Binding Overview.Ports.Status}" Classes="muted" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+      <Border Classes="card">
+        <StackPanel Spacing="18">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="5">
+              <TextBlock Text="联网检测" Classes="section-title"/>
+              <TextBlock Text="每 30 秒一轮；失败后间隔 5 秒复测，连续三次失败才确认。" Classes="muted"/>
+            </StackPanel>
+            <Button Grid.Column="1" Content="立即检测" Classes="primary" Command="{Binding Network.CheckCommand}"/>
+          </Grid>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="25">
+            <StackPanel Spacing="8">
+              <TextBlock Text="ESIM-家宽" FontWeight="Medium"/>
+              <TextBlock Text="{Binding Network.DirectInternetStatus}" TextWrapping="Wrap"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="8">
+              <TextBlock Text="Proxy-代理" FontWeight="Medium"/>
+              <TextBlock Text="{Binding Network.ProxyInternetStatus}" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Grid>
+          <TextBlock Text="{Binding Network.LastChecked, StringFormat='最近完成：{0}'}" Classes="muted"/>
+          <TextBlock Text="{Binding Network.Status}" Classes="warning" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Border>
+      <Border Classes="card">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Cloudflare DoH" Classes="section-title"/>
+            <TextBlock Text="DNS 使用 ESIM-家宽出口，不参与守护存活判断。" Classes="muted"/>
+            <SelectableTextBlock Text="https://cloudflare-dns.com/dns-query" Foreground="#667184"/>
+          </StackPanel>
+          <Border Grid.Column="1" Classes="badge" VerticalAlignment="Center">
+            <TextBlock Text="固定 DNS" FontSize="12"/>
+          </Border>
+        </Grid>
+      </Border>
+      <Border Classes="notice" IsVisible="{Binding Network.HasTunFailure}">
+        <StackPanel Spacing="7">
+          <TextBlock Text="TUN 最近一次失败" FontWeight="SemiBold"/>
+          <SelectableTextBlock Text="{Binding Network.TunFailure}" TextWrapping="Wrap"/>
+          <Button Content="查看运行事件" Click="OnShowDiagnostics"/>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</local:PageView>

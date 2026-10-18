@@ -41,7 +41,7 @@ each second; a monotonic three-second lease detects a hung main even when its pi
 It checks the exact main PID/creation time/path and independently inspects the reported owned
 sing-box PID/creation time/path, TUN interface/address and IPv4/IPv6 default takeover routes.
 No process-name search establishes main liveness. Service does still enumerate process snapshots
-to find protected applications and track descendants; IPC does not eliminate that required work.
+to find all instances of saved EXE paths; IPC does not eliminate that required work.
 
 The tray uses the service verdict: red means protecting or unable to confirm state, normal means
 main/TUN ready, gray means an explicitly stopped/disabled/uninstalled service. A running service
@@ -61,6 +61,9 @@ cross-account token queries can require debug privilege ([service rights](https:
 Client opens request the same individual access bits as the ACL and use identification-only SQOS.
 Using `GENERIC_WRITE` here would also request pipe-instance creation and deny the normal user's tray;
 see [Microsoft's pipe access documentation](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights).
+
+Protocol v2 requires fixed EXE membership. A v1 service must be explicitly reinstalled from the new
+package; the UI reports an upgrade instruction instead of silently accepting its descendant behavior.
 
 Messages are length-prefixed source-generated JSON, bounded to 4 MiB, with a protocol version,
 random session identifier and increasing sequence. Main connects with a full validated policy;
@@ -83,7 +86,7 @@ readable by its registered owner. It contains:
   tracking/history checkpoints. Bootstrap writes occur only before service installation.
 - `desired-policy.json`: main's latest desired selection, also updated while the service is manually
   stopped. Service imports it before the next sweep, including on restart. Stable revisions are derived
-  from normalized paths/roots/exclusions, not network verdicts or application routing choices.
+  from normalized saved EXE paths/exclusions, not network verdicts or application routing choices.
 - `registration.json`: main location, installation state, startup choice and manual-stop boot ID.
 - `service-error.log` and `management-error.log`: host and management failure details.
 
@@ -93,12 +96,12 @@ selection rather than silently stopping enforcement. Corrupt main profiles are n
 defaults. An unreadable SQLite policy cannot supply a trustworthy scope: startup fails visibly and
 SCM recovery retries; this is a reported protection failure, not a claim that applications are blocked.
 
-The profile retains cached full EXE paths and `directoryRoots`. Every process sweep matches all
-instances at those paths plus running EXEs beneath selected roots, including later updates. This is
-directory recursion, independently of parent/child process tracking. Descendants are tracked while
-healthy as well as unready; PID and creation time survive a service restart so already observed
-orphans remain protected. A deselected source drops its tracked descendants. A child never observed
-before its parent exits cannot be reliably reconstructed from process names.
+The profile retains full EXE paths and discovery metadata (`directoryRoots`). Recursion happens
+when scanning directories, not during runtime protection. New policy mailboxes contain explicit
+EXEs and no directory wildcard scope. Every sweep matches all instances of those saved paths.
+ParentPid never enrolls helpers or shared tools. Legacy checkpoints are read for event history,
+but their old descendant identities are not restored as membership. A fresh exact-path snapshot
+is authoritative, including after a service restart. Newly created files require an explicit rescan.
 
 LocalSystem filtering limits termination to the registered user's SID, and checks ownership again
 before termination. The underlying adapter validates creation time on the termination handle. Known
@@ -128,8 +131,8 @@ SCM/service shutdown and explicit stop terminate cleanly; a nonzero service-host
 
 Tests use fake process snapshots, identities, TUN facts, time, service operations, registration stores
 and IPC request dispatch. Real SQLite/atomic-file tests use unique disposable temporary directories.
-Tests cover startup, loss/recovery, replay/stale sessions, policy ACK failure, failed handoff, descendant
-restoration, PID reuse, user filtering, directory updates, state corruption, service controls and UI badges.
+Tests cover startup, loss/recovery, replay/stale sessions, policy ACK failure, failed handoff, rejection
+of legacy descendant scope, PID reuse, saved path aliases, user filtering, state corruption, service controls and UI badges.
 Product adapters reject live operations under `EGRESS_MOCK_ONLY=1`.
 
 Packaging publishes App, GuardService and GuardTray separately with NativeAOT. Both companion
