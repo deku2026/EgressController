@@ -14,5 +14,16 @@ public sealed record TrafficUsage(string ProcessPath, DateOnly Day, TrafficExit 
 public sealed record TrafficUsageSnapshot(DateOnly From, DateOnly Through, DateTimeOffset? RecordedSinceUtc,
     IReadOnlyList<TrafficUsage> Entries)
 {
-    public static TrafficUsageSnapshot Empty(DateOnly today) => new(today.AddDays(-29), today, null, []);
+    public static TrafficUsageSnapshot Empty(DateOnly today) => new(today, today.AddDays(29), null, []);
+}
+
+/// <summary>Fixed calendar periods anchored to first use, never a rolling or running-hours window.</summary>
+public readonly record struct TrafficPeriod(DateOnly From, DateOnly Through)
+{
+    public static TrafficPeriod At(DateOnly firstDay, DateOnly today)
+    {
+        int period = Math.Max(0, today.DayNumber - firstDay.DayNumber) / 30;
+        var from = firstDay.AddDays(period * 30);
+        return new(from, from.AddDays(29));
+    }
 }

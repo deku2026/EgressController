@@ -3,7 +3,7 @@
       <Grid ColumnDefinitions=".8*,1.2*" ColumnSpacing="16">
         <Border Classes="card">
           <StackPanel Spacing="18">
-            <Grid ColumnDefinitions="*,Auto"><TextBlock Text="近 30 天用量" Classes="section-title"/><TextBlock Grid.Column="1" Text="{Binding Traffic.Period}" Classes="muted" VerticalAlignment="Center"/></Grid>
+            <Grid ColumnDefinitions="*,Auto"><TextBlock Text="本周期用量" Classes="section-title"/><TextBlock Grid.Column="1" Text="{Binding Traffic.Period}" Classes="muted" VerticalAlignment="Center"/></Grid>
             <TextBlock Text="{Binding Traffic.Total}" Classes="metric number" FontSize="36"/>
             <Grid ColumnDefinitions="*,1,*" ColumnSpacing="20">
               <StackPanel Spacing="6"><TextBlock Text="家宽" Classes="home"/><TextBlock Text="{Binding Traffic.Home}" Classes="secondary-metric" FontSize="20"/></StackPanel>

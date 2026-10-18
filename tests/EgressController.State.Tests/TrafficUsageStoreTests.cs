@@ -56,19 +56,65 @@ public sealed class TrafficUsageStoreTests : IDisposable
     }
 
     [Fact]
-    public void Window_contains_thirty_calendar_days_and_midnight_adds_only_the_delta()
+    public void Period_is_anchored_to_first_open_and_only_rolls_at_day_thirty()
     {
         var store = Store();
-        store.Record([Counter(10, 20, id: "expired")], Now.AddDays(-30));
-        store.Record([Counter(30, 40, id: "edge")], Now.AddDays(-29));
+        store.Read(Now.AddDays(-29)); // First open, with no network activity yet.
+        store.Record([Counter(30, 40, id: "edge")], Now.AddDays(-28));
         store.Record([Counter(50, 60)], Now);
         var snapshot = store.Read(Now);
         Assert.Equal(DateOnly.FromDateTime(Now.Date).AddDays(-29), snapshot.From);
         Assert.Equal(180, snapshot.Entries.Sum(row => row.Total));
         store.Record([Counter(70, 80)], Now.AddDays(1));
         var tomorrow = store.Read(Now.AddDays(1));
-        Assert.Equal(150, tomorrow.Entries.Sum(row => row.Total));
-        Assert.Equal(40, tomorrow.Entries.Single(row => row.Day == tomorrow.Through).Total);
+        Assert.Equal(DateOnly.FromDateTime(Now.AddDays(1).Date), tomorrow.From);
+        Assert.Equal(tomorrow.From.AddDays(29), tomorrow.Through);
+        Assert.Equal(40, Assert.Single(tomorrow.Entries).Total);
+        Assert.Equal(180, store.Read(Now).Entries.Sum(row => row.Total)); // Previous cycle was not erased.
+    }
+
+    [Fact]
+    public void Closing_does_not_pause_calendar_or_charge_unobserved_bytes_on_resume()
+    {
+        var store = Store(); store.BeginSession(Now);
+        store.Record([Counter(10, 20, start: Now.AddSeconds(1))], Now.AddSeconds(2));
+        var reopened = Store(); reopened.BeginSession(Now.AddDays(12));
+        reopened.Record([Counter(5000, 6000, start: Now.AddSeconds(1))], Now.AddDays(12));
+        reopened.Record([Counter(5010, 6020, start: Now.AddSeconds(1))], Now.AddDays(12).AddSeconds(1));
+        var snapshot = reopened.Read(Now.AddDays(12));
+        Assert.Equal(DateOnly.FromDateTime(Now.Date), snapshot.From);
+        Assert.Equal(60, snapshot.Entries.Sum(row => row.Total));
+        Assert.Empty(Store().Read(Now.AddDays(65)).Entries);
+        Assert.Equal(DateOnly.FromDateTime(Now.Date).AddDays(60), Store().Read(Now.AddDays(65)).From);
+    }
+
+    [Fact]
+    public void Existing_connections_are_baselined_and_new_connections_are_counted()
+    {
+        var store = Store(); store.BeginSession(Now);
+        store.Record([Counter(900, 900)], Now.AddSeconds(1));
+        store.Record([Counter(910, 920), Counter(10, 20, id: "new", start: Now.AddSeconds(1))], Now.AddSeconds(2));
+        Assert.Equal(60, Assert.Single(store.Read(Now).Entries).Total);
+    }
+
+    [Theory]
+    [InlineData(0, 0)] [InlineData(1, 0)] [InlineData(29, 0)] [InlineData(30, 30)] [InlineData(59, 30)] [InlineData(60, 60)] [InlineData(365, 360)]
+    public void Natural_day_boundaries_are_not_running_hours(int elapsed, int start)
+    {
+        var first = new DateOnly(2024, 2, 20); // leap day and DST cannot change the number of calendar days.
+        var period = TrafficPeriod.At(first, first.AddDays(elapsed));
+        Assert.Equal(first.AddDays(start), period.From); Assert.Equal(period.From.AddDays(29), period.Through);
+    }
+
+    [Fact]
+    public void Existing_database_keeps_its_original_recording_anchor()
+    {
+        var store = Store(); store.Record([Counter(1, 2)], Now);
+        using var db = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"); db.Open();
+        using var command = db.CreateCommand(); command.CommandText = "DROP TABLE traffic_calendar"; command.ExecuteNonQuery();
+        var reopened = Store(); reopened.BeginSession(Now.AddDays(16));
+        Assert.Equal(DateOnly.FromDateTime(Now.Date), reopened.Read(Now.AddDays(16)).From);
+        Assert.Equal(3, Assert.Single(reopened.Read(Now.AddDays(16)).Entries).Total);
     }
 
     [Fact]

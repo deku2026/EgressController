@@ -4,7 +4,7 @@ namespace EgressController.Launcher.Discovery;
 
 public sealed record SupportedApplication(string Id, string Name, string[] ExecutableStems, string[] DisplayNames);
 
-/// <summary>Classify the primary executable, never a nested EXE or arbitrary substring.</summary>
+/// <summary>Optional product artwork/names, not an admission whitelist or a category classifier.</summary>
 public static class SupportedApplicationCatalog
 {
     public static IReadOnlyList<SupportedApplication> Applications { get; } = [
@@ -55,6 +55,13 @@ public static class SupportedApplicationCatalog
     public static SupportedApplication? Identify(LaunchTarget target)
     {
         if (target.Kind is not (LaunchKind.DirectExe or LaunchKind.PackagedAumid or LaunchKind.CliNative)) return null;
+        if (target.Kind == LaunchKind.PackagedAumid)
+        {
+            // Codex packages can still ship an executable named ChatGPT.exe.
+            if (target.PackageFamily?.StartsWith("OpenAI.Codex_", StringComparison.OrdinalIgnoreCase) == true)
+                return ForName("Codex");
+            if (ForName(target.Name) is { } packageName) return packageName;
+        }
         string? path = target.CanonicalExecutable ?? target.Command;
         return ForExecutable(path) ?? (string.IsNullOrEmpty(path) ? ForName(target.Name) : null);
     }

@@ -11,7 +11,10 @@
 
 ## Windows application catalog
 
-- Classify the primary EXE using an exact case-insensitive product catalog. Do not classify Visual Studio/system tools as AI or browser apps because a nested helper or a substring matches.
+- Discover Windows applications broadly, including games, social/media/office/development apps. The exact case-insensitive product catalog supplies optional names/artwork, never an admission whitelist. Do not infer a product from nested helpers.
+- New apps are unchecked and unclassified. Built-in categories are user-selected SQLite metadata, independent of routes/protection. Rescans never overwrite categories or silently change saved executable membership.
+- Discover roots through Windows install registration/MSI/MSIX and platform install manifests (Steam/Tencent/Rail); no default Program Files or drive crawl. Generate a complete recursive EXE inventory only on explicit selection or refresh, on a background worker, within verified application roots. Refuse broad shared roots and report incomplete scans.
+- Treat each installed game separately from its launcher. Uninstall commands can provide directory evidence; never choose an uninstall/maintenance host as the application's primary EXE. Support manual EXE/directory selection for missing registration.
 - Display one main application row for its recursively scanned fixed EXEs. Related discovery keys only reconcile saved selections; they must never broaden a conflicting helper route to the whole app.
 - Native AI CLI commands get distinct names and exact EXE paths from command metadata. Never execute the AI command during discovery, recursively enroll a shared bin directory, or bind a generic node/python/powershell host.
 - Keep saved paths through rescans and route changes. Preserve conflicting old routes until the user explicitly unifies them. UI icons/names are presentation metadata, never route identity.
@@ -46,7 +49,7 @@
 - Use the supplied Surge references for hierarchy, restrained surfaces, sidebar navigation, typography and dense readable tables. Preserve Windows window controls.
 - Shared design tokens, icons and reusable controls belong in a presentation layer. Views must not create production controllers or invoke Windows service/process/network operations.
 - Provide a fully isolated, interactive UI preview mode with mock data and screenshot rendering. Enter mock safety mode before any production initialization. Preview mode must not enumerate/terminate real targets, start TUN, install services, change startup entries or write the user's real configuration.
-- Application usage is persistent across closed connections and restarts, over the last 30 local calendar days including today. Classify bytes using the observed outbound; never relabel history using a later route selection. Checkpoints and usage totals commit atomically. Statistics/storage failures cannot affect TUN or protection.
+- Application usage uses successive fixed 30-natural-day periods anchored to first opening, not a rolling window or 720 running hours. Closing does not pause the calendar; resume baselines pre-existing connections so offline bytes are not charged. Preserve prior totals. Classify bytes using the observed outbound; never relabel history using a later route selection. Checkpoints and usage totals commit atomically. Statistics/storage failures cannot affect TUN or protection.
 - Remove quota and remaining-allowance UI; do not reintroduce carrier-plan estimates.
 - Use the same Inter/CJK font setup, semantic home/other colors and compact controls in the main window, companion and previews.
 - Telemetry charts must use actual observation times, a zero baseline and explicit shared numeric scale. UI refresh cannot manufacture samples; missing/stale data is not zero. Byte units and app percentages must match their real denominators.
@@ -54,6 +57,7 @@
 - Resolve displayed adapter names/descriptions from live GUID identity; keep raw runtime tags out of primary connection/route labels.
 - Both tray menus use the same rounded presentation. Position them from the actual Windows notification icon rectangle and its monitor DPI/work area, including negative coordinates. Native shell APIs must be fenced out of mock previews.
 - Read Windows executable icons off the UI thread with bounded shared caching; helper and CLI artwork should reuse their product icon.
+- All application icons use the shared adaptive backing surface. Transparent white/pale artwork needs a dark backing; preserve original brand colors and proportions. Verify application/connection/traffic/detail surfaces and normal/hover/selected states.
 - Validate normal, hover, pressed, focused and disabled states. Use meaningful mock screenshots at ordinary and compact Windows window sizes, not only XAML compilation.
 
 ## Workflow and validation

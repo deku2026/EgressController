@@ -17,6 +17,38 @@ public sealed class PreviewController : IAppController
     private static readonly Guid ProxyId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private readonly List<LaunchTarget> _targets = [];
     private readonly List<ProtectionEvent> _events = [];
+    private readonly Dictionary<string, string> _categories = new(StringComparer.Ordinal);
+    public IReadOnlyList<LaunchTarget> CachedTargets => _targets.ToArray();
+    public LaunchTarget? FindApplication(string key) => _targets.FirstOrDefault(item => item.DiscoveryKey == key);
+    public IReadOnlyDictionary<string, string> ApplicationCategories => _categories;
+    public Task<ControllerOperationResult> SetApplicationCategoryAsync(LaunchTarget target, string? category)
+    {
+        if (!ApplicationCategory.IsValid(category)) return Task.FromResult(ControllerOperationResult.Failure("未知分类。"));
+        _categories[target.DiscoveryKey] = category ?? "";
+        return Task.FromResult(ControllerOperationResult.Success());
+    }
+    public int InventoryBuildCount { get; private set; }
+    private LaunchTarget BuildPreviewInventory(LaunchTarget target)
+    {
+        InventoryBuildCount++;
+        string root = target.OwnedRoots.FirstOrDefault() ?? @"C:\Preview\Application";
+        var updated = target.WithInventory(target.OwnedExecutables.Concat(new[] { target.CanonicalExecutable ?? Path.Combine(root, "app.exe"), Path.Combine(root, "tools", "helper.exe") }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        int index = _targets.FindIndex(item => item.DiscoveryKey == target.DiscoveryKey);
+        if (index >= 0) _targets[index] = updated;
+        Visuals.Update(_targets, Profile); return updated;
+    }
+    public Task<ControllerOperationResult> RefreshApplicationInventoryAsync(LaunchTarget target)
+    {
+        var updated = BuildPreviewInventory(target);
+        var selected = Profile.Applications.FirstOrDefault(item => item.DiscoveryKey == target.DiscoveryKey);
+        return selected is null ? Task.FromResult(ControllerOperationResult.Success()) : SetApplicationsRouteAsync([updated], true, selected.Target);
+    }
+    public Task<ControllerOperationResult> AddManualApplicationAsync(string path, string? replaceKey = null)
+    {
+        _targets.Add(new() { Id = replaceKey ?? "manual:" + path, SavedDiscoveryKey = replaceKey, Name = "手动添加的应用", CanonicalExecutable = path,
+            Command = path, OwnedExecutables = [path], Source = "UI 预览数据", IsManual = true });
+        return Task.FromResult(ControllerOperationResult.Success());
+    }
     private string _scenario;
     private int _sample;
     private readonly PreviewClock _clock = new();
@@ -39,12 +71,14 @@ public sealed class PreviewController : IAppController
         Adapters = [Adapter(HomeId, "Ethernet", "Apple Mobile Device Ethernet", "192.0.2.10", 7), Adapter(ProxyId, "Wi-Fi", "无线网络", "198.51.100.10", 12)];
         Profile = new EgressProfileDocument { DefaultAdapterId = HomeId.ToString(), ProxyAdapterId = ProxyId.ToString(),
             UpstreamPorts = [7890, 7891], UpstreamPort = 7890 }.NormalizeAndValidate();
-        string[] names = ["ChatGPT", "Claude", "Codex", "Google Chrome", "Microsoft Edge", "Windsurf", "Firefox", "LM Studio"];
+        string[] names = ["ChatGPT", "Claude", "Codex", "Google Chrome", "Microsoft Edge", "Windsurf", "Firefox", "LM Studio",
+            "英雄联盟", "WeGame", "Steam", "微信", "Telegram", "VLC media player", "Visual Studio"];
         foreach (string name in names)
         {
             string path = @"C:\Applications\" + name + @"\" + name.Replace(" ", "") + ".exe";
-            _targets.Add(new() { Id = "preview:" + name, Name = name, CatalogId = EgressController.Launcher.Discovery.SupportedApplicationCatalog.ForName(name)?.Id, Kind = LaunchKind.DirectExe,
-                Command = path, CanonicalExecutable = path, OwnedExecutables = [path, Path.Combine(Path.GetDirectoryName(path)!, "tools", "helper.exe")],
+            _targets.Add(new() { Id = "preview:" + name, Name = name, CatalogId = name switch { "英雄联盟" => "league", "Steam" => "steam", "WeGame" => "wegame", _ => EgressController.Launcher.Discovery.SupportedApplicationCatalog.ForName(name)?.Id }, Kind = LaunchKind.DirectExe,
+                Command = path, CanonicalExecutable = path, OwnedExecutables = name is "英雄联盟" or "Steam" or "WeGame" ? [] : [path, Path.Combine(Path.GetDirectoryName(path)!, "tools", "helper.exe")],
+                InventoryReady = name is not ("英雄联盟" or "Steam" or "WeGame"),
                 OwnedRoots = [Path.GetDirectoryName(path)!], Source = "UI 预览数据" });
         }
         foreach (string brand in new[] { "claude", "codex" })
@@ -146,8 +180,9 @@ public sealed class PreviewController : IAppController
         IReadOnlyDictionary<string, EgressRouteTarget>? routes = null, CancellationToken cancellationToken = default)
     {
         var next = Profile.Applications.ToDictionary(item => item.DiscoveryKey);
-        foreach (var target in targets)
+        foreach (var item in targets.ToArray())
         {
+            var target = enabled && !item.InventoryReady ? BuildPreviewInventory(item) : item;
             var previous = next.Values.Where(item => target.SelectionKeys.Contains(item.DiscoveryKey)).ToArray();
             foreach (string alias in target.SelectionKeys) next.Remove(alias);
             if (enabled) next[target.DiscoveryKey] = EgressController.Launcher.Discovery.ApplicationCatalogProjection.Merge(target, previous,
@@ -182,18 +217,20 @@ public sealed class PreviewController : IAppController
         var today = DateOnly.FromDateTime(DateTime.Today);
         if (empty) return TrafficUsageSnapshot.Empty(today);
         var entries = new List<TrafficUsage>();
+        var firstOpened = DateTimeOffset.Now.AddDays(-42);
+        var period = TrafficPeriod.At(DateOnly.FromDateTime(firstOpened.Date), today);
         double[] dailyMib = [264, 176, 122, 588, 70, 45, 22, 12, 80, 32];
-        for (int day = 0; day < 30; day++)
+        for (int day = 0; day <= today.DayNumber - period.From.DayNumber; day++)
         for (int app = 0; app < _targets.Count; app++)
         {
-            double value = dailyMib[app] * (0.4 + (day * 13 + app * 7) % 21 / 14d);
+            double value = dailyMib[app % dailyMib.Length] * (0.4 + (day * 13 + app * 7) % 21 / 14d);
             double home = app is 0 or 1 or 8 ? .82 : app == 3 ? .23 : .54;
             string path = _targets[app].CanonicalExecutable!;
             long bytes = (long)(value * 1048576);
-            entries.Add(new(path, today.AddDays(-29 + day), TrafficExit.Home, (long)(bytes * home * .2), (long)(bytes * home * .8)));
-            entries.Add(new(path, today.AddDays(-29 + day), TrafficExit.Other, (long)(bytes * (1 - home) * .2), (long)(bytes * (1 - home) * .8)));
+            entries.Add(new(path, period.From.AddDays(day), TrafficExit.Home, (long)(bytes * home * .2), (long)(bytes * home * .8)));
+            entries.Add(new(path, period.From.AddDays(day), TrafficExit.Other, (long)(bytes * (1 - home) * .2), (long)(bytes * (1 - home) * .8)));
         }
-        return new(today.AddDays(-29), today, DateTimeOffset.Now.AddDays(-42), entries);
+        return new(period.From, period.Through, firstOpened, entries);
     }
     private static NetworkAdapterInfo Adapter(Guid id, string name, string description, string address, int index) => new()
     { Identity = new(id, name), Description = description, Luid = (ulong)index, IfIndex = index, Ipv6IfIndex = index,

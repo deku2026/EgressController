@@ -5,14 +5,24 @@ namespace EgressController.State.Traffic;
 
 /// <summary>Daily application totals and connection checkpoints commit together. Re-reading a
 /// snapshot, reconnecting the display monitor or reopening the app cannot count the same bytes twice.</summary>
-public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZone = null)
+public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZone = null, DateTimeOffset? sessionStartedAt = null)
 {
-    private static readonly Lazy<bool> Provider = new(() => { SQLitePCL.Batteries_V2.Init(); return true; });
     private readonly object _gate = new();
     private readonly TimeZoneInfo _zone = timeZone ?? TimeZoneInfo.Local;
     public string DatabasePath { get; } = Path.Combine(Path.GetFullPath(dataDirectory), "traffic.db");
     private bool _initialized;
     private DateOnly? _lastPruned;
+    private DateTimeOffset? _sessionStarted = sessionStartedAt;
+
+    public void BeginSession(DateTimeOffset firstOpenedAt)
+    {
+        lock (_gate)
+        {
+            _sessionStarted = firstOpenedAt;
+            using var database = Open();
+            EnsureCalendar(database, firstOpenedAt);
+        }
+    }
 
     public void Record(IReadOnlyList<TrafficCounter> counters, DateTimeOffset observedAtUtc)
     {
@@ -20,6 +30,7 @@ public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZo
         lock (_gate)
         {
             using var database = Open();
+            EnsureCalendar(database, observedAtUtc);
             using var transaction = database.BeginTransaction();
             using var read = database.CreateCommand();
             read.Transaction = transaction;
@@ -56,15 +67,23 @@ public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZo
                 read.Parameters["$id"].Value = counter.ConnectionId;
                 read.Parameters["$started"].Value = started;
                 long up = counter.Upload, down = counter.Download;
+                bool hadCheckpoint = false;
                 using (var previous = read.ExecuteReader())
                 {
                     if (previous.Read())
                     {
+                        hadCheckpoint = true;
                         if (previous.GetInt64(2) >= observed) continue;
                         up = Delta(up, previous.GetInt64(0));
                         down = Delta(down, previous.GetInt64(1));
+                        // An external core may survive the UI. Never charge bytes accumulated
+                        // while this controller was closed; resume from the first observation.
+                        if (_sessionStarted is { } session && previous.GetInt64(2) < session.ToUnixTimeMilliseconds())
+                            up = down = 0;
                     }
                 }
+                if (!hadCheckpoint && _sessionStarted is { } opened && (counter.StartedAtUtc is null || counter.StartedAtUtc < opened))
+                    up = down = 0;
                 checkpoint.Parameters["$id"].Value = counter.ConnectionId;
                 checkpoint.Parameters["$started"].Value = started;
                 checkpoint.Parameters["$up"].Value = counter.Upload;
@@ -79,11 +98,6 @@ public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZo
                 add.Parameters["$down"].Value = down;
                 add.ExecuteNonQuery();
             }
-            using var first = database.CreateCommand();
-            first.Transaction = transaction;
-            first.CommandText = "INSERT OR IGNORE INTO traffic_metadata(id,recorded_since) VALUES(1,$at)";
-            first.Parameters.AddWithValue("$at", observed);
-            first.ExecuteNonQuery();
             transaction.Commit();
             Prune(database, observedAtUtc);
         }
@@ -95,26 +109,25 @@ public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZo
         {
             using var database = Open();
             var today = Day(now);
+            var (firstOpened, anchor) = EnsureCalendar(database, now);
+            var period = TrafficPeriod.At(anchor, today);
             using var query = database.CreateCommand();
             query.CommandText = "SELECT day,process_path,exit,upload,download FROM application_traffic WHERE day >= $from AND day <= $through ORDER BY day,process_path";
-            query.Parameters.AddWithValue("$from", today.AddDays(-29).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            query.Parameters.AddWithValue("$from", period.From.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             query.Parameters.AddWithValue("$through", today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             var entries = new List<TrafficUsage>();
             using (var reader = query.ExecuteReader())
                 while (reader.Read())
                     entries.Add(new(reader.GetString(1), DateOnly.ParseExact(reader.GetString(0), "yyyy-MM-dd", CultureInfo.InvariantCulture),
                         (TrafficExit)reader.GetInt32(2), Math.Max(0, reader.GetInt64(3)), Math.Max(0, reader.GetInt64(4))));
-            query.CommandText = "SELECT recorded_since FROM traffic_metadata WHERE id=1";
-            query.Parameters.Clear();
-            var at = query.ExecuteScalar();
             Prune(database, now);
-            return new(today.AddDays(-29), today, at is long stamp ? DateTimeOffset.FromUnixTimeMilliseconds(stamp) : null, entries);
+            return new(period.From, period.Through, firstOpened, entries);
         }
     }
 
     private SqliteConnection Open()
     {
-        _ = Provider.Value;
+        SqliteRuntime.EnsureInitialized();
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         var database = new SqliteConnection(new SqliteConnectionStringBuilder
         { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 2 }.ToString());
@@ -133,6 +146,7 @@ public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZo
                       connection_id TEXT NOT NULL, started INTEGER NOT NULL, upload INTEGER NOT NULL,
                       download INTEGER NOT NULL, observed INTEGER NOT NULL, PRIMARY KEY(connection_id,started));
                     CREATE TABLE IF NOT EXISTS traffic_metadata(id INTEGER PRIMARY KEY, recorded_since INTEGER NOT NULL);
+                    CREATE TABLE IF NOT EXISTS traffic_calendar(id INTEGER PRIMARY KEY, first_day TEXT NOT NULL);
                     """;
                 command.ExecuteNonQuery();
                 _initialized = true;
@@ -147,12 +161,27 @@ public sealed class TrafficUsageStore(string dataDirectory, TimeZoneInfo? timeZo
         var today = Day(now);
         if (_lastPruned == today) return;
         using var command = database.CreateCommand();
-        command.CommandText = "DELETE FROM application_traffic WHERE day < $from; DELETE FROM traffic_checkpoint WHERE observed < $old;";
-        command.Parameters.AddWithValue("$from", today.AddDays(-29).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        // Daily totals are retained. Only obsolete connection checkpoints are disposable.
+        command.CommandText = "DELETE FROM traffic_checkpoint WHERE observed < $old;";
         command.Parameters.AddWithValue("$old", now.AddDays(-31).ToUnixTimeMilliseconds());
         command.ExecuteNonQuery();
         _lastPruned = today;
     }
     private DateOnly Day(DateTimeOffset at) => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(at, _zone).Date);
+    private (DateTimeOffset FirstOpened, DateOnly Anchor) EnsureCalendar(SqliteConnection database, DateTimeOffset now)
+    {
+        using var transaction = database.BeginTransaction();
+        using var command = database.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT OR IGNORE INTO traffic_metadata(id,recorded_since) VALUES(1,$at); SELECT recorded_since FROM traffic_metadata WHERE id=1;";
+        command.Parameters.AddWithValue("$at", (_sessionStarted ?? now).ToUnixTimeMilliseconds());
+        var first = DateTimeOffset.FromUnixTimeMilliseconds((long)command.ExecuteScalar()!);
+        command.CommandText = "INSERT OR IGNORE INTO traffic_calendar(id,first_day) VALUES(1,$day); SELECT first_day FROM traffic_calendar WHERE id=1;";
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue("$day", Day(first).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        var anchor = DateOnly.ParseExact((string)command.ExecuteScalar()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        transaction.Commit();
+        return (first, anchor);
+    }
     private static long Delta(long current, long previous) => current >= previous ? current - previous : current;
 }

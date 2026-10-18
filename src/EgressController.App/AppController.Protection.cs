@@ -56,7 +56,7 @@ public sealed partial class AppController
         foreach (EgressApplicationSelection selected in profile.Applications)
         {
             inventory.TryGet(selected.DiscoveryKey, out ApplicationInventoryEntry? entry);
-            IEnumerable<string> paths = (entry?.ExecutablePaths ?? []).Concat(selected.ExecutablePaths);
+            IEnumerable<string> paths = selected.ExecutablePaths.Count > 0 ? selected.ExecutablePaths : entry?.ExecutablePaths ?? [];
             if (selected.DiscoveryKey.StartsWith("exe:", StringComparison.OrdinalIgnoreCase))
                 paths = paths.Append(selected.DiscoveryKey[4..]);
             foreach (string path in paths.Where(Path.IsPathFullyQualified).Distinct(StringComparer.OrdinalIgnoreCase))

@@ -55,6 +55,12 @@ public interface IAppController
     IReadOnlyList<string> ManualDomains { get; }
     IReadOnlyList<NetworkAdapterInfo> RefreshAdapters();
     IReadOnlyList<LaunchTarget> ScanTargets();
+    IReadOnlyList<LaunchTarget> CachedTargets { get; }
+    LaunchTarget? FindApplication(string key);
+    IReadOnlyDictionary<string, string> ApplicationCategories { get; }
+    Task<ControllerOperationResult> SetApplicationCategoryAsync(LaunchTarget target, string? category);
+    Task<ControllerOperationResult> RefreshApplicationInventoryAsync(LaunchTarget target);
+    Task<ControllerOperationResult> AddManualApplicationAsync(string path, string? replaceKey = null);
     Task<ControllerOperationResult> SetAdapterRolesAsync(string? directId, string? proxyId);
     Task<ControllerOperationResult> SetApplicationsRouteAsync(IEnumerable<LaunchTarget> targets, bool enabled,
         EgressRouteTarget? route = null, IReadOnlyDictionary<string, EgressRouteTarget>? routes = null, CancellationToken cancellationToken = default);

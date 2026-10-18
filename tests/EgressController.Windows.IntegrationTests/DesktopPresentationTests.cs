@@ -112,6 +112,15 @@ public sealed class DesktopPresentationTests
     }
 
     [Fact]
+    public void Unresolved_install_entries_do_not_share_one_visual_identity()
+    {
+        using var visuals = new ApplicationVisualCatalog(true);
+        var a = visuals.ForApplication(new() { Id = "a", SavedDiscoveryKey = "arp:a", Name = "A" });
+        var b = visuals.ForApplication(new() { Id = "b", SavedDiscoveryKey = "arp:b", Name = "B" });
+        Assert.NotSame(a, b); Assert.Equal("A", a.Name); Assert.Equal("B", b.Name);
+    }
+
+    [Fact]
     public void Routes_display_live_adapter_names_and_device_descriptions_not_runtime_tags()
     {
         var preview = new PreviewController();

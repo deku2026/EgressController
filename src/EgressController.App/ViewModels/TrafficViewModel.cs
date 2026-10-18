@@ -39,8 +39,8 @@ public sealed class TrafficViewModel(IAppController controller) : ObservableObje
     public string Home => TrafficUnits.Bytes(HomeBytes);
     public string Other => TrafficUnits.Bytes(OtherBytes);
     public string Unknown => TrafficUnits.Bytes(UnknownBytes);
-    public string Period => _last is null ? "近 30 天" : $"{_last.From:MM.dd} – {_last.Through:MM.dd}";
-    public string RecordedSince => _last?.RecordedSinceUtc is { } at ? $"本机记录始于 {at.ToLocalTime():yyyy.MM.dd}" : "开始联网后记录应用用量";
+    public string Period => _last is null ? "本周期 · 30 天" : $"{_last.From:MM.dd} – {_last.Through:MM.dd}";
+    public string RecordedSince => _last?.RecordedSinceUtc is { } at ? $"首次使用 {at.ToLocalTime():yyyy.MM.dd} · 每 30 个自然日一个周期" : "首次打开起算 · 停用期间用量不增加";
     public string ApplicationCount => $"{_all.Length} 个应用";
     public bool IsEmpty => Applications.Count == 0;
     public bool HasApplications => _all.Length > 0;

@@ -1,5 +1,4 @@
 using Microsoft.Win32;
-using System.Diagnostics;
 using System.Security.Principal;
 using System.Xml.Linq;
 using EgressController.Core.Models;
@@ -12,9 +11,8 @@ namespace EgressController.Launcher.Discovery;
 /// <summary>
 /// Discovers launchable Windows applications from the same primary sources used by
 /// BCUninstaller: the per-user Store package API, the 32/64-bit uninstall registry and
-/// App Paths and native AI commands resolved by Get-Command. Shortcuts are excluded. The resulting broad discovery is
-/// filtered through <see cref="SupportedApplicationCatalog"/> so the UI only exposes AI clients
-/// and browsers; no manual EXE fallback exists.
+/// App Paths, game-library install records and native AI commands resolved by Get-Command.
+/// Only metadata and immediate directory entries are read; full EXE inventories are explicit work.
 /// </summary>
 public sealed class WindowsLaunchTargetScanner
 {
@@ -22,20 +20,19 @@ public sealed class WindowsLaunchTargetScanner
         "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages";
     private const string AppPaths = "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths";
     private const string UninstallRoot = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
-    private readonly Dictionary<string, IReadOnlyList<string>> _inventoryCache = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<string> Notices { get; private set; } = [];
 
     public IReadOnlyList<LaunchTarget> Scan()
     {
         RuntimeSafety.RequireLiveOperations();
-        _inventoryCache.Clear();
         var registry = new LaunchTargetRegistry();
         DiscoverStorePackages(registry);
         DiscoverInstalledRegistryApps(registry);
         DiscoverAppPaths(registry);
-        DiscoverProgramFilesApps(registry);
         var notices = new List<string>();
+        try { DiscoverPlatformLibraries(registry, notices); }
+        catch (Exception error) { notices.Add("游戏平台目录读取未完成：" + error.Message); }
         try
         {
             var cli = new WindowsCliDiscovery(new PowerShellCommandLocationSource());
@@ -189,7 +186,7 @@ public sealed class WindowsLaunchTargetScanner
                     PackageFamily = family,
                     Aumid = aumid,
                     OwnedRoots = roots,
-                    OwnedExecutables = CollectExecutables(roots, fullExe),
+                    OwnedExecutables = [], InventoryReady = false,
                     RouteSelected = false,
                     // AUMID activation is valid even when the manifest omits Executable. The
                     // launch service correlates the resulting process against OwnedRoots.
@@ -304,35 +301,10 @@ public sealed class WindowsLaunchTargetScanner
                                 continue;
 
                             string? iconPath = RegisteredExecutablePath.Parse(GetString(key, "DisplayIcon"), icon: true);
-                            string? installLocation = ResolveDirectory(GetString(key, "InstallLocation"));
-                            string? executable = FindRegisteredExecutable(name, iconPath, installLocation);
-                            if (executable is null)
-                                continue;
-
-                            var roots = new[] { installLocation, Path.GetDirectoryName(executable) }
-                                .Where(p => !string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
-                                .Select(p => NormalizeRoot(p!))
-                                .Distinct(StringComparer.OrdinalIgnoreCase)
-                                .ToArray();
-                            if (roots.Length == 0)
-                                continue;
-
-                            registry.Add(new LaunchTarget
-                            {
-                                Id = $"arp:{hive}:{view}:{keyName}",
-                                Name = name.Trim(),
-                                Kind = LaunchKind.DirectExe,
-                                Command = executable,
-                                CanonicalExecutable = executable,
-                                OwnedRoots = roots,
-                                OwnedExecutables = CollectExecutables(roots, executable),
-                                RouteSelected = false,
-                                ResolutionUnsupported = false,
-                                IconPath = iconPath,
-                                Source = "Windows 卸载注册表",
-                                Publisher = GetString(key, "Publisher"),
-                                Version = GetString(key, "DisplayVersion"),
-                            });
+                            string? installLocation = ResolveDirectory(GetString(key, "InstallLocation"))
+                                ?? NativeInstallLocations.MsiLocation(keyName, hive == RegistryHive.LocalMachine);
+                            AddInstalled(registry, new($"arp:{hive}:{view}:{keyName}", name.Trim(), installLocation, null,
+                                iconPath, GetString(key, "UninstallString"), "Windows 安装登记", GetString(key, "Publisher"), GetString(key, "DisplayVersion")));
                         }
                         catch
                         {
@@ -359,57 +331,6 @@ public sealed class WindowsLaunchTargetScanner
         return releaseType is not null
             && (releaseType.Contains("update", StringComparison.OrdinalIgnoreCase)
                 || releaseType.Contains("hotfix", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string? FindRegisteredExecutable(string displayName, string? iconPath, string? installLocation)
-    {
-        if (IsExecutable(iconPath))
-            return Path.GetFullPath(iconPath!);
-        if (string.IsNullOrWhiteSpace(installLocation) || !Directory.Exists(installLocation))
-            return null;
-
-        string displayKey = SimplifyName(displayName);
-        try
-        {
-            var candidates = Directory.EnumerateFiles(installLocation, "*.exe", SearchOption.TopDirectoryOnly)
-                .Where(path => !IsLikelyInstaller(path))
-                .Select(path => new
-                {
-                    Path = Path.GetFullPath(path),
-                    Score = ScoreExecutable(Path.GetFileNameWithoutExtension(path), displayKey)
-                })
-                .OrderByDescending(x => x.Score)
-                .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            return candidates.Length == 0 ? null : candidates[0].Path;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int ScoreExecutable(string fileName, string displayKey)
-    {
-        string key = SimplifyName(fileName);
-        if (key.Length == 0)
-            return 0;
-        if (key.Equals(displayKey, StringComparison.Ordinal))
-            return 100;
-        if (displayKey.Length > 0 && (key.Contains(displayKey, StringComparison.Ordinal) || displayKey.Contains(key, StringComparison.Ordinal)))
-            return 50;
-        return 1;
-    }
-
-    private static bool IsLikelyInstaller(string path)
-    {
-        string name = Path.GetFileNameWithoutExtension(path);
-        return name.Contains("uninstall", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("unins", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("setup", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("update", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("updater", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("repair", StringComparison.OrdinalIgnoreCase);
     }
 
     private void DiscoverAppPaths(LaunchTargetRegistry registry)
@@ -448,154 +369,10 @@ public sealed class WindowsLaunchTargetScanner
         }
     }
 
-    /// <summary>
-    /// Mirrors BCUninstaller's DirectoryFactory for applications which are not registered in ARP
-    /// (portable installs and vendors that only place a launcher under Program Files). Only the
-    /// first level is used to identify an application; once identified, its whole directory is
-    /// recursively indexed for process ownership.
-    /// </summary>
-    private void DiscoverProgramFilesApps(LaunchTargetRegistry registry)
-    {
-        string[] knownRoots = registry.All()
-            .SelectMany(target => target.OwnedRoots)
-            .Where(root => !string.IsNullOrWhiteSpace(root))
-            .Select(NormalizeRoot)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        foreach (string programFilesRoot in GetProgramFilesRoots())
-        {
-            try
-            {
-                foreach (string directory in Directory.EnumerateDirectories(programFilesRoot, "*", SearchOption.TopDirectoryOnly))
-                {
-                    if (IsSystemProgramFilesDirectory(directory)
-                        || knownRoots.Any(root => IsWithin(directory, root) || IsWithin(root, directory)))
-                        continue;
-
-                    string[] candidates = FindProgramDirectoryExecutables(directory);
-                    if (candidates.Length == 0)
-                        continue;
-
-                    string executable = SelectPrimaryExecutable(directory, candidates);
-                    string root = NormalizeRoot(directory);
-                    IReadOnlyList<string> ownedExecutables = CollectExecutables(new[] { root }, executable);
-                    if (ownedExecutables.Count == 0)
-                        continue;
-
-                    FileVersionInfo? versionInfo = TryGetVersionInfo(executable);
-                    string name = FirstValid(versionInfo?.ProductName, versionInfo?.FileDescription, Path.GetFileName(directory))
-                        ?? Path.GetFileName(directory);
-
-                    registry.Add(new LaunchTarget
-                    {
-                        Id = "dir:" + root.ToLowerInvariant(),
-                        Name = name,
-                        Kind = LaunchKind.DirectExe,
-                        Command = executable,
-                        CanonicalExecutable = executable,
-                        OwnedRoots = new[] { root },
-                        OwnedExecutables = ownedExecutables,
-                    RouteSelected = false,
-                        ResolutionUnsupported = false,
-                        IconPath = executable,
-                        Source = "Program Files",
-                        Publisher = FirstValid(versionInfo?.CompanyName),
-                        Version = FirstValid(versionInfo?.ProductVersion, versionInfo?.FileVersion),
-                    });
-                }
-            }
-            catch
-            {
-                // Program Files may contain protected or transient vendor directories.
-            }
-        }
-    }
-
-    private static IEnumerable<string> GetProgramFilesRoots()
-    {
-        var candidates = new[]
-        {
-            Environment.GetEnvironmentVariable("ProgramW6432"),
-            Environment.GetEnvironmentVariable("ProgramFiles"),
-            Environment.GetEnvironmentVariable("ProgramFiles(x86)"),
-        };
-
-        return candidates
-            .Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
-            .Select(path => Path.GetFullPath(path!))
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static string[] FindProgramDirectoryExecutables(string directory)
-    {
-        try
-        {
-            var candidates = Directory.EnumerateFiles(directory, "*.exe", SearchOption.TopDirectoryOnly)
-                .Where(path => !IsLikelyInstaller(path))
-                .Select(Path.GetFullPath)
-                .ToList();
-
-            // Match BCU's binary-directory convention for apps whose root contains only x64/x86/bin.
-            foreach (string childName in new[] { "x64", "x86", "bin", "app", "program" })
-            {
-                string child = Path.Combine(directory, childName);
-                if (!Directory.Exists(child))
-                    continue;
-
-                candidates.AddRange(Directory.EnumerateFiles(child, "*.exe", SearchOption.TopDirectoryOnly)
-                    .Where(path => !IsLikelyInstaller(path))
-                    .Select(Path.GetFullPath));
-            }
-
-            return candidates
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(40) // The same safety bound used by BCU's directory factory.
-                .ToArray();
-        }
-        catch
-        {
-            return Array.Empty<string>();
-        }
-    }
-
-    private static string SelectPrimaryExecutable(string directory, IReadOnlyList<string> candidates)
-    {
-        string directoryKey = SimplifyName(Path.GetFileName(directory));
-        return candidates
-            .Select(path => new
-            {
-                Path = path,
-                Score = ScoreExecutable(Path.GetFileNameWithoutExtension(path), directoryKey)
-                    + (Path.GetDirectoryName(path)?.Equals(directory, StringComparison.OrdinalIgnoreCase) == true ? 5 : 0),
-            })
-            .OrderByDescending(item => item.Score)
-            .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
-            .First().Path;
-    }
-
-    private static FileVersionInfo? TryGetVersionInfo(string path)
-    {
-        try { return FileVersionInfo.GetVersionInfo(path); }
-        catch { return null; }
-    }
-
-    private static bool IsSystemProgramFilesDirectory(string directory)
-    {
-        string name = Path.GetFileName(directory);
-        return name.Equals("Common Files", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("WindowsApps", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("Windows Defender", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("Microsoft SDKs", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("Reference Assemblies", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("Internet Explorer", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("Windows Media Player", StringComparison.OrdinalIgnoreCase);
-    }
-
     private void AddNative(LaunchTargetRegistry registry, string executable, string name, LaunchKind kind, string source)
     {
         string full = Path.GetFullPath(executable);
+        if (InstalledApplicationResolver.IsInstaller(full)) return;
         string[] roots = new[] { NormalizeRoot(Path.GetDirectoryName(full) ?? string.Empty) };
         registry.Add(new LaunchTarget
         {
@@ -605,7 +382,7 @@ public sealed class WindowsLaunchTargetScanner
             Command = full,
             CanonicalExecutable = full,
             OwnedRoots = roots,
-            OwnedExecutables = CollectExecutables(roots, full),
+            OwnedExecutables = [], InventoryReady = false,
             RouteSelected = false,
             IconPath = full,
             Source = source,
@@ -637,9 +414,6 @@ public sealed class WindowsLaunchTargetScanner
             && !value.StartsWith("@", StringComparison.Ordinal)
             && !value.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase));
 
-    private static string SimplifyName(string value)
-        => new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-
     private static bool IsWithin(string path, string root)
     {
         string fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -653,6 +427,48 @@ public sealed class WindowsLaunchTargetScanner
     private static string NormalizeRoot(string root)
         => root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-    private IReadOnlyList<string> CollectExecutables(IEnumerable<string> roots, string? primary)
-        => ExecutableInventory.Collect(roots, primary, _inventoryCache);
+    private static void AddInstalled(LaunchTargetRegistry registry, InstalledApplication application)
+        => registry.Add(InstalledApplicationResolver.Resolve(application, File.Exists, Directory.Exists,
+            root => Directory.EnumerateFiles(root, "*.exe", SearchOption.TopDirectoryOnly)));
+
+    private static void DiscoverPlatformLibraries(LaunchTargetRegistry registry, List<string> notices)
+    {
+        foreach (string steam in NativeInstallLocations.SteamRoots(notices))
+            AddInstalled(registry, new("steam-client:" + steam.ToLowerInvariant(), "Steam", steam, Path.Combine(steam, "steam.exe"), Path.Combine(steam, "steam.exe"), null, "游戏平台安装登记"));
+        foreach (var game in NativeInstallLocations.TencentGames(notices))
+        {
+            try { AddInstalled(registry, game); }
+            catch (Exception error) { notices.Add(game.Name + " 安装目录读取失败：" + error.Message); }
+        }
+        var steamRoots = registry.All().Where(target => target.Name.Equals("Steam", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(target => target.OwnedRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string steam in steamRoots)
+        {
+            libraries.Add(steam);
+            foreach (string relative in new[] { @"steamapps\libraryfolders.vdf", @"config\libraryfolders.vdf" })
+            {
+                string file = Path.Combine(steam, relative);
+                if (!File.Exists(file)) continue;
+                try { foreach (string root in GameLibraryManifest.SteamLibraries(steam, File.ReadAllText(file))) libraries.Add(root); }
+                catch (Exception error) { notices.Add("Steam 游戏库读取失败：" + error.Message); }
+            }
+        }
+        foreach (string library in libraries)
+        {
+            string manifests = Path.Combine(library, "steamapps");
+            if (!Directory.Exists(manifests)) continue;
+            try
+            {
+                foreach (string path in Directory.EnumerateFiles(manifests, "appmanifest_*.acf", SearchOption.TopDirectoryOnly))
+                    try
+                    {
+                        if (GameLibraryManifest.SteamGame(library, File.ReadAllText(path)) is { } game && Directory.Exists(game.Location)) AddInstalled(registry, game);
+                    }
+                    catch (Exception error) { notices.Add("Steam 游戏清单读取失败：" + Path.GetFileName(path) + " · " + error.Message); }
+            }
+            catch (Exception error) { notices.Add("Steam 游戏库不可读取：" + error.Message); }
+        }
+    }
+
 }

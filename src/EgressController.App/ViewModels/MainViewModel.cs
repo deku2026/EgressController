@@ -36,7 +36,7 @@ public sealed class MainViewModel : ObservableObject
         new("apps", "应用", "选择需要保护的应用与固定程序路径"),
         new("rules", "域名规则", "为域名与规则集指定出口"),
         new("connections", "连接", "查看当前连接与已结束的会话"),
-        new("traffic", "流量", "查看近 30 天应用用量与出口分布"),
+        new("traffic", "流量", "查看本周期应用用量与出口分布"),
         new("protection", "进程保护", "主程序的保护状态与终止记录"),
         new("guardian", "独立守护", "只核验主程序存活与 TUN 接管"),
         new("events", "运行事件", "查看保护、启动与重启的关键原因")];

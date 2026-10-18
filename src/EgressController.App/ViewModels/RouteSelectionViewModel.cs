@@ -140,7 +140,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
                 Status = result.Error ?? "分流保存失败，已保留原选择。";
             }
             else
-                Status = enabled ? $"已选择 {option.Label}" : "已取消单独分流";
+                Status = string.Empty; // The selection itself confirms success; reserve inline notices for pending/errors.
         }
         catch (Exception exception)
         {

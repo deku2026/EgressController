@@ -84,7 +84,7 @@ Traffic charts use actual monotonic observation timestamps over a fixed 60-secon
 zero baseline and one labeled numeric scale shared by upload/download. Never normalize each
 line to its own peak or append points on UI refresh. Missing/initial/stale readings are unknown,
 not zero; gaps stay visible. New sessions reset the series. Byte values use explicit IEC units.
-Application bars show persistent usage for the last 30 calendar days (including today). Bar length is relative to the largest application; a tooltip states the scale. Home/other segments use actual bytes, with explicit category labels and amounts. Numeric shares, where used, retain all applications as their denominator. Delay tiles use structured successful probe results rather than parsing text.
+Application bars show the current fixed 30-natural-day period, anchored to first opening. Closing does not pause the calendar and pre-existing connections are baselined on reopen. Bar length is relative to the largest application; a tooltip states the scale. Home/other segments use observed bytes, explicit labels and amounts. Shares retain all applications as their denominator. Delay tiles use structured successful probe results rather than parsing text.
 
 ```
 Guardian                         Traffic
@@ -185,3 +185,21 @@ Native guidance: [Avalonia-skills](https://github.com/linuxdevel/Avalonia-skills
 avalonia-pro-max/design-system, components and styling. The existing Impeccable Operate/polish
 workflow supplies visual review. Web-specific framework recommendations from ui.md were not used
 as Avalonia APIs. No theme-framework replacement or WebView was required.
+
+## Application catalog refinement
+
+The application page adds a quiet 144 px category rail with counts, a shared searchable list and
+manual category selectors. All new items start unclassified; categorization never chooses a route.
+Known brands are optional naming/artwork hints, not a catalog allowlist. Registered games remain
+independent from their launchers. Compact selectors, popup checkmarks, rounded surfaces and focus
+styles reuse the same theme in both desktop applications. Changing a row preserves scroll position;
+500-row previews verify virtualization.
+
+All process artwork passes through AppAvatar. Cached alpha-aware luminance analysis chooses a dark
+backing for white/pale logos and a light backing for dark/color logos. Native artwork is neither
+recolored nor stretched. Contrast fixtures cover 22/28/32/48 px, CLI marks and normal/hover/selected
+backgrounds. The same control is used in application, connection, traffic and detail views.
+
+Discovery references: [BCUninstaller source](https://github.com/BCUninstaller/Bulk-Crap-Uninstaller/tree/master/source/UninstallTools/Factory),
+especially RegistryFactory/MsiInfoAdder and SteamHelper's library/app manifests. Only install metadata
+patterns were adopted; no uninstall/residue-removal operations or drive crawling are included.

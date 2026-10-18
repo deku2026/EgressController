@@ -114,7 +114,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
         Directory.CreateDirectory(_rulesetRoot);
         _profileStore = new EgressProfileStore(_dataRoot);
-        _usageStore = new TrafficUsageStore(_dataRoot);
+        _usageStore = new TrafficUsageStore(_dataRoot, sessionStartedAt: _openedAtUtc);
+        _applicationCatalog = new EgressController.State.Applications.ApplicationCatalogStore(_dataRoot);
         _stateStore = new SingBoxStateStore(_dataRoot);
         _adapterService = new WindowsNetworkAdapterService();
         _profile = ApplicationPathAliases.Expand(LoadProfile(), new ExecutablePathCanonicalizer());
@@ -130,6 +131,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             SingBoxFailure.Code(error, "core." + stage), error.Message, error);
         InitializeProtection();
         InitializeGuardian();
+        LoadApplicationCatalog(); // Optional UI cache cannot delay starting protection of saved paths.
         var usageToken = _lifetimeCts.Token;
         _ = Task.Run(() => TrafficUsageLoopAsync(usageToken));
     }
@@ -224,59 +226,44 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices;
+    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices.Concat(_catalogNotice.Length == 0 ? [] : new[] { _catalogNotice }).ToArray();
 
     public IReadOnlyList<LaunchTarget> ScanTargets()
     {
-        IReadOnlyList<LaunchTarget> scanned = _targetScanner.Scan();
-        var discovered = scanned.ToList();
-
-        _configurationGate.Wait(_lifetimeCts.Token);
+        _inventoryGate.Wait(_lifetimeCts.Token);
         try
         {
-            string previousSelection = ApplicationRoutingKey(_profile);
-            discovered = ApplicationCatalogProjection.RestoreSavedTargets(discovered, _profile.Applications).ToList();
-            _profile = _profile with { Applications = ApplicationCatalogProjection.Reconcile(_profile.Applications, discovered) };
-            foreach (EgressApplicationSelection selected in _profile.Applications
-                .Where(selected => discovered.All(target => !target.SelectionKeys.Contains(selected.DiscoveryKey))))
+            var scanned = _targetScanner.Scan();
+            var cached = _targets.All();
+            var consumed = new HashSet<string>(StringComparer.Ordinal);
+            var discovered = scanned.Select(target =>
             {
-                discovered.Add(new LaunchTarget
-                {
-                    Id = selected.DiscoveryKey, SavedDiscoveryKey = selected.DiscoveryKey,
-                    Name = selected.DisplayName ?? selected.DiscoveryKey,
-                    CanonicalExecutable = selected.ExecutablePaths.FirstOrDefault(),
-                    Kind = selected.DiscoveryKey.StartsWith("cli:", StringComparison.OrdinalIgnoreCase) ? LaunchKind.CliNative : LaunchKind.DirectExe,
-                    Source = "缓存记录（当前未发现）",
-                    OwnedExecutables = selected.ExecutablePaths,
-                    OwnedRoots = selected.DirectoryRoots,
-                    ResolutionUnsupported = true,
-                });
-            }
-            _targets.Clear();
-            foreach (LaunchTarget target in discovered)
+                var previous = cached.FirstOrDefault(item => item.SelectionKeys.Intersect(target.SelectionKeys, StringComparer.Ordinal).Any());
+                if (previous is null) return target;
+                consumed.Add(previous.DiscoveryKey);
+                return ApplicationCatalogProjection.RestoreCachedInventory(target, previous);
+            }).Concat(cached.Where(item => !consumed.Contains(item.DiscoveryKey))).ToArray();
+            var projected = ApplicationCatalogProjection.Project(discovered);
+            var restored = ApplicationCatalogProjection.RestoreSavedTargets(projected, _profile.Applications);
+            foreach (LaunchTarget target in restored)
             {
                 target.RouteSelected = _profile.Applications.Any(selection => target.SelectionKeys.Contains(selection.DiscoveryKey));
-                _targets.Add(target);
             }
-            ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(discovered);
-            _profile = _profile with
+            _targets.ReplaceAll(restored);
+            try
             {
-                Applications = _profile.Applications.Select(selection => inventory.TryGet(selection.DiscoveryKey, out var entry) && entry is not null
-                    ? selection with { DisplayName = entry.DisplayName, ExecutablePaths = entry.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                        DirectoryRoots = discovered.Where(target => target.DiscoveryKey == selection.DiscoveryKey).SelectMany(target => target.OwnedRoots)
-                            .Concat(selection.DirectoryRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() }
-                    : selection).ToArray(),
-            };
-            _profile = ApplicationPathAliases.Expand(_profile, new ExecutablePathCanonicalizer());
-            _profileStore.Save(_profile);
-            RefreshProtectedInventory();
-            if (previousSelection != ApplicationRoutingKey(_profile)) _routingDirty = true;
-            Visuals.Update(discovered, _profile);
+                _applicationCatalog.Save(restored);
+                ReloadCategories();
+                _catalogNotice = "";
+            }
+            catch (Exception error) { _catalogNotice = "应用缓存保存失败：" + error.Message; }
+            // Metadata refresh has no authority to change the user's exact routing/protection set.
+            Visuals.Update(restored, _profile);
             _inventoryReady = true;
+            SetMessage($"已发现 {restored.Count} 个应用与 CLI。");
+            return restored;
         }
-        finally { _configurationGate.Release(); }
-        SetMessage($"已扫描 {discovered.Count} 个浏览器、AI 应用与 CLI。" + (_targetScanner.Notices.Count == 0 ? "" : "\n" + string.Join("\n", _targetScanner.Notices)));
-        return discovered;
+        finally { _inventoryGate.Release(); }
     }
 
     public async Task<ControllerOperationResult> SetApplicationsRouteAsync(
@@ -287,7 +274,15 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(targets);
-        string[] keys = targets
+        var requested = targets.ToArray();
+        try
+        {
+            if (enabled)
+                for (int index = 0; index < requested.Length; index++)
+                    if (!requested[index].InventoryReady) requested[index] = await BuildInventoryAsync(requested[index], cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) { return Failure("无法建立完整 EXE 清单：" + error.Message); }
+        string[] keys = requested
             .Where(target => !enabled || target.CanRoute)
             .Select(target => target.DiscoveryKey)
             .Distinct(StringComparer.Ordinal)
@@ -300,7 +295,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 {
                     if (enabled)
                     {
-                        var target = _targets.All().First(item => item.DiscoveryKey == key);
+                        var target = requested.First(item => item.DiscoveryKey == key);
                         var saved = selected.Values.Where(item => target.SelectionKeys.Contains(item.DiscoveryKey)).ToArray();
                         foreach (string alias in target.SelectionKeys) selected.Remove(alias);
                         selected[key] = ApplicationCatalogProjection.Merge(target, saved,
@@ -308,7 +303,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                     }
                     else
                     {
-                        var target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
+                        var target = requested.FirstOrDefault(item => item.DiscoveryKey == key);
                         foreach (string alias in target?.SelectionKeys ?? [key]) selected.Remove(alias);
                     }
                 }
@@ -717,7 +712,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             .Select(item => item.DiscoveryKey + ":" + item.Target + ":"
                 + string.Join("|", item.ExecutablePaths.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))));
 
-    private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
+    internal static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
         EgressProfileDocument profile, ApplicationInventorySnapshot inventory)
     {
         var routes = new List<SingBoxApplicationRouteInput>();
@@ -728,7 +723,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             if (!target.CanRoute)
                 throw new ControllerPreparationException("application.unresolved", $"应用没有可用于分流匹配的 EXE：{target.DisplayName}。");
             routes.Add(new SingBoxApplicationRouteInput(
-                target.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                (selection.ExecutablePaths.Count > 0 ? selection.ExecutablePaths : target.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 selection.Target));
         }
         return routes;

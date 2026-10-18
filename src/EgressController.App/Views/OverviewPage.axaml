@@ -63,7 +63,7 @@
           </Border>
           <Border Grid.Row="1" Classes="card">
             <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="14">
-              <Grid ColumnDefinitions="*,Auto"><TextBlock Text="累计用量" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="近 30 天" Classes="muted"/></Grid>
+              <Grid ColumnDefinitions="*,Auto"><TextBlock Text="累计用量" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="本周期" Classes="muted"/></Grid>
               <TextBlock Grid.Row="1" Text="{Binding Traffic.Total}" Classes="metric number" FontSize="34"/>
               <Grid Grid.Row="2" ColumnDefinitions="*,1,*" ColumnSpacing="18" VerticalAlignment="Center" Margin="0,5">
                 <StackPanel Spacing="6"><TextBlock Text="家宽" Classes="home"/><TextBlock Text="{Binding Traffic.Home}" Classes="number" FontWeight="SemiBold" FontSize="19"/></StackPanel>
@@ -80,7 +80,7 @@
         </Grid>
         <Border Grid.Column="1" Classes="card">
           <StackPanel Spacing="14">
-            <Grid ColumnDefinitions="*,Auto"><TextBlock Text="应用流量" Classes="section-title"/><TextBlock Grid.Column="1" Text="近 30 天" Classes="muted" VerticalAlignment="Center"/></Grid>
+            <Grid ColumnDefinitions="*,Auto"><TextBlock Text="应用流量" Classes="section-title"/><TextBlock Grid.Column="1" Text="本周期" Classes="muted" VerticalAlignment="Center"/></Grid>
             <StackPanel Orientation="Horizontal" Spacing="16">
               <StackPanel Orientation="Horizontal" Spacing="6"><Border Width="16" Height="6" CornerRadius="3" Background="{StaticResource HomeBrush}" VerticalAlignment="Center"/><TextBlock Text="家宽" Classes="muted"/></StackPanel>
               <StackPanel Orientation="Horizontal" Spacing="6"><Border Width="16" Height="6" CornerRadius="3" Background="{StaticResource OtherBrush}" VerticalAlignment="Center"/><TextBlock Text="非家宽" Classes="muted"/></StackPanel>

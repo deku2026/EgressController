@@ -6,6 +6,8 @@ using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Rules.Catalog;
+using Avalonia.Media;
+using EgressController.Presentation;
 
 namespace EgressController.App.ViewModels;
 
@@ -16,6 +18,7 @@ public sealed class AppsViewModel : ObservableObject
     private string _query = string.Empty;
     private string _status = "尚未扫描";
     private bool _isScanning;
+    private AppCategoryFilter _selectedCategory;
     private string _discoveryNotice = "";
     public string DiscoveryNotice { get => _discoveryNotice; private set { SetProperty(ref _discoveryNotice, value); OnPropertyChanged(nameof(HasDiscoveryNotice)); } }
     public bool HasDiscoveryNotice => DiscoveryNotice.Length > 0;
@@ -23,10 +26,19 @@ public sealed class AppsViewModel : ObservableObject
     public AppsViewModel(IAppController controller)
     {
         _controller = controller;
+        Categories = new[] { new AppCategoryFilter("all", "全部应用", "apps"), new AppCategoryFilter("selected", "已勾选", "guardian") }
+            .Concat(ApplicationCategory.BuiltIn.Select(item => new AppCategoryFilter(item.Id, item.Name, item.Icon))).ToArray();
+        _selectedCategory = Categories[0];
         ScanCommand = new AsyncRelayCommand(ScanAsync);
         SelectAllCommand = new AsyncRelayCommand(() => SetAllAsync(true));
         ClearAllCommand = new AsyncRelayCommand(() => SetAllAsync(false));
+        ReplaceEntries(controller.CachedTargets);
     }
+
+    public IReadOnlyList<AppCategoryFilter> Categories { get; }
+    public AppCategoryFilter SelectedCategory { get => _selectedCategory; set { if (value is not null && SetProperty(ref _selectedCategory, value)) RefreshVisible(); } }
+    public string CategoryTitle => SelectedCategory.Name;
+    public string CategoryDescription => SelectedCategory.Id switch { "all" => "新应用默认未分类 · 勾选后单独分流", "selected" => "已启用单独分流与进程保护的应用", _ => "分类由你决定 · 修改分类不会影响分流" };
 
     public ObservableCollection<AppEntryViewModel> Entries { get; } = new();
     public string Query
@@ -45,7 +57,7 @@ public sealed class AppsViewModel : ObservableObject
             OnPropertyChanged(nameof(ScanText));
         }
     }
-    public string ScanText => IsScanning ? "扫描中…" : "扫描应用";
+    public string ScanText => IsScanning ? "刷新中…" : "刷新列表";
     public string Summary => $"{_all.Count} 个目标 · {_all.Count(entry => entry.Routing.IsSelected)} 个单独分流";
     public bool IsEmpty => Entries.Count == 0;
     public bool HasEntries => Entries.Count > 0;
@@ -61,15 +73,11 @@ public sealed class AppsViewModel : ObservableObject
         if (IsScanning)
             return;
         IsScanning = true;
-        Status = "正在扫描 Windows 应用和 EXE 所有权边界…";
+        Status = "正在读取 Windows 安装登记与游戏库…";
         try
         {
             IReadOnlyList<LaunchTarget> discovered = _controller.IsPreview ? _controller.ScanTargets() : await Task.Run(_controller.ScanTargets);
-            foreach (AppEntryViewModel entry in _all)
-                entry.Dispose();
-            _all.Clear();
-            foreach (LaunchTarget target in discovered)
-                _all.Add(new AppEntryViewModel(_controller, target, RefreshVisible));
+            ReplaceEntries(discovered);
             Status = $"扫描完成：{_all.Count(entry => entry.Target.Kind != LaunchKind.CliNative)} 个应用，{_all.Count(entry => entry.Target.Kind == LaunchKind.CliNative)} 个 CLI。";
             DiscoveryNotice = string.Join("\n", _controller.DiscoveryNotices);
             RefreshVisible();
@@ -87,7 +95,7 @@ public sealed class AppsViewModel : ObservableObject
 
     private async Task SetAllAsync(bool enabled)
     {
-        AppEntryViewModel[] targets = _all.Where(entry => entry.CanManage && entry.Routing.CanEdit).ToArray();
+        AppEntryViewModel[] targets = Entries.Where(entry => entry.CanManage && entry.Routing.CanEdit).ToArray();
         ControllerOperationResult result = await _controller.SetApplicationsRouteAsync(
             targets.Select(entry => entry.Target),
             enabled, routes: targets.ToDictionary(entry => entry.DiscoveryKey, entry => entry.Routing.SelectedRoute.Target));
@@ -99,7 +107,7 @@ public sealed class AppsViewModel : ObservableObject
         {
             foreach (AppEntryViewModel entry in targets)
                 entry.RefreshRoute();
-            Status = enabled ? "已启用应用分流，新选择默认走默认网卡。" : "已清空应用分流选择。";
+            Status = enabled ? "已为当前列表启用分流与保护。" : "已取消当前列表的分流与保护。";
         }
         RefreshVisible();
     }
@@ -107,20 +115,53 @@ public sealed class AppsViewModel : ObservableObject
     private void RefreshVisible()
     {
         string query = _query.Trim();
-        Entries.Clear();
-        foreach (AppEntryViewModel entry in _all.Where(entry => query.Length == 0
+        var visible = _all.Where(entry => MatchesCategory(entry) && (query.Length == 0
             || entry.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
             || entry.KindText.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || entry.Command.Contains(query, StringComparison.OrdinalIgnoreCase)))
-            Entries.Add(entry);
+            || entry.Command.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
+        for (int index = 0; index < visible.Length; index++)
+        {
+            int current = Entries.IndexOf(visible[index]);
+            if (current < 0) Entries.Insert(index, visible[index]);
+            else if (current != index) Entries.Move(current, index);
+        }
+        while (Entries.Count > visible.Length) Entries.RemoveAt(Entries.Count - 1);
+        foreach (var category in Categories) category.Count = _all.Count(entry => category.Id == "all" || category.Id == "selected" && entry.Routing.IsSelected
+            || category.Id is not ("all" or "selected") && entry.CategoryId == category.Id);
+        OnPropertyChanged(nameof(CategoryTitle)); OnPropertyChanged(nameof(CategoryDescription));
         OnPropertyChanged(nameof(Summary));
         OnPropertyChanged(nameof(IsEmpty)); OnPropertyChanged(nameof(HasEntries));
+    }
+
+    private bool MatchesCategory(AppEntryViewModel entry) => SelectedCategory.Id switch
+    { "all" => true, "selected" => entry.Routing.IsSelected, _ => entry.CategoryId == SelectedCategory.Id };
+    private void ReplaceEntries(IReadOnlyList<LaunchTarget> targets)
+    {
+        foreach (var item in _all) item.Dispose();
+        _all.Clear(); foreach (var target in targets) _all.Add(new(_controller, target, RefreshVisible));
+        RefreshVisible();
+    }
+    public async Task AddManualAsync(string path, string? replaceKey = null)
+    {
+        var result = await _controller.AddManualApplicationAsync(path, replaceKey);
+        Status = result.Succeeded ? replaceKey is null ? "应用已添加，尚未启用分流。" : "安装目录已记录；刷新 EXE 清单后应用新的路径。" : result.Error ?? "添加失败";
+        if (result.Succeeded) ReplaceEntries(_controller.CachedTargets);
     }
 
     public void RefreshStatuses()
     {
         foreach (AppEntryViewModel entry in _all)
             entry.RefreshRoute();
-        OnPropertyChanged(nameof(Summary));
+        RefreshVisible();
     }
+}
+
+public sealed class AppCategoryFilter(string id, string name, string icon) : ObservableObject
+{
+    public string Id { get; } = id;
+    public string Name { get; } = name;
+    private Geometry? _glyph;
+    public Geometry Glyph => _glyph ??= Icons.For(icon);
+    private int _count;
+    public int Count { get => _count; set => SetProperty(ref _count, value); }
 }

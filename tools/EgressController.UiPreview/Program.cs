@@ -43,6 +43,7 @@ internal static class Program
         RenderChecks.TrayMenus(directory);
         RenderChecks.TrayPlacement(directory);
         RenderChecks.MonthlyList(directory);
+        ApplicationChecks.Run(directory);
         foreach (var scenario in new[] { "ready", "offline", "starting", "empty", "telemetry", "failed", "download-timeout" })
         {
             var controller = new PreviewController(scenario, PreviewIcons.Load);
