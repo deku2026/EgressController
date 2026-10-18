@@ -31,7 +31,7 @@
 - Use validated local core/rule caches before remote requests. Recover missing/corrupt catalog through the same proxy path. Distinguish caller cancellation from transport/CLI timeout and retain resource/port/stage in errors.
 - A new preparation shows current progress; prior failures belong in history. Only the operation that owns its cancellation source disposes it; obsolete work cannot overwrite a replacement's state.
 - The installed tray is a separate copied payload. On main startup, compare bytes, stage/verify, replace only exact installed tray instances, and preserve rollback. Do not stop the protection service or reset user stop/startup preferences to update its UI.
-- Keep mock combination matrices for startup states, caches, selected ports, cancellation/recovery, and separate guardian/network verdicts. Test production storage/compiler/transport boundaries with fake network/core adapters.
+- Keep mock combination matrices for startup states, caches, selected ports, cancellation/recovery, and separate guardian/network verdicts. Use in-memory state/resource adapters for large Cartesian matrices; validate real storage integrity, atomic publication and rollback in focused boundary tests. Never weaken production durability to speed up tests.
 
 ## Diagnostics
 

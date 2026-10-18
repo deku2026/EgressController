@@ -133,6 +133,43 @@ public sealed class SingBoxCoreManagerTests : IDisposable
         Assert.Equal(executable, candidate.ExecutablePath);
         if (!lastGoodOnly) Assert.Equal("unused-corrupt-fallback", File.ReadAllText(state.LastGoodPath));
     }
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Missing_or_corrupt_core_requires_successful_download(bool corrupt, bool online)
+    {
+        var state = new SingBoxStateStore(_directory);
+        string executable = Path.Combine(state.CoreDirectory, "1.13.19", "sing-box.exe");
+        if (corrupt)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+            File.WriteAllText(executable, "damaged-core");
+            state.SaveCurrent(new() { Version = "1.13.19", ExecutablePath = executable,
+                Sha256 = new string('0', 64), VerifiedAtUtc = DateTimeOffset.UtcNow });
+        }
+        byte[] zip = MakeZip(("sing-box-1.13.19-windows-amd64/sing-box.exe", "repaired-core"));
+        var releases = new FakeReleaseClient(zip, Convert.ToHexString(SHA256.HashData(zip)));
+        var manager = new SingBoxCoreManager(_directory,
+            online ? releases : new RateLimitedReleaseClient(false), new FakeCli(), state);
+        if (online)
+        {
+            var candidate = await manager.PrepareAsync(new(), TestContext.Current.CancellationToken);
+            Assert.Equal("repaired-core", File.ReadAllText(candidate.ExecutablePath));
+            Assert.Equal(candidate.Sha256, state.LoadCurrent()!.Sha256);
+            Assert.Equal(1, releases.DownloadCount);
+        }
+        else
+        {
+            var failure = await Assert.ThrowsAsync<SingBoxCoreException>(
+                () => manager.PrepareAsync(new(), TestContext.Current.CancellationToken));
+            Assert.Equal("core.release", failure.Code);
+            if (corrupt) Assert.Equal("damaged-core", File.ReadAllText(executable));
+            else Assert.Null(state.LoadCurrent());
+        }
+    }
+
     private sealed class NoNetworkRelease : ISingBoxReleaseClient
     {
         public Task<SingBoxRelease> GetLatestStableAsync(CancellationToken token = default) => throw new InvalidOperationException("Startup must not request metadata");

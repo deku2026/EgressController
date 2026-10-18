@@ -1,14 +1,10 @@
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Core.Protection;
-using EgressController.Rules.Artifacts;
-using EgressController.Rules.Catalog;
-using EgressController.SingBox.Cli;
 using EgressController.SingBox.Configuration;
 using EgressController.SingBox.Core;
 using EgressController.SingBox.Runtime;
@@ -18,7 +14,7 @@ using EgressController.Transport.Upstream;
 namespace EgressController.SingBox.Tests;
 
 /// <summary>2 TUN × 4 links × 6 proxy × 4 rule selection/cache × 3 core cache × 2 port changes × 3 cancellation = 3,456 cases.</summary>
-public sealed class StartupRecoveryMatrixTests
+public sealed class StartupRecoveryMatrixTests(StartupRuleFixture ruleFixture) : IClassFixture<StartupRuleFixture>
 {
     public static IEnumerable<object[]> Cases()
     {
@@ -37,125 +33,112 @@ public sealed class StartupRecoveryMatrixTests
     public async Task Startup_and_recovery_obey_all_enumerated_states(bool occupied, bool homeUp, bool proxyUp,
         int portState, int ruleCache, int coreCache, bool changePort, int cancellation)
     {
-        string root = Path.Combine(Path.GetTempPath(), "EgressController.StartupMatrix", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
+        // This matrix tests orchestration. File integrity/atomic publication are exercised
+        // separately by RuleArtifactStore, SingBoxCoreManager and SingBoxStateStore tests.
+        // The compiler uses one shared read-only SRS fixture. No matrix row creates files,
+        // opens sockets or starts a process.
+        var state = new MemoryRuntimeState();
+        var env = Environment(homeUp, proxyUp);
+        int? savedPort = portState == 1 ? null : 7890;
+        int? desiredPort = savedPort;
+        int fault = portState;
+        bool conflict = occupied;
+        var requests = new List<int>();
+        var transport = new DefaultProxyDownloadTransport(() => savedPort, port =>
         {
-            var state = new SingBoxStateStore(root);
-            var env = Environment(homeUp, proxyUp);
-            int? savedPort = portState == 1 ? null : 7890;
-            int? desiredPort = savedPort;
-            int fault = portState;
-            bool conflict = occupied;
-            var requests = new List<int>();
-            var transport = new DefaultProxyDownloadTransport(() => savedPort, port =>
+            requests.Add(port);
+            return new HttpClient(new DownloadHandler(() => fault));
+        });
+        using var artifactsFetcher = new HttpRemoteFetcher(transport);
+        var resources = new MemoryResources(ruleCache, coreCache, ruleFixture.RulePath, artifactsFetcher, new SingBoxReleaseClient(transport));
+        var host = new MockHost();
+        await using var service = new SingBoxService(host, state);
+        CancellationTokenSource? cancelAtApply = null;
+        SingBoxRuntimeCandidate? candidate = null;
+        EgressProfileDocument Profile() => new EgressProfileDocument
+        {
+            DefaultAdapterId = env.DefaultAdapter.AdapterId.ToString(),
+            ProxyAdapterId = env.ProxyAdapter.AdapterId.ToString(),
+            UpstreamPorts = desiredPort is int port ? [port] : [],
+            UpstreamPort = desiredPort ?? 7890,
+            RuleSets = ruleCache == 3 ? [] : [new() { Name = "openai", Target = EgressRouteTarget.DefaultAdapter }]
+        }.NormalizeAndValidate();
+        async Task<SingBoxRuntimeCandidate> Prepare(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (conflict) throw new SingBoxServiceException("tun.conflict", "mock occupied TUN");
+            using var scope = transport.UseDefaultPort(desiredPort);
+            string? rule = await resources.PrepareRuleAsync(token);
+            var core = await resources.PrepareCoreAsync(token);
+            var compilation = new EgressProfileCompiler().Compile(new()
             {
-                requests.Add(port);
-                return new HttpClient(new DownloadHandler(() => fault));
+                Profile = Profile(),
+                Environment = env,
+                UpstreamOwnerPaths = desiredPort is null ? [] : [@"C:\Mock\mihomo.exe"],
+                ApplicationRoutes = [new([@"C:\Mock\ChatGPT.exe"], EgressRouteTarget.DefaultAdapter)],
+                UnreadyUpstreamPorts = desiredPort is int p && fault == 2 ? [p] : [],
+                RuleSets = rule is null ? [] : [new("openai", rule)],
+                ControllerPort = 19090,
+                ControllerSecret = "0123456789abcdef0123456789abcdef"
             });
-            using var artifactsFetcher = new HttpRemoteFetcher(transport);
-            var artifacts = new RuleArtifactStore(Path.Combine(root, "rules-cache"), artifactsFetcher);
-            string ruleFile = Path.Combine(artifacts.RootDirectory, "rules", Commit, "openai.srs");
-            if (ruleCache is 0 or 2) { Directory.CreateDirectory(Path.GetDirectoryName(ruleFile)!); File.WriteAllBytes(ruleFile, ruleCache == 0 ? RuleBody : "bad"u8.ToArray()); }
-            if (coreCache != 1)
-            {
-                string exe = Path.Combine(root, "core", "1.13.19", "sing-box.exe");
-                Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
-                File.WriteAllBytes(exe, coreCache == 0 ? CoreBody : "bad"u8.ToArray());
-                state.SaveCurrent(new() { Version = "1.13.19", ExecutablePath = exe, Sha256 = Convert.ToHexString(SHA256.HashData(CoreBody)), VerifiedAtUtc = DateTimeOffset.UtcNow });
-            }
-            var manager = new SingBoxCoreManager(root, new SingBoxReleaseClient(transport), new MockCli(), state);
-            var host = new MockHost();
-            await using var service = new SingBoxService(host, state);
-            CancellationTokenSource? cancelAtApply = null;
-            SingBoxRuntimeCandidate? candidate = null;
-            EgressProfileDocument Profile() => new EgressProfileDocument
-            {
-                DefaultAdapterId = env.DefaultAdapter.AdapterId.ToString(),
-                ProxyAdapterId = env.ProxyAdapter.AdapterId.ToString(),
-                UpstreamPorts = desiredPort is int port ? [port] : [],
-                UpstreamPort = desiredPort ?? 7890,
-                RuleSets = ruleCache == 3 ? [] : [new() { Name = "openai", Target = EgressRouteTarget.DefaultAdapter }]
-            }.NormalizeAndValidate();
-            async Task<SingBoxRuntimeCandidate> Prepare(CancellationToken token)
-            {
-                token.ThrowIfCancellationRequested();
-                if (conflict) throw new SingBoxServiceException("tun.conflict", "mock occupied TUN");
-                using var scope = transport.UseDefaultPort(desiredPort);
-                var rule = ruleCache == 3 ? null : await artifacts.EnsureAsync(Snapshot, "openai", token);
-                if (rule is { Succeeded: false }) throw new SingBoxServiceException("rules.download", rule.Error!);
-                var core = await manager.PrepareAsync(new(), token);
-                var compilation = new EgressProfileCompiler().Compile(new()
-                {
-                    Profile = Profile(),
-                    Environment = env,
-                    UpstreamOwnerPaths = desiredPort is null ? [] : [@"C:\Mock\mihomo.exe"],
-                    ApplicationRoutes = [new([@"C:\Mock\ChatGPT.exe"], EgressRouteTarget.DefaultAdapter)],
-                    UnreadyUpstreamPorts = desiredPort is int p && fault == 2 ? [p] : [],
-                    RuleSets = rule is null ? [] : [new("openai", rule.Path!)],
-                    ControllerPort = 19090,
-                    ControllerSecret = "0123456789abcdef0123456789abcdef"
-                });
-                using var json = JsonDocument.Parse(compilation.JsonBytes);
-                var appRule = json.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray()
-                    .Single(item => item.TryGetProperty("process_path_regex", out var paths) && paths.GetRawText().Contains("ChatGPT", StringComparison.Ordinal));
-                Assert.Equal(homeUp ? "route" : "reject", appRule.GetProperty("action").GetString());
-                string config = Path.Combine(root, "config-" + compilation.Sha256 + ".json");
-                EgressProfileCompiler.WriteNext(config, compilation);
-                candidate = SingBoxRuntimeCandidate.From(core, config, compilation.Sha256, 19090, "0123456789abcdef0123456789abcdef");
-                cancelAtApply?.Cancel(); token.ThrowIfCancellationRequested();
-                return candidate;
-            }
-            var first = await service.StartAsync(Prepare, TestContext.Current.CancellationToken);
-            bool shouldStart = !occupied && (portState == 0 || (ruleCache is 0 or 3) && coreCache == 0);
-            Assert.Equal(shouldStart, first.Succeeded);
-            Assert.Equal(shouldStart ? 1 : 0, host.Starts);
-            if (occupied || (ruleCache is 0 or 3) && coreCache == 0) Assert.Empty(requests);
-            Assert.All(requests, port => Assert.Equal(7890, port));
-            var health = new NetworkHealthState();
-            int generation = health.ObserveEnvironment(env, desiredPort);
-            health.Complete(generation, NetworkHealthCheck.DirectInternet, new(homeUp, "mock"), TestContext.Current.CancellationToken);
-            health.Complete(generation, NetworkHealthCheck.ProxyInternet, new(proxyUp && portState == 0, "mock"), TestContext.Current.CancellationToken);
-            Assert.Equal(shouldStart && homeUp && proxyUp && (desiredPort is null || portState == 0),
-                ProtectionReadiness.Evaluate(first.Succeeded, first.ErrorMessage, first.Succeeded, null, null, health.Readiness).Ready);
-
-            // Fix the external fault without changing either adapter. Changing the default port
-            // is an independent matrix dimension; preparation must use the uncommitted new value.
-            conflict = false; fault = 0; desiredPort = changePort ? 7891 : 7890;
-            int before = host.Starts, requestCount = requests.Count;
-            using var cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            if (cancellation == 1) cancel.Cancel();
-            if (cancellation == 2) cancelAtApply = cancel;
-            var recovery = await service.ApplyAsync(Prepare, cancel.Token);
-            if (cancellation != 0)
-            {
-                Assert.Equal("operation.cancelled", recovery.ErrorCode);
-                Assert.Equal(before, host.Starts);
-                cancelAtApply = null;
-                recovery = await service.ApplyAsync(Prepare, TestContext.Current.CancellationToken);
-            }
-            Assert.True(recovery.Succeeded, recovery.ErrorMessage);
-            Assert.All(requests.Skip(requestCount), port => Assert.Equal(desiredPort, port));
-            Assert.Equal(SingBoxServiceState.Running, service.Status.State);
-            int stableStarts = host.Starts;
-            Assert.False((await service.ApplyCandidateAsync(candidate!, TestContext.Current.CancellationToken)).CoreChanged);
-            Assert.Equal(stableStarts, host.Starts);
-            generation = health.ObserveEnvironment(env, desiredPort);
-            health.Complete(generation, NetworkHealthCheck.DirectInternet, new(homeUp, "mock"), TestContext.Current.CancellationToken);
-            health.Complete(generation, NetworkHealthCheck.ProxyInternet, new(proxyUp, "mock"), TestContext.Current.CancellationToken);
-            Assert.Equal(homeUp && proxyUp, ProtectionReadiness.Evaluate(true, null, true, null, null, health.Readiness).Ready);
-            // A real takeover failure remains authoritative, independently of healthy network probes.
-            service.ReportTakeoverFailure("mock lost TUN");
-            Assert.False(ProtectionReadiness.Evaluate(false, "mock lost TUN", true, null, null, health.Readiness).Ready);
+            using var json = JsonDocument.Parse(compilation.JsonBytes);
+            var appRule = json.RootElement.GetProperty("route").GetProperty("rules").EnumerateArray()
+                .Single(item => item.TryGetProperty("process_path_regex", out var paths) && paths.GetRawText().Contains("ChatGPT", StringComparison.Ordinal));
+            Assert.Equal(homeUp ? "route" : "reject", appRule.GetProperty("action").GetString());
+            string config = @"C:\Mock\StartupMatrix\config-" + compilation.Sha256 + ".json";
+            candidate = SingBoxRuntimeCandidate.From(core, config, compilation.Sha256, 19090, "0123456789abcdef0123456789abcdef");
+            cancelAtApply?.Cancel(); token.ThrowIfCancellationRequested();
+            return candidate;
         }
-        finally { Directory.Delete(root, true); }
+        var first = await service.StartAsync(Prepare, TestContext.Current.CancellationToken);
+        bool shouldStart = !occupied && (portState == 0 || (ruleCache is 0 or 3) && coreCache == 0);
+        Assert.Equal(shouldStart, first.Succeeded);
+        Assert.Equal(shouldStart ? 1 : 0, host.Starts);
+        if (occupied || (ruleCache is 0 or 3) && coreCache == 0) Assert.Empty(requests);
+        Assert.All(requests, port => Assert.Equal(7890, port));
+        var health = new NetworkHealthState();
+        int generation = health.ObserveEnvironment(env, desiredPort);
+        health.Complete(generation, NetworkHealthCheck.DirectInternet, new(homeUp, "mock"), TestContext.Current.CancellationToken);
+        health.Complete(generation, NetworkHealthCheck.ProxyInternet, new(proxyUp && portState == 0, "mock"), TestContext.Current.CancellationToken);
+        Assert.Equal(shouldStart && homeUp && proxyUp && (desiredPort is null || portState == 0),
+            ProtectionReadiness.Evaluate(first.Succeeded, first.ErrorMessage, first.Succeeded, null, null, health.Readiness).Ready);
+
+        // Fix the external fault without changing either adapter. Changing the default port
+        // is an independent matrix dimension; preparation must use the uncommitted new value.
+        conflict = false; fault = 0; desiredPort = changePort ? 7891 : 7890;
+        int before = host.Starts, requestCount = requests.Count;
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        if (cancellation == 1) cancel.Cancel();
+        if (cancellation == 2) cancelAtApply = cancel;
+        var recovery = await service.ApplyAsync(Prepare, cancel.Token);
+        if (cancellation != 0)
+        {
+            Assert.Equal("operation.cancelled", recovery.ErrorCode);
+            Assert.Equal(before, host.Starts);
+            cancelAtApply = null;
+            recovery = await service.ApplyAsync(Prepare, TestContext.Current.CancellationToken);
+        }
+        Assert.True(recovery.Succeeded, recovery.ErrorMessage);
+        Assert.All(requests.Skip(requestCount), port => Assert.Equal(desiredPort, port));
+        Assert.Equal(SingBoxServiceState.Running, service.Status.State);
+        Assert.Null(state.LoadPendingApply());
+        Assert.Equal(candidate!.CoreSha256, state.CurrentCore!.Sha256);
+        Assert.Equal(state.CurrentCore, state.LastGoodCore);
+        int stableStarts = host.Starts;
+        Assert.False((await service.ApplyCandidateAsync(candidate!, TestContext.Current.CancellationToken)).CoreChanged);
+        Assert.Equal(stableStarts, host.Starts);
+        generation = health.ObserveEnvironment(env, desiredPort);
+        health.Complete(generation, NetworkHealthCheck.DirectInternet, new(homeUp, "mock"), TestContext.Current.CancellationToken);
+        health.Complete(generation, NetworkHealthCheck.ProxyInternet, new(proxyUp, "mock"), TestContext.Current.CancellationToken);
+        Assert.Equal(homeUp && proxyUp, ProtectionReadiness.Evaluate(true, null, true, null, null, health.Readiness).Ready);
+        // A real takeover failure remains authoritative, independently of healthy network probes.
+        service.ReportTakeoverFailure("mock lost TUN");
+        Assert.False(ProtectionReadiness.Evaluate(false, "mock lost TUN", true, null, null, health.Readiness).Ready);
     }
 
-    private const string Commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private static readonly byte[] RuleBody = "mock-srs"u8.ToArray(), CoreBody = "mock-native-core"u8.ToArray();
     private static readonly byte[] Zip = Archive();
-    private static readonly SingBoxRuleCatalogSnapshot Snapshot = new(Commit, new string('b', 40),
-        [new("openai", "geo/geosite/openai.srs", Convert.ToHexString(SHA1.HashData(Encoding.ASCII.GetBytes($"blob {RuleBody.Length}\0").Concat(RuleBody).ToArray())).ToLowerInvariant(), RuleBody.Length)]);
+    private static readonly string CoreDigest = Convert.ToHexString(SHA256.HashData(CoreBody));
     private static byte[] Archive()
     {
         using var output = new MemoryStream();
@@ -194,10 +177,53 @@ public sealed class StartupRecoveryMatrixTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = body });
         }
     }
-    private sealed class MockCli : ISingBoxCli
+    /// <summary>Models the result of cache validation, not its file-system implementation.</summary>
+    private sealed class MemoryResources(int rules, int core, string rulePath, HttpRemoteFetcher fetcher, SingBoxReleaseClient releases)
     {
-        public Task<SingBoxVersionInfo> GetVersionAsync(string path, CancellationToken token = default) => Task.FromResult(new SingBoxVersionInfo { Version = new(1, 13, 19), RawOutput = "mock" });
-        public Task<SingBoxCommandResult> CheckAsync(string path, string config, CancellationToken token = default) => Task.FromResult(new SingBoxCommandResult { ExitCode = 0, StandardOutput = "", StandardError = "" });
+        private bool _ruleAvailable = rules == 0;
+        private bool _coreAvailable = core == 0;
+
+        public async Task<string?> PrepareRuleAsync(CancellationToken token)
+        {
+            if (rules == 3) return null;
+            if (!_ruleAvailable)
+            {
+                await fetcher.FetchAsync(new("https://mock.invalid/openai.srs"), 1024, token);
+                _ruleAvailable = true;
+            }
+            return rulePath;
+        }
+
+        public async Task<SingBoxCoreCandidate> PrepareCoreAsync(CancellationToken token)
+        {
+            if (!_coreAvailable)
+            {
+                var release = await releases.GetLatestStableAsync(token);
+                using var archive = new MemoryStream();
+                await releases.DownloadAsync(Assert.Single(release.Assets), archive, token);
+                Assert.Equal(Zip, archive.ToArray());
+                _coreAvailable = true;
+            }
+            return new() { Mode = EgressProfileSchema.ManagedCore, Version = "1.13.19",
+                ExecutablePath = @"C:\Mock\StartupMatrix\sing-box.exe", Sha256 = CoreDigest, IsManaged = true };
+        }
+    }
+
+    private sealed class MemoryRuntimeState : ISingBoxRuntimeStateStore
+    {
+        private SingBoxRuntimePointer? _current, _lastGood;
+        private SingBoxPendingApply? _pending;
+        public SingBoxCorePointer? CurrentCore { get; private set; }
+        public SingBoxCorePointer? LastGoodCore { get; private set; }
+        public SingBoxRuntimePointer? LoadCurrentRuntime() => _current;
+        public SingBoxRuntimePointer? LoadLastGoodRuntime() => _lastGood;
+        public SingBoxPendingApply? LoadPendingApply() => _pending;
+        public void SaveCurrentRuntime(SingBoxRuntimePointer pointer) => _current = pointer;
+        public void SaveLastGoodRuntime(SingBoxRuntimePointer pointer) => _lastGood = pointer;
+        public void SavePendingApply(SingBoxPendingApply pending) => _pending = pending;
+        public void SaveCurrent(SingBoxCorePointer pointer) => CurrentCore = pointer;
+        public void SaveLastGood(SingBoxCorePointer pointer) => LastGoodCore = pointer;
+        public void ClearPendingApply() => _pending = null;
     }
     private sealed class MockHost : ISingBoxProcessClient
     {
@@ -207,5 +233,23 @@ public sealed class StartupRecoveryMatrixTests
         public Task<SingBoxProcessStatus> GetStatusAsync(CancellationToken token = default) => Task.FromResult(new SingBoxProcessStatus(true, "running", 1234, 0, null, null));
         public Task<SingBoxProcessStatus> StopAsync(CancellationToken token = default) => Task.FromResult(new SingBoxProcessStatus(true, "stopped", null, 0, null, null));
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>One immutable file for the real compiler's file-existence check, not a per-case cache.</summary>
+public sealed class StartupRuleFixture : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "EgressController.StartupRule-" + Guid.NewGuid().ToString("N"));
+    public string RulePath { get; }
+    public StartupRuleFixture()
+    {
+        Directory.CreateDirectory(_directory);
+        RulePath = Path.Combine(_directory, "openai.srs");
+        File.WriteAllBytes(RulePath, "mock-srs"u8.ToArray());
+    }
+    public void Dispose()
+    {
+        File.Delete(RulePath);
+        Directory.Delete(_directory);
     }
 }

@@ -123,7 +123,7 @@ public sealed record SingBoxOutputEvent(string Source, string Line, int DroppedC
 public sealed class SingBoxService : IAsyncDisposable
 {
     private readonly ISingBoxProcessClient _processClient;
-    private readonly SingBoxStateStore _stateStore;
+    private readonly ISingBoxRuntimeStateStore _stateStore;
     private readonly Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>> _healthCheck;
     private readonly Action? _beforeTunChange;
     private readonly Action? _afterTunChange;
@@ -135,7 +135,7 @@ public sealed class SingBoxService : IAsyncDisposable
 
     public SingBoxService(
         ISingBoxProcessClient processClient,
-        SingBoxStateStore stateStore,
+        ISingBoxRuntimeStateStore stateStore,
         Func<SingBoxRuntimeCandidate, CancellationToken, Task<bool>>? healthCheck = null,
         Action? beforeTunChange = null,
         Action? afterTunChange = null)
