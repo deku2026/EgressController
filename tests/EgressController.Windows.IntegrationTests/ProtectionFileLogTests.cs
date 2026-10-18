@@ -20,6 +20,13 @@ public sealed class ProtectionFileLogTests
         journal.Report("进程保护", "protection.sweep", "cannot inspect selected process");
         journal.Info("守护管理", "service stopped by user");
         Assert.Equal(5, written.Count);
+        foreach (string stage in new[] { "应用扫描", "初始化", "托盘异常" })
+        {
+            journal.Info(stage, "routine progress");
+            journal.Report(stage, "startup.failed", "cannot finish startup or keep the tray alive");
+        }
+        Assert.Equal(8, written.Count);
+        Assert.DoesNotContain(written, entry => entry.Message == "routine progress");
         Assert.DoesNotContain(written, entry => entry.Message.Contains("ordinary connection"));
         Assert.Contains(journal.Snapshot(), item => item.Code == "monitor.connections");
     }

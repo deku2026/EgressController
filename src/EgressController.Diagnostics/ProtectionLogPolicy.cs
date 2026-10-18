@@ -8,6 +8,7 @@ public static class ProtectionLogPolicy
         string[] stages = ["TUN", "保护", "进程保护", "进程终止", "守护状态", "守护终止", "守护保护", "守护接管检查",
             "守护名单同步", "守护管理", "独立守护通信", "出口变化检测", "内核生命周期", "出口配置更新", "退出保护", "服务", "启动", "退出", "主程序启动"];
         return stages.Any(stage => entry.Source.StartsWith(stage, StringComparison.Ordinal))
+            || (entry.Level is "error" or "fatal") && (entry.Source is "应用扫描" or "初始化" or "托盘异常")
             || entry.Source.StartsWith("联网检测", StringComparison.Ordinal) && entry.Message.Contains("[network.failed]", StringComparison.Ordinal);
     }
 }
