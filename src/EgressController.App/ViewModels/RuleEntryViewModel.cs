@@ -21,7 +21,7 @@ public sealed class RuleEntryViewModel
         Routing = new RouteSelectionViewModel(controller.Profile,
             controller.Profile.RuleSets.FirstOrDefault(route => route.Name == Name)?.Target,
             (enabled, route) => controller.SetRuleSetAsync(Name, enabled, route), changed,
-            error => controller.ReportFailure("规则分流", "rules.route", error.Message, error));
+            error => controller.ReportFailure("规则分流", "rules.route", error.Message, error), () => controller.Adapters);
     }
 
     public string Name { get; }

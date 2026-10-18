@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using EgressController.Core.Profile;
+using EgressController.Core.Models;
 
 namespace EgressController.App.ViewModels;
 
@@ -7,12 +8,12 @@ public sealed record RouteOptionViewModel(EgressRouteTarget Target, string Label
 {
     public override string ToString() => Label;
 
-    public static IReadOnlyList<RouteOptionViewModel> Create(EgressProfileDocument profile)
+    public static IReadOnlyList<RouteOptionViewModel> Create(EgressProfileDocument profile, IReadOnlyList<NetworkAdapterInfo>? adapters = null)
         => new[]
         {
             new RouteOptionViewModel(EgressRouteTarget.DefaultAdapter,
-                "默认直连 · " + (profile.Adapters.FirstOrDefault(adapter => adapter.Id == profile.DefaultAdapterId)?.Name ?? "未设置")),
-        }.Concat(profile.Adapters.Select(adapter => new RouteOptionViewModel(EgressRouteTarget.ForAdapter(adapter.Id), adapter.Name + " · 直连")))
+                "默认直连 · " + (adapters is null ? profile.Adapters.FirstOrDefault(adapter => adapter.Id == profile.DefaultAdapterId)?.Name ?? "未设置" : RouteNames.Adapter(profile.DefaultAdapterId, profile, adapters))),
+        }.Concat(profile.Adapters.Select(adapter => new RouteOptionViewModel(EgressRouteTarget.ForAdapter(adapter.Id), (adapters is null ? adapter.Name : RouteNames.Adapter(adapter.Id, profile, adapters)) + " · 直连")))
         .Concat(profile.UpstreamPorts.Count == 0 ? [] : new[] { new RouteOptionViewModel(EgressRouteTarget.Default, $"默认端口 · {profile.UpstreamPort}") })
         .Concat(profile.UpstreamPorts.Select(port => new RouteOptionViewModel(EgressRouteTarget.ForPort(port), $"端口 {port}"))).ToArray();
 }
@@ -22,6 +23,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
 {
     private readonly Func<bool, EgressRouteTarget, Task<ControllerOperationResult>> _save;
     private readonly Action _changed;
+    private readonly Func<IReadOnlyList<NetworkAdapterInfo>>? _adapters;
     private readonly Action<Exception>? _reportError;
     private bool _isSelected;
     private bool _isBusy;
@@ -31,13 +33,13 @@ public sealed class RouteSelectionViewModel : ObservableObject
     private RouteOptionViewModel _selectedRoute;
 
     public RouteSelectionViewModel(EgressProfileDocument profile, EgressRouteTarget? target,
-        Func<bool, EgressRouteTarget, Task<ControllerOperationResult>> save, Action changed, Action<Exception>? reportError = null)
+        Func<bool, EgressRouteTarget, Task<ControllerOperationResult>> save, Action changed, Action<Exception>? reportError = null, Func<IReadOnlyList<NetworkAdapterInfo>>? adapters = null)
     {
-        _save = save;
+        _save = save; _adapters = adapters;
         _changed = changed;
         _reportError = reportError;
         _isSelected = target is not null;
-        _options = WithCurrent(RouteOptionViewModel.Create(profile), target);
+        _options = WithCurrent(RouteOptionViewModel.Create(profile, _adapters?.Invoke()), target);
         _selectedRoute = _options.First(option => option.Target == (target ?? EgressRouteTarget.DefaultAdapter));
     }
 
@@ -105,7 +107,7 @@ public sealed class RouteSelectionViewModel : ObservableObject
         _isBusy = true;
         // Keep an unchecked row's chosen destination until the user enables it.
         EgressRouteTarget preferred = target ?? _selectedRoute.Target;
-        var options = WithCurrent(RouteOptionViewModel.Create(profile), target);
+        var options = WithCurrent(RouteOptionViewModel.Create(profile, _adapters?.Invoke()), target);
         _options = options;
         _selectedRoute = options.FirstOrDefault(option => option.Target == preferred) ?? options[0];
         _isSelected = target is not null;
@@ -114,6 +116,8 @@ public sealed class RouteSelectionViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSelected));
         _isBusy = false;
     }
+
+    public Task CommitCurrentAsync() => _isBusy ? Task.CompletedTask : ApplyAsync(true, _selectedRoute);
 
     private async Task ApplyAsync(bool enabled, RouteOptionViewModel option)
     {

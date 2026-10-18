@@ -15,6 +15,11 @@ public sealed class ConnectionRowViewModel : ObservableObject
     private ConnectionObservation _item;
     private bool _isActive;
     private bool _ratesFresh = true;
+    private Services.ProcessVisual? _appearance;
+    public Services.ProcessVisual? Appearance { get => _appearance; private set => SetProperty(ref _appearance, value); }
+    public void SetAppearance(Services.ProcessVisual appearance) { Appearance = appearance; OnPropertyChanged(nameof(ProcessName)); }
+    private Func<string?, bool, string>? _routeName;
+    public void SetRouteNames(Func<string?, bool, string> names) { _routeName = names; OnPropertyChanged(nameof(Route)); OnPropertyChanged(nameof(RoutePath)); }
 
     public ConnectionRowViewModel(ConnectionObservation item, bool active)
     {
@@ -29,17 +34,18 @@ public sealed class ConnectionRowViewModel : ObservableObject
     public string DownloadText => TrafficFormat.Bytes(_item.Download);
     public bool IsCurrent => _isActive && _ratesFresh;
     public string Status => !IsActive ? "已结束" : IsCurrent ? "活动" : "上次活动";
-    public string ProcessName => string.IsNullOrWhiteSpace(_item.ProcessPath)
+    public string ProcessName => Appearance?.Name ?? (string.IsNullOrWhiteSpace(_item.ProcessPath)
         ? "未识别进程"
-        : Path.GetFileName(_item.ProcessPath);
+        : Path.GetFileName(_item.ProcessPath));
     public string ProcessPath => string.IsNullOrWhiteSpace(_item.ProcessPath) ? "未识别路径" : _item.ProcessPath;
     public string Target => Endpoint(_item.Host, _item.DestinationIp, _item.DestinationPort);
     public string SourceEndpoint => Endpoint(string.Empty, _item.SourceIp, _item.SourcePort);
     public string DestinationEndpoint => Endpoint(string.Empty, _item.DestinationIp, _item.DestinationPort);
     public string Protocol => string.IsNullOrWhiteSpace(_item.Network) ? "未知" : _item.Network.ToUpperInvariant();
     public string Type => string.IsNullOrWhiteSpace(_item.Type) ? "未知" : _item.Type;
-    public string Route => _item.Outbound ?? _item.Chains.FirstOrDefault() ?? "未知出口";
-    public string RoutePath => _item.Chains.Count == 0 ? Route : string.Join(" → ", _item.Chains);
+    public string RawRoute => _item.Outbound ?? _item.Chains.FirstOrDefault() ?? "未知出口";
+    public string Route => _routeName?.Invoke(RawRoute, false) ?? RawRoute;
+    public string RoutePath => _item.Chains.Count == 0 ? _routeName?.Invoke(RawRoute, true) ?? Route : string.Join(" → ", _item.Chains.Select(tag => _routeName?.Invoke(tag, true) ?? tag));
     public string Reason => string.IsNullOrWhiteSpace(_item.Rule) ? "final" : _item.Rule;
     public string Rule => string.IsNullOrWhiteSpace(_item.Rule) ? "未提供" : _item.Rule;
     public string DnsMode => string.IsNullOrWhiteSpace(_item.DnsMode) ? "未提供" : _item.DnsMode;

@@ -62,6 +62,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private readonly SingBoxService _singBox;
     private readonly ConnectionHistoryStore _connectionHistory = new();
     private readonly BoundedLogStore _logs = new();
+    public ApplicationVisualCatalog Visuals { get; } = new();
     private readonly TrafficTimeline _trafficTimeline = new();
     private bool _connectionRatesValid;
     public TrafficSnapshot TrafficSnapshot => _trafficTimeline.Snapshot();
@@ -221,6 +222,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         }
     }
 
+    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices;
+
     public IReadOnlyList<LaunchTarget> ScanTargets()
     {
         IReadOnlyList<LaunchTarget> scanned = _targetScanner.Scan();
@@ -229,24 +232,28 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         _configurationGate.Wait(_lifetimeCts.Token);
         try
         {
+            string previousSelection = ApplicationRoutingKey(_profile);
+            discovered = ApplicationCatalogProjection.RestoreSavedTargets(discovered, _profile.Applications).ToList();
+            _profile = _profile with { Applications = ApplicationCatalogProjection.Reconcile(_profile.Applications, discovered) };
             foreach (EgressApplicationSelection selected in _profile.Applications
-                .Where(selected => discovered.All(target => target.DiscoveryKey != selected.DiscoveryKey)))
+                .Where(selected => discovered.All(target => !target.SelectionKeys.Contains(selected.DiscoveryKey))))
             {
                 discovered.Add(new LaunchTarget
                 {
                     Id = selected.DiscoveryKey, SavedDiscoveryKey = selected.DiscoveryKey,
                     Name = selected.DisplayName ?? selected.DiscoveryKey,
+                    CanonicalExecutable = selected.ExecutablePaths.FirstOrDefault(),
+                    Kind = selected.DiscoveryKey.StartsWith("cli:", StringComparison.OrdinalIgnoreCase) ? LaunchKind.CliNative : LaunchKind.DirectExe,
                     Source = "缓存记录（当前未发现）",
                     OwnedExecutables = selected.ExecutablePaths,
                     OwnedRoots = selected.DirectoryRoots,
                     ResolutionUnsupported = true,
                 });
             }
-            string previousSelection = ApplicationRoutingKey(_profile);
             _targets.Clear();
             foreach (LaunchTarget target in discovered)
             {
-                target.RouteSelected = _profile.Applications.Any(selection => selection.DiscoveryKey == target.DiscoveryKey);
+                target.RouteSelected = _profile.Applications.Any(selection => target.SelectionKeys.Contains(selection.DiscoveryKey));
                 _targets.Add(target);
             }
             ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(discovered);
@@ -262,10 +269,11 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             _profileStore.Save(_profile);
             RefreshProtectedInventory();
             if (previousSelection != ApplicationRoutingKey(_profile)) _routingDirty = true;
+            Visuals.Update(discovered, _profile);
             _inventoryReady = true;
         }
         finally { _configurationGate.Release(); }
-        SetMessage($"已扫描 {discovered.Count} 个 Windows 应用。");
+        SetMessage($"已扫描 {discovered.Count} 个浏览器、AI 应用与 CLI。" + (_targetScanner.Notices.Count == 0 ? "" : "\n" + string.Join("\n", _targetScanner.Notices)));
         return discovered;
     }
 
@@ -290,15 +298,16 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 {
                     if (enabled)
                     {
-                        var saved = selected.GetValueOrDefault(key);
-                        var target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
-                        selected[key] = ApplicationInventorySnapshot.Create(_targets.All()).CaptureSelection(key,
-                            route ?? routes?.GetValueOrDefault(key) ?? saved?.Target ?? EgressRouteTarget.DefaultAdapter,
-                            saved, target?.OwnedRoots);
+                        var target = _targets.All().First(item => item.DiscoveryKey == key);
+                        var saved = selected.Values.Where(item => target.SelectionKeys.Contains(item.DiscoveryKey)).ToArray();
+                        foreach (string alias in target.SelectionKeys) selected.Remove(alias);
+                        selected[key] = ApplicationCatalogProjection.Merge(target, saved,
+                            route ?? routes?.GetValueOrDefault(key) ?? saved.FirstOrDefault()?.Target ?? EgressRouteTarget.DefaultAdapter);
                     }
                     else
                     {
-                        selected.Remove(key);
+                        var target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
+                        foreach (string alias in target?.SelectionKeys ?? [key]) selected.Remove(alias);
                     }
                 }
                 return current with { Applications = selected.Values.ToArray() };
@@ -637,6 +646,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         catch (Exception error) { ReportFailure("退出清理", "core.dispose", error.Message, error); }
         _remoteFetcher.Dispose();
         _releaseHttpClient.Dispose();
+        Visuals.Dispose();
         Diagnostics.Info("退出", "EgressController stopped.");
         _lifetimeCts.Dispose();
         _configurationGate.Dispose();

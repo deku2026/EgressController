@@ -30,7 +30,7 @@
               <TextBlock Text="模拟数据，不连接真实 TUN" FontSize="11" Foreground="#8B5D1C" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <TextBlock Classes="muted" Text="EgressController" Margin="12,0" FontSize="11"/>
+          <Grid ColumnDefinitions="*,Auto"><TextBlock Classes="muted" Text="EgressController" Margin="12,0" FontSize="11" VerticalAlignment="Center"/><Button Grid.Column="1" Classes="quiet" Content="退出" Click="OnExitRequested" ToolTip.Tip="退出主程序，独立守护继续运行"/></Grid>
         </StackPanel>
         <ListBox Name="Navigation" Classes="navList" ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}" SelectionChanged="OnNavigationChanged" ItemContainerTheme="{StaticResource NavigationItem}">
           <ListBox.ItemTemplate>

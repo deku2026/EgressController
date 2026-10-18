@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
+    <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
     <ProjectReference Include="..\EgressController.Guardian\EgressController.Guardian.csproj" />
   </ItemGroup>
 </Project>

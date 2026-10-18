@@ -82,6 +82,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private EgressProfileDocument? _routingProfile;
+    private string _adapterLabels = "";
     private string _status = "正在初始化…";
     public string Status
     {
@@ -104,9 +105,10 @@ public sealed class MainViewModel : ObservableObject
     {
         Dashboard.Refresh();
         Overview.Refresh();
-        if (!Controller.IsUpdatingProfile && !ReferenceEquals(_routingProfile, Controller.Profile))
+        string labels = string.Join("|", Controller.Adapters.Select(item => $"{item.Identity.Guid}:{item.Identity.NameSnapshot}:{item.Description}:{item.IsUp}"));
+        if (!Controller.IsUpdatingProfile && (!ReferenceEquals(_routingProfile, Controller.Profile) || _adapterLabels != labels))
         {
-            _routingProfile = Controller.Profile;
+            _routingProfile = Controller.Profile; _adapterLabels = labels;
             Apps.RefreshStatuses();
             Domains.RefreshRoutes();
         }

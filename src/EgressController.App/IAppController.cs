@@ -12,6 +12,7 @@ namespace EgressController.App;
 /// <summary>UI boundary. The preview implements this without constructing any production service.</summary>
 public interface IAppController
 {
+    Services.ApplicationVisualCatalog Visuals { get; }
     bool IsPreview { get; }
     bool IsTunRunning { get; }
     bool IsUpdatingProfile { get; }
@@ -20,6 +21,7 @@ public interface IAppController
     string ProtectionStatus { get; }
     string LastTunFailure { get; }
     string LastMessage { get; }
+    IReadOnlyList<string> DiscoveryNotices { get; }
     string UpstreamSummary { get; }
     EgressProfileDocument Profile { get; }
     IReadOnlyList<NetworkAdapterInfo> Adapters { get; }

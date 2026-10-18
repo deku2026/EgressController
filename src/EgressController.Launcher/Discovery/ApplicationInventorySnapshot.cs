@@ -13,6 +13,7 @@ public sealed record ApplicationInventoryEntry
     public required bool CanLaunch { get; init; }
     public string? IconPath { get; init; }
     public string? Source { get; init; }
+    public IReadOnlyList<string> Aliases { get; init; } = [];
 }
 
 /// <summary>
@@ -29,7 +30,17 @@ public sealed class ApplicationInventorySnapshot
     {
         Entries = entries;
         CapturedAtUtc = capturedAtUtc;
-        _byKey = entries.ToDictionary(entry => entry.DiscoveryKey, StringComparer.Ordinal);
+        var byKey = entries.ToDictionary(entry => entry.DiscoveryKey, StringComparer.Ordinal);
+        foreach (var entry in entries)
+        foreach (string alias in entry.Aliases)
+        {
+            // An unresolved legacy route must not expand from one helper to its entire owner.
+            // Saved paths are merged by the compiler; compatible routes already share the main key.
+            string? path = alias.StartsWith("exe:", StringComparison.OrdinalIgnoreCase) || alias.StartsWith("cli:", StringComparison.OrdinalIgnoreCase)
+                ? NormalizeExecutablePath(alias[4..]) : null;
+            byKey.TryAdd(alias, entry with { DiscoveryKey = alias, ExecutablePaths = path is null ? [] : [path], Aliases = [] });
+        }
+        _byKey = byKey;
     }
 
     public DateTimeOffset CapturedAtUtc { get; }
@@ -52,7 +63,7 @@ public sealed class ApplicationInventorySnapshot
                 CanRoute = target.CanRoute,
                 CanLaunch = target.CanLaunch,
                 IconPath = target.IconPath,
-                Source = target.Source,
+                Source = target.Source, Aliases = target.RelatedDiscoveryKeys,
             })
             .OrderBy(entry => entry.DiscoveryKey, StringComparer.Ordinal)
             .ToArray();

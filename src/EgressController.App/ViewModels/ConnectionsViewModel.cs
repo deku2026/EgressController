@@ -119,6 +119,8 @@ public sealed class ConnectionsViewModel : ObservableObject
                 row.Update(item, activeRow);
             }
 
+            row.SetAppearance(_controller.Visuals.ForProcess(item.ProcessPath));
+            row.SetRouteNames((tag, details) => RouteNames.Outbound(tag, _controller.Profile, _controller.Adapters, details));
             row.SetRateFreshness(_traffic.ObservationFresh);
             if (index < Rows.Count && ReferenceEquals(Rows[index], row))
                 continue;
@@ -176,13 +178,14 @@ public sealed class ConnectionsViewModel : ObservableObject
             ? "active:" + item.Id
             : $"closed:{item.Id}:{item.StartedAtUtc.UtcTicks}:{item.ClosedAtUtc?.UtcTicks ?? 0}";
 
-    private static bool Matches(ConnectionObservation item, string query)
+    private bool Matches(ConnectionObservation item, string query)
     {
         if (query.Length == 0)
             return true;
         string text = string.Join('\n', item.Id, item.ProcessPath, item.Host, item.DestinationIp,
             item.DestinationPort, item.Network, item.Type, item.DnsMode, item.Rule,
-            item.Outbound, string.Join(' ', item.Chains));
+            item.Outbound, string.Join(' ', item.Chains), _controller.Visuals.ForProcess(item.ProcessPath).Name,
+            RouteNames.Outbound(item.Outbound, _controller.Profile, _controller.Adapters, true));
         return text.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 }

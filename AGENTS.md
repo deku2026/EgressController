@@ -9,6 +9,13 @@
 - Directory roots are discovery inputs, not a runtime wildcard that silently enrolls new executable paths. Explicit rescanning/selection can update the saved inventory.
 - Existing descendant tracking and its tests are not requirements. Remove that behavior instead of preserving it under a different name.
 
+## Windows application catalog
+
+- Classify the primary EXE using an exact case-insensitive product catalog. Do not classify Visual Studio/system tools as AI or browser apps because a nested helper or a substring matches.
+- Display one main application row for its recursively scanned fixed EXEs. Related discovery keys only reconcile saved selections; they must never broaden a conflicting helper route to the whole app.
+- Native AI CLI commands get distinct names and exact EXE paths from command metadata. Never execute the AI command during discovery, recursively enroll a shared bin directory, or bind a generic node/python/powershell host.
+- Keep saved paths through rescans and route changes. Preserve conflicting old routes until the user explicitly unifies them. UI icons/names are presentation metadata, never route identity.
+
 ## Independent responsibilities
 
 - The companion guardian monitors the authenticated main-process instance and actual TUN takeover. It never performs or consumes Internet/DoH reachability checks.
@@ -32,6 +39,9 @@
 - Provide a fully isolated, interactive UI preview mode with mock data and screenshot rendering. Enter mock safety mode before any production initialization. Preview mode must not enumerate/terminate real targets, start TUN, install services, change startup entries or write the user's real configuration.
 - Telemetry charts must use actual observation times, a zero baseline and explicit shared numeric scale. UI refresh cannot manufacture samples; missing/stale data is not zero. Byte units and app percentages must match their real denominators.
 - Guardian icons and text must distinguish healthy, protecting, unavailable and manually stopped states; never show a green check based on a stale reply after a read error.
+- Resolve displayed adapter names/descriptions from live GUID identity; keep raw runtime tags out of primary connection/route labels.
+- Both tray menus use the same rounded presentation. Position them from the actual Windows notification icon rectangle and its monitor DPI/work area, including negative coordinates. Native shell APIs must be fenced out of mock previews.
+- Read Windows executable icons off the UI thread with bounded shared caching; helper and CLI artwork should reuse their product icon.
 - Validate normal, hover, pressed, focused and disabled states. Use meaningful mock screenshots at ordinary and compact Windows window sizes, not only XAML compilation.
 
 ## Workflow and validation

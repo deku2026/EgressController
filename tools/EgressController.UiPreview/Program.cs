@@ -40,9 +40,10 @@ internal static class Program
         PreviewChecks.Run();
         RenderChecks.Buttons(directory);
         RenderChecks.GuardIcons(directory);
+        RenderChecks.TrayMenus(directory);
         foreach (var scenario in new[] { "ready", "offline", "starting", "empty", "telemetry", "failed" })
         {
-            var controller = new PreviewController(scenario);
+            var controller = new PreviewController(scenario, PreviewIcons.Load);
             var vm = new MainViewModel(controller);
             var window = new MainWindow { DataContext = vm, Width = 1440, Height = 900 };
             window.Show();
@@ -58,6 +59,8 @@ internal static class Program
             }
             if (scenario == "ready")
             {
+                window.SelectPage("apps"); vm.Apps.Query = "CLI";
+                RenderChecks.Save(window, Path.Combine(directory, "ready-cli.png")); vm.Apps.Query = "";
                 window.Width = 1100; window.Height = 760;
                 foreach (string page in vm.Pages.Select(page => page.Key))
                 {
@@ -84,12 +87,12 @@ internal static class Program
         }
         foreach (string state in new[] { "starting", "guard-stopped", "guard-unavailable", "guard-main-absent", "guard-records" })
         {
-            var backend = new PreviewController(state); backend.Guard.RefreshAsync().GetAwaiter().GetResult();
+            var backend = new PreviewController(state, PreviewIcons.Load); backend.Guard.RefreshAsync().GetAwaiter().GetResult();
             var companion = new EgressController.GuardTray.GuardWindow(backend.Guard, preview: true) { AllowExit = true };
             companion.Show(); RenderChecks.Save(companion, Path.Combine(directory, "companion-" + state + ".png"));
             companion.Close();
         }
-        var trayController = new PreviewController(); trayController.Guard.RefreshAsync().GetAwaiter().GetResult();
+        var trayController = new PreviewController(icons: PreviewIcons.Load); trayController.Guard.RefreshAsync().GetAwaiter().GetResult();
         var trayWindow = new EgressController.GuardTray.GuardWindow(trayController.Guard, preview: true) { AllowExit = true };
         trayWindow.Show(); RenderChecks.Save(trayWindow, Path.Combine(directory, "guard-window.png"));
         trayWindow.Width = 680; trayWindow.Height = 520;
@@ -127,7 +130,7 @@ public sealed class PreviewApplication : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var controller = new PreviewController();
+            var controller = new PreviewController(icons: PreviewIcons.Load);
             var vm = new MainViewModel(controller);
             desktop.MainWindow = new MainWindow { DataContext = vm, Title = "EgressController — UI 开发模式" };
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -135,5 +138,14 @@ public sealed class PreviewApplication : Application
             desktop.Exit += (_, _) => timer.Stop();
         }
         base.OnFrameworkInitializationCompleted();
+    }
+}
+
+internal static class PreviewIcons
+{
+    public static Avalonia.Media.Imaging.Bitmap? Load(string id)
+    {
+        using var stream = typeof(PreviewIcons).Assembly.GetManifestResourceStream("EgressController.UiPreview.Assets." + id + ".png");
+        return stream is null ? null : new Avalonia.Media.Imaging.Bitmap(stream);
     }
 }

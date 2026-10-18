@@ -21,7 +21,7 @@ public sealed class ManualDomainViewModel : ObservableObject
         Routing = new RouteSelectionViewModel(controller.Profile,
             controller.Profile.Domains.FirstOrDefault(route => route.Name == domain)?.Target,
             (_, route) => controller.AddManualDomainAsync(domain, route), () => { },
-            error => controller.ReportFailure("域名分流", "domain.route", error.Message, error));
+            error => controller.ReportFailure("域名分流", "domain.route", error.Message, error), () => controller.Adapters);
         RemoveCommand = new AsyncRelayCommand(async () =>
         {
             ControllerOperationResult result = await controller.RemoveManualDomainAsync(domain);
