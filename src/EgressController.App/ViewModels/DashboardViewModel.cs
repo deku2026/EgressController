@@ -5,11 +5,9 @@ using EgressController.Core.Profile;
 
 namespace EgressController.App.ViewModels;
 
-public sealed record ApplicationTrafficRow(Services.ProcessVisual Appearance, string Amount, double Share)
-{ public string Name => Appearance.Name; public string ShareLabel => $"{Share:0.#}%"; }
-
-public sealed class DashboardViewModel(IAppController controller) : ObservableObject
+public sealed class DashboardViewModel(IAppController controller, TrafficViewModel? usage = null) : ObservableObject
 {
+    private readonly TrafficViewModel _usage = usage ?? new(controller);
     private TrafficSnapshot _snapshot = new(null, null, null, [], [], 1024);
     public IReadOnlyList<RatePoint> UploadSamples => _snapshot.Upload;
     public IReadOnlyList<RatePoint> DownloadSamples => _snapshot.Download;
@@ -17,12 +15,16 @@ public sealed class DashboardViewModel(IAppController controller) : ObservableOb
     public bool HasCurrentRate => _snapshot.HasCurrentRate;
     public bool ObservationFresh => _snapshot.ObservationFresh;
     public string FreshnessLabel => ObservationFresh ? "最新快照" : _snapshot.ObservedAtUtc is null ? "等待采样" : "上次快照";
-    public string TelemetryStatus => HasCurrentRate ? "最近 60 秒 · 上传与下载使用同一刻度"
-        : "暂无有效网速，缺失采样保持空白";
+    public string TelemetryStatus => HasCurrentRate ? "最近 60 秒 · 实时速度"
+        : "等待有效采样";
     public string SampleTime => _snapshot.ObservedAtUtc is { } at ? $"最近采样 {at.ToLocalTime():HH:mm:ss}" : "尚未收到内核统计";
-    public ObservableCollection<ApplicationTrafficRow> Applications { get; } = [];
+    public IReadOnlyList<ApplicationTrafficRow> Applications => _usage.TopApplications;
     public string UploadRate => TrafficUnits.Rate(_snapshot.UploadRate);
     public string DownloadRate => TrafficUnits.Rate(_snapshot.DownloadRate);
+    public string UploadValue => UploadRate.Split(' ')[0];
+    public string UploadUnit => UploadRate.Contains(' ') ? " " + UploadRate.Split(' ')[1] : "";
+    public string DownloadValue => DownloadRate.Split(' ')[0];
+    public string DownloadUnit => DownloadRate.Contains(' ') ? " " + DownloadRate.Split(' ')[1] : "";
     public string TotalTraffic => TrafficFormat.Bytes(TrafficFormat.AddCounters(controller.TrafficUp, controller.TrafficDown));
     public string UploadTotal => TrafficFormat.Bytes(controller.TrafficUp);
     public string DownloadTotal => TrafficFormat.Bytes(controller.TrafficDown);
@@ -33,6 +35,7 @@ public sealed class DashboardViewModel(IAppController controller) : ObservableOb
     public string DirectAdapter => Adapter(controller.Profile.DefaultAdapterId);
     public string ProxyAdapter => Adapter(controller.Profile.ProxyAdapterId);
     public string DirectLatency => controller.DirectDelayMilliseconds?.ToString() ?? "—";
+    public string CheckTime => controller.NetworkLastCheckedAtUtc is {} at ? $"检测于 {at.ToLocalTime():HH:mm:ss}" : "等待首次检测";
     public string ProxyLatency => controller.ProxyDelayMilliseconds?.ToString() ?? "—";
     public bool Ready => controller.Protection.Ready;
     public string StatusTitle => Ready ? "应用保护已就绪" : "正在保护所选应用";
@@ -43,15 +46,10 @@ public sealed class DashboardViewModel(IAppController controller) : ObservableOb
     public void Refresh()
     {
         _snapshot = controller.TrafficSnapshot;
-        var groups = controller.ConnectionHistory.ActiveSnapshot().GroupBy(item => controller.Visuals.ForProcess(item.ProcessPath).Key)
-            .Select(group => (Appearance: controller.Visuals.ForProcess(group.First().ProcessPath), Bytes: group.Aggregate(0L,
-                (sum, item) => TrafficFormat.AddCounters(sum, TrafficFormat.AddCounters(item.Upload, item.Download)))))
-            .OrderByDescending(item => item.Bytes).ToArray();
-        double total = Math.Max(1, groups.Sum(item => (double)item.Bytes));
-        Applications.Clear();
-        foreach (var item in groups.Take(5)) Applications.Add(new(item.Appearance, TrafficFormat.Bytes(item.Bytes), (double)item.Bytes / total * 100));
-        foreach (string name in new[] { nameof(UploadSamples), nameof(DownloadSamples), nameof(ScaleMaximum), nameof(HasCurrentRate), nameof(ObservationFresh), nameof(FreshnessLabel), nameof(TelemetryStatus), nameof(SampleTime), nameof(UploadRate), nameof(DownloadRate), nameof(TotalTraffic), nameof(UploadTotal), nameof(DownloadTotal),
-            nameof(ActiveCount), nameof(ProtectedCount), nameof(ExecutableCount), nameof(PortCount), nameof(DirectAdapter), nameof(ProxyAdapter), nameof(DirectLatency), nameof(ProxyLatency), nameof(Ready),
+        _usage.Refresh();
+        OnPropertyChanged(nameof(Applications));
+        foreach (string name in new[] { nameof(UploadSamples), nameof(DownloadSamples), nameof(ScaleMaximum), nameof(HasCurrentRate), nameof(ObservationFresh), nameof(FreshnessLabel), nameof(TelemetryStatus), nameof(SampleTime), nameof(UploadRate), nameof(DownloadRate), nameof(UploadValue), nameof(UploadUnit), nameof(DownloadValue), nameof(DownloadUnit), nameof(TotalTraffic), nameof(UploadTotal), nameof(DownloadTotal),
+            nameof(ActiveCount), nameof(ProtectedCount), nameof(ExecutableCount), nameof(PortCount), nameof(DirectAdapter), nameof(ProxyAdapter), nameof(DirectLatency), nameof(CheckTime), nameof(ProxyLatency), nameof(Ready),
             nameof(StatusTitle), nameof(StatusDetail), nameof(HasTraffic), nameof(IsEmpty) }) OnPropertyChanged(name);
     }
 }

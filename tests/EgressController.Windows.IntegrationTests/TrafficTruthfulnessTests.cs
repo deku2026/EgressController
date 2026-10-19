@@ -3,6 +3,7 @@ using EgressController.App.Preview;
 using EgressController.App.ViewModels;
 using EgressController.Diagnostics;
 using EgressController.Presentation;
+using EgressController.State.Traffic;
 
 namespace EgressController.Windows.IntegrationTests;
 
@@ -70,8 +71,9 @@ public sealed class TrafficTruthfulnessTests
     public void App_bars_use_all_observed_bytes_and_cannot_overflow_when_multiplied_by_100()
     {
         var backend = new PreviewController();
-        backend.ConnectionHistory.ApplySnapshot(Enumerable.Range(1, 6).Select(i => new ConnectionObservation
-        { Id = i.ToString(), ProcessPath = $@"C:\mock\app{i}.exe", Upload = long.MaxValue, Download = long.MaxValue }));
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        backend.TrafficUsage = new(today.AddDays(-29), today, DateTimeOffset.Now, Enumerable.Range(1,6)
+            .Select(i => new TrafficUsage($@"C:\mock\app{i}.exe", today, TrafficExit.Home, long.MaxValue, long.MaxValue)).ToArray());
         var vm = new DashboardViewModel(backend); vm.Refresh();
         Assert.Equal(5, vm.Applications.Count);
         Assert.All(vm.Applications, item => Assert.Equal(100d / 6, item.Share, 8));
@@ -79,17 +81,55 @@ public sealed class TrafficTruthfulnessTests
     }
 
     [Fact]
-    public void Missing_speed_is_not_reported_as_zero_and_form_refresh_keeps_user_edits()
+    public void Missing_speed_is_not_reported_as_zero_and_monthly_history_survives_sampling_failure()
     {
         var backend = new PreviewController("telemetry");
         for (int i = 0; i < 60; i++) backend.AdvanceSample();
         var dashboard = new DashboardViewModel(backend); dashboard.Refresh();
         Assert.Equal("—", dashboard.UploadRate); Assert.True(backend.Protection.Ready);
-        var quota = new TrafficViewModel(backend) { TotalInput = "", RemainingInput = "12.5" };
-        quota.Refresh(); Assert.Equal("", quota.TotalInput); Assert.Equal("12.5", quota.RemainingInput);
-        backend.ConfigureQuota(0, 0); quota.Refresh(); Assert.Equal("未设置", quota.UsedPercentText);
+        var usage = new TrafficViewModel(backend); usage.Refresh();
+        Assert.True(usage.TotalBytes > 0); Assert.Equal(30, usage.Days.Count);
         var row = new ConnectionRowViewModel(new() { Id = "x", UploadRate = 200, HasRate = false }, true);
         Assert.Equal("—", row.Speed); row.SetRateFreshness(false); Assert.Equal("上次活动", row.Status);
+    }
+
+    [Theory]
+    [InlineData("adapter-11111111111111111111111111111111", TrafficExit.Home)]
+    [InlineData("adapter-22222222222222222222222222222222", TrafficExit.Other)]
+    [InlineData("upstream-7890", TrafficExit.Other)]
+    [InlineData("proxy-direct", TrafficExit.Other)]
+    [InlineData("adapter-invalid", TrafficExit.Unknown)]
+    [InlineData("upstream-70000", TrafficExit.Unknown)]
+    [InlineData("unexpected", TrafficExit.Unknown)]
+    [InlineData("recovery-direct", TrafficExit.Unknown)]
+    [InlineData(null, TrafficExit.Unknown)]
+    public void Monthly_exit_classification_uses_actual_outbound_not_the_apps_current_selection(string? outbound, TrafficExit expected)
+        => Assert.Equal(expected, EgressController.App.Services.TrafficExitClassifier.Classify(outbound, "11111111-1111-1111-1111-111111111111"));
+
+    [Fact]
+    public void Monthly_app_rows_group_saved_directory_helpers_and_survive_closed_connections()
+    {
+        var backend = new PreviewController();
+        var app = backend.ScanTargets().First(target => target.Name == "Claude");
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        backend.TrafficUsage = new(today.AddDays(-29), today, DateTimeOffset.UtcNow, [
+            new(app.CanonicalExecutable!, today.AddDays(-18), TrafficExit.Home, 100, 900),
+            new(app.OwnedExecutables[1].ToUpperInvariant(), today.AddDays(-4), TrafficExit.Other, 200, 800)]);
+        backend.ConnectionHistory.ApplySnapshot([]);
+        var vm = new TrafficViewModel(backend); vm.Refresh();
+        var row = Assert.Single(vm.Applications);
+        Assert.Equal("Claude", row.Name); Assert.Equal(1000, row.HomeBytes); Assert.Equal(1000, row.OtherBytes);
+        Assert.Equal(2000, vm.TotalBytes); Assert.Equal(30, vm.Days.Count);
+    }
+
+    [Fact]
+    public void Accounting_errors_are_visible_without_changing_protection_or_the_last_monthly_totals()
+    {
+        var backend = new PreviewController(); var vm = new TrafficViewModel(backend); vm.Refresh();
+        long recorded = vm.TotalBytes;
+        backend.TrafficUsageError = "mock disk failure"; vm.Refresh();
+        Assert.True(vm.HasError); Assert.Equal(recorded, vm.TotalBytes); Assert.True(backend.IsTunRunning); Assert.True(backend.Protection.Ready);
+        backend.TrafficUsageError = ""; vm.Refresh(); Assert.False(vm.HasError);
     }
 
     private sealed class Clock : TimeProvider

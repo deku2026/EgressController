@@ -1,131 +1,101 @@
 <local:PageView xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:EgressController.App.Views" xmlns:vm="using:EgressController.App.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.Views.OverviewPage" x:DataType="vm:MainViewModel">
-  <ScrollViewer VerticalScrollBarVisibility="Auto">
-    <StackPanel Spacing="18">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+    <StackPanel Spacing="16">
       <Grid ColumnDefinitions="1.4*,*,*" ColumnSpacing="16">
-        <Border Classes="card" MinHeight="230">
-          <Grid RowDefinitions="Auto,*,Auto">
+        <Border Classes="card" MinHeight="218">
+          <Grid RowDefinitions="Auto,*,Auto" RowSpacing="18">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="最近检测延迟" Classes="eyebrow" VerticalAlignment="Center"/>
-              <Button Grid.Column="1" Content="检测联网" Command="{Binding Network.CheckCommand}" Padding="10,5" MinHeight="28"/>
+              <TextBlock Text="联网延迟" Classes="section-title" VerticalAlignment="Center"/>
+              <Button Grid.Column="1" Content="检测联网" Command="{Binding Network.CheckCommand}" Classes="quiet" Padding="9,5" MinHeight="28"/>
             </Grid>
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
-              <TextBlock Text="{Binding Dashboard.DirectLatency}" FontSize="45" FontWeight="SemiBold"/>
-              <TextBlock Text="ms" VerticalAlignment="Bottom" Margin="0,0,0,10" Foreground="#667184"/>
+            <Grid Grid.Row="1" ColumnDefinitions="*,1,*" ColumnSpacing="22" VerticalAlignment="Center">
+              <StackPanel Spacing="7">
+                <TextBlock Text="家宽" Classes="home" FontWeight="Medium"/>
+                <TextBlock Name="DirectDelayValue" Classes="number" FontSize="32" FontWeight="SemiBold"><Run Text="{Binding Dashboard.DirectLatency}"/><Run Text=" ms" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
+                <TextBlock Text="{Binding Dashboard.DirectAdapter}" Classes="muted" TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+              <Border Grid.Column="1" Classes="divider" Margin="0,4"/>
+              <StackPanel Grid.Column="2" Spacing="7">
+                <TextBlock Text="非家宽" Classes="other" FontWeight="Medium"/>
+                <TextBlock Name="ProxyDelayValue" Classes="number" FontSize="32" FontWeight="SemiBold"><Run Text="{Binding Dashboard.ProxyLatency}"/><Run Text=" ms" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
+                <TextBlock Text="{Binding Dashboard.ProxyAdapter}" Classes="muted" TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+            </Grid>
+            <TextBlock Grid.Row="2" Text="{Binding Dashboard.CheckTime}" Classes="muted" FontSize="11.5"/>
+          </Grid>
+        </Border>
+        <Border Grid.Column="1" Classes="card" Padding="0" ClipToBounds="True">
+          <Grid RowDefinitions="Auto,*">
+            <StackPanel Margin="20,20,20,0" Spacing="8">
+              <TextBlock Text="上传速度" Classes="eyebrow"/>
+              <TextBlock Classes="number" FontSize="30" FontWeight="SemiBold"><Run Text="{Binding Dashboard.UploadValue}"/><Run Text="{Binding Dashboard.UploadUnit}" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
             </StackPanel>
-            <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="20">
-              <StackPanel Spacing="5">
-                <TextBlock Text="ESIM-家宽" Classes="muted"/>
-                <TextBlock Text="{Binding Dashboard.DirectAdapter}" FontWeight="Medium"/>
-              </StackPanel>
-              <StackPanel Grid.Column="1" Spacing="5">
-                <TextBlock Text="Proxy-代理" Classes="muted"/>
-                <TextBlock Text="{Binding Dashboard.ProxyLatency, StringFormat='{}{0} ms'}" FontWeight="Medium"/>
-              </StackPanel>
-            </Grid>
+            <ui:TrendChart Grid.Row="1" Samples="{Binding Dashboard.UploadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="{StaticResource RateBrush}" MinHeight="110" Margin="0,8,0,0"/>
           </Grid>
         </Border>
-        <Border Grid.Column="1" Classes="card">
-          <Grid RowDefinitions="Auto,Auto,*,Auto">
-            <TextBlock Text="上传" Classes="eyebrow"/>
-            <TextBlock Grid.Row="1" Text="{Binding Dashboard.UploadRate}" FontSize="30" FontWeight="SemiBold" Margin="0,10,0,12"/>
-            <ui:TrendChart Grid.Row="2" Samples="{Binding Dashboard.UploadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#6371D6" MinHeight="110"/>
-            <TextBlock Grid.Row="3" Text="{Binding Dashboard.SampleTime}" Classes="muted" Margin="0,10,0,0"/>
-          </Grid>
-        </Border>
-        <Border Grid.Column="2" Classes="card">
-          <Grid RowDefinitions="Auto,Auto,*,Auto">
-            <TextBlock Text="下载" Classes="eyebrow"/>
-            <TextBlock Grid.Row="1" Text="{Binding Dashboard.DownloadRate}" FontSize="30" FontWeight="SemiBold" Margin="0,10,0,12"/>
-            <ui:TrendChart Grid.Row="2" Samples="{Binding Dashboard.DownloadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="#55A8CF" MinHeight="110"/>
-            <TextBlock Grid.Row="3" Text="{Binding Dashboard.SampleTime}" Classes="muted" Margin="0,10,0,0"/>
+        <Border Grid.Column="2" Classes="card" Padding="0" ClipToBounds="True">
+          <Grid RowDefinitions="Auto,*">
+            <StackPanel Margin="20,20,20,0" Spacing="8">
+              <TextBlock Text="下载速度" Classes="eyebrow"/>
+              <TextBlock Classes="number" FontSize="30" FontWeight="SemiBold"><Run Text="{Binding Dashboard.DownloadValue}"/><Run Text="{Binding Dashboard.DownloadUnit}" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
+            </StackPanel>
+            <ui:TrendChart Grid.Row="1" Samples="{Binding Dashboard.DownloadSamples}" Maximum="{Binding Dashboard.ScaleMaximum}" Stroke="{StaticResource RateBrush}" MinHeight="110" Margin="0,8,0,0"/>
           </Grid>
         </Border>
       </Grid>
-      <Grid ColumnDefinitions="*,1.05*" ColumnSpacing="16">
-        <StackPanel Spacing="16">
+      <Grid ColumnDefinitions=".95*,1.15*" ColumnSpacing="16">
+        <Grid RowDefinitions="Auto,*" RowSpacing="16">
           <Border Classes="card">
-            <StackPanel Spacing="18">
+            <StackPanel Spacing="16">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="活动连接" Classes="eyebrow"/>
-                <Border Grid.Column="1" Classes="badge" Classes.healthy="{Binding Dashboard.ObservationFresh}" Padding="8,4">
-                  <TextBlock Text="{Binding Dashboard.FreshnessLabel}" Foreground="#667184" FontSize="11"/>
-                </Border>
+                <TextBlock Grid.Column="1" Text="{Binding Dashboard.FreshnessLabel}" Classes="muted" FontSize="11.5"/>
               </Grid>
-              <TextBlock Text="{Binding Dashboard.ActiveCount}" Classes="metric"/>
-              <Grid ColumnDefinitions="*,*,*" ColumnSpacing="15">
-                <StackPanel Spacing="4">
-                  <TextBlock Text="{Binding Dashboard.ProtectedCount}" FontSize="23" FontWeight="SemiBold"/>
-                  <TextBlock Text="受保护应用" Classes="muted"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Spacing="4">
-                  <TextBlock Text="{Binding Dashboard.ExecutableCount}" FontSize="23" FontWeight="SemiBold"/>
-                  <TextBlock Text="固定 EXE 路径" Classes="muted"/>
-                </StackPanel>
-                <StackPanel Grid.Column="2" Spacing="4">
-                  <TextBlock Text="{Binding Dashboard.PortCount}" FontSize="23" FontWeight="SemiBold"/>
-                  <TextBlock Text="代理端口" Classes="muted"/>
-                </StackPanel>
+              <TextBlock Text="{Binding Dashboard.ActiveCount}" Classes="metric number" FontSize="36"/>
+              <Grid ColumnDefinitions="*,1,*,1,*" ColumnSpacing="16">
+                <StackPanel Spacing="5"><TextBlock Text="{Binding Dashboard.ProtectedCount}" Classes="secondary-metric"/><TextBlock Text="受保护应用" Classes="muted"/></StackPanel>
+                <Border Grid.Column="1" Classes="divider"/>
+                <StackPanel Grid.Column="2" Spacing="5"><TextBlock Text="{Binding Dashboard.ExecutableCount}" Classes="secondary-metric"/><TextBlock Text="固定 EXE" Classes="muted"/></StackPanel>
+                <Border Grid.Column="3" Classes="divider"/>
+                <StackPanel Grid.Column="4" Spacing="5"><TextBlock Text="{Binding Dashboard.PortCount}" Classes="secondary-metric"/><TextBlock Text="代理端口" Classes="muted"/></StackPanel>
               </Grid>
             </StackPanel>
           </Border>
-          <Border Classes="card">
-            <StackPanel Spacing="12">
-              <TextBlock Text="当前会话流量" Classes="eyebrow"/>
-              <TextBlock Text="{Binding Dashboard.TotalTraffic}" Classes="metric"/>
-              <Grid ColumnDefinitions="*,*">
-                <StackPanel Spacing="4">
-                  <TextBlock Text="已上传" Classes="muted"/>
-                  <TextBlock Text="{Binding Dashboard.UploadTotal}" FontSize="18" FontWeight="Medium"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Spacing="4">
-                  <TextBlock Text="已下载" Classes="muted"/>
-                  <TextBlock Text="{Binding Dashboard.DownloadTotal}" FontSize="18" FontWeight="Medium"/>
-                </StackPanel>
+          <Border Grid.Row="1" Classes="card">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="14">
+              <Grid ColumnDefinitions="*,Auto"><TextBlock Text="累计用量" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="本周期" Classes="muted"/></Grid>
+              <TextBlock Grid.Row="1" Text="{Binding Traffic.Total}" Classes="metric number" FontSize="34"/>
+              <Grid Grid.Row="2" ColumnDefinitions="*,1,*" ColumnSpacing="18" VerticalAlignment="Center" Margin="0,5">
+                <StackPanel Spacing="6"><TextBlock Text="家宽" Classes="home"/><TextBlock Text="{Binding Traffic.Home}" Classes="number" FontWeight="SemiBold" FontSize="19"/></StackPanel>
+                <Border Grid.Column="1" Classes="divider"/>
+                <StackPanel Grid.Column="2" Spacing="6"><TextBlock Text="非家宽" Classes="other"/><TextBlock Text="{Binding Traffic.Other}" Classes="number" FontWeight="SemiBold" FontSize="19"/></StackPanel>
               </Grid>
-            </StackPanel>
-          </Border>
-        </StackPanel>
-        <Border Grid.Column="1" Classes="card">
-          <StackPanel Spacing="20">
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="应用流量" Classes="section-title"/>
-              <TextBlock Grid.Column="1" Text="活动连接流量占比" Classes="muted" VerticalAlignment="Center"/>
+              <StackPanel Grid.Row="3" Spacing="10">
+                <ui:UsageBar Home="{Binding Traffic.HomeBytes}" Other="{Binding Traffic.OtherBytes}" Unknown="{Binding Traffic.UnknownBytes}" Maximum="{Binding Traffic.TotalBytes}" Height="14"/>
+                <TextBlock Text="{Binding Traffic.Unknown, StringFormat='未识别出口 {0}'}" Classes="muted" FontSize="11.5" IsVisible="{Binding Traffic.HasUnknown}"/>
+                <TextBlock Text="{Binding Traffic.RecordedSince}" Classes="muted" FontSize="11.5"/>
+              </StackPanel>
             </Grid>
-            <ItemsControl ItemsSource="{Binding Dashboard.Applications}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:ApplicationTrafficRow">
-                  <Grid ColumnDefinitions="34,*" ColumnSpacing="12" Margin="0,0,0,21">
-                    <ui:AppAvatar Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="30" Height="30"/>
-                    <StackPanel Grid.Column="1" Spacing="8">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="{Binding Name}" FontWeight="Medium"/>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
-                          <TextBlock Text="{Binding Amount}" Foreground="#667184"/>
-                          <TextBlock Text="{Binding ShareLabel}" Foreground="#667184" MinWidth="42" TextAlignment="Right"/>
-                        </StackPanel>
-                      </Grid>
-                      <ProgressBar Value="{Binding Share}" Maximum="100" Height="4" Foreground="#7C8BD8" Background="#EDF0F5"/>
-                    </StackPanel>
-                  </Grid>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <StackPanel Spacing="9" Margin="0,50" IsVisible="{Binding Dashboard.IsEmpty}">
-              <TextBlock Text="还没有活动连接" FontSize="17" FontWeight="Medium" HorizontalAlignment="Center"/>
-              <TextBlock Text="打开应用后，这里会显示实际流量。" Classes="muted" HorizontalAlignment="Center"/>
+          </Border>
+        </Grid>
+        <Border Grid.Column="1" Classes="card">
+          <StackPanel Spacing="14">
+            <Grid ColumnDefinitions="*,Auto"><TextBlock Text="应用流量" Classes="section-title"/><TextBlock Grid.Column="1" Text="本周期" Classes="muted" VerticalAlignment="Center"/></Grid>
+            <StackPanel Orientation="Horizontal" Spacing="16">
+              <StackPanel Orientation="Horizontal" Spacing="6"><Border Width="16" Height="6" CornerRadius="3" Background="{StaticResource HomeBrush}" VerticalAlignment="Center"/><TextBlock Text="家宽" Classes="muted"/></StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="6"><Border Width="16" Height="6" CornerRadius="3" Background="{StaticResource OtherBrush}" VerticalAlignment="Center"/><TextBlock Text="非家宽" Classes="muted"/></StackPanel>
             </StackPanel>
+            <local:ApplicationTrafficList ItemsSource="{Binding Dashboard.Applications}"/>
+            <StackPanel Spacing="8" Margin="0,70" IsVisible="{Binding !Traffic.HasApplications}"><TextBlock Text="尚无应用用量记录" FontSize="16" FontWeight="Medium" HorizontalAlignment="Center"/><TextBlock Text="联网后自动累计，关闭应用也会保留记录。" Classes="muted" HorizontalAlignment="Center"/></StackPanel>
+            <Button Content="查看全部应用" Click="OnShowTraffic" Classes="quiet" HorizontalAlignment="Right" MinHeight="28" Padding="8,4"/>
           </StackPanel>
         </Border>
       </Grid>
-      <Border Background="#EAF2EE" Padding="17,13" CornerRadius="10" IsVisible="{Binding Dashboard.Ready}">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="4">
-            <TextBlock Text="{Binding Dashboard.StatusTitle}" FontWeight="Medium" Foreground="#285E48"/>
-            <TextBlock Text="{Binding Dashboard.StatusDetail}" Foreground="#527362" FontSize="12"/>
-          </StackPanel>
-          <Button Grid.Column="1" Content="运行事件" Click="OnShowDiagnostics" VerticalAlignment="Center"/>
-        </Grid>
-      </Border>
+      <TextBlock Text="{Binding Traffic.Status}" Classes="warning" TextWrapping="Wrap" IsVisible="{Binding Traffic.HasError}"/>
+      <Grid ColumnDefinitions="*,Auto" Margin="2,0">
+        <TextBlock Text="{Binding Dashboard.TelemetryStatus}" Classes="muted" VerticalAlignment="Center"/>
+        <Button Grid.Column="1" Content="运行事件" Classes="quiet" Click="OnShowDiagnostics"/>
+      </Grid>
     </StackPanel>
   </ScrollViewer>
 </local:PageView>

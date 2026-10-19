@@ -39,6 +39,8 @@ public sealed class LaunchTarget
 
     public IReadOnlyList<string> OwnedRoots { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> OwnedExecutables { get; init; } = Array.Empty<string>();
+    public bool InventoryReady { get; init; } = true;
+    public bool IsManual { get; init; }
     /// <summary>User-selected application route toggle. Newly discovered targets start unchecked.</summary>
     public bool RouteSelected { get; set; }
 
@@ -74,6 +76,7 @@ public sealed class LaunchTarget
     /// </summary>
     public bool CanRoute
         => OwnedExecutables.Count > 0
+            || OwnedRoots.Count > 0
             || (!string.IsNullOrWhiteSpace(CanonicalExecutable)
                 && Path.GetExtension(CanonicalExecutable).Equals(".exe", StringComparison.OrdinalIgnoreCase));
 
@@ -83,6 +86,16 @@ public sealed class LaunchTarget
             && (Kind is LaunchKind.DirectExe or LaunchKind.CliNative
                 ? !string.IsNullOrWhiteSpace(CanonicalExecutable ?? Command)
                 : Kind == LaunchKind.PackagedAumid && !string.IsNullOrWhiteSpace(Aumid));
+
+    public LaunchTarget WithInventory(IReadOnlyList<string> paths, bool ready = true, IReadOnlyList<string>? roots = null, IReadOnlyList<string>? aliases = null) => new()
+    {
+        Id = Id, Name = Name, Kind = Kind, Command = Command, Arguments = Arguments, WorkingDirectory = WorkingDirectory,
+        Environment = Environment, PackageFamily = PackageFamily, Aumid = Aumid, CanonicalExecutable = CanonicalExecutable,
+        OwnedRoots = roots ?? OwnedRoots, OwnedExecutables = paths, InventoryReady = ready, IsManual = IsManual,
+        RouteSelected = RouteSelected, IconPath = IconPath, Source = Source, Publisher = Publisher, Version = Version,
+        CatalogId = CatalogId, RelatedDiscoveryKeys = aliases ?? RelatedDiscoveryKeys, SavedDiscoveryKey = SavedDiscoveryKey,
+        ResolutionUnsupported = ResolutionUnsupported,
+    };
 
     private static string Prefix(string prefix, string? value, string? fallback)
         => string.IsNullOrWhiteSpace(value) ? prefix + (fallback ?? "") : prefix + value;

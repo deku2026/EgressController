@@ -6,7 +6,6 @@ using EgressController.Core.Models;
 using EgressController.Core.Profile;
 using EgressController.Diagnostics;
 using EgressController.Rules.Catalog;
-using EgressController.State.Quota;
 
 namespace EgressController.App.ViewModels;
 
@@ -15,12 +14,12 @@ public sealed class MainViewModel : ObservableObject
     public MainViewModel(IAppController controller)
     {
         Controller = controller;
-        Dashboard = new DashboardViewModel(controller);
+        Traffic = new TrafficViewModel(controller);
+        Dashboard = new DashboardViewModel(controller, Traffic);
         Overview = new OverviewViewModel(controller);
         Apps = new AppsViewModel(controller);
         Domains = new DomainsViewModel(controller);
         Connections = new ConnectionsViewModel(controller);
-        Traffic = new TrafficViewModel(controller);
         Network = new NetworkViewModel(controller);
         Diagnostics = new DiagnosticsViewModel(controller.Diagnostics, controller.Logs, controller.LogPath);
         Domains.RefreshSearch();
@@ -37,7 +36,7 @@ public sealed class MainViewModel : ObservableObject
         new("apps", "应用", "选择需要保护的应用与固定程序路径"),
         new("rules", "域名规则", "为域名与规则集指定出口"),
         new("connections", "连接", "查看当前连接与已结束的会话"),
-        new("traffic", "流量", "查看流量趋势与家宽套餐用量"),
+        new("traffic", "流量", "查看本周期应用用量与出口分布"),
         new("protection", "进程保护", "主程序的保护状态与终止记录"),
         new("guardian", "独立守护", "只核验主程序存活与 TUN 接管"),
         new("events", "运行事件", "查看保护、启动与重启的关键原因")];

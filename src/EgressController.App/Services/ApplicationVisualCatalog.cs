@@ -41,11 +41,12 @@ public sealed class ApplicationVisualCatalog(bool preview = false, Func<string, 
         }
         Volatile.Write(ref _owners, owners);
     }
-    public ProcessVisual ForApplication(LaunchTarget target) => Get(target.CanonicalExecutable ?? target.OwnedExecutables.FirstOrDefault(), target);
+    public ProcessVisual ForApplication(LaunchTarget target) => Get(target.CanonicalExecutable
+        ?? target.OwnedExecutables.FirstOrDefault(path => !InstalledApplicationResolver.IsInstaller(path)), target);
     public ProcessVisual ForProcess(string? path) => Get(path, null);
     private ProcessVisual Get(string? path, LaunchTarget? explicitOwner)
     {
-        string lookup = path ?? "unknown";
+        string lookup = path ?? explicitOwner?.DiscoveryKey ?? "unknown";
         var owner = explicitOwner ?? Volatile.Read(ref _owners).GetValueOrDefault(lookup);
         var definition = SupportedApplicationCatalog.ForExecutable(path);
         string name = owner?.Name ?? definition?.Name ?? (path is null ? "未知进程" : Path.GetFileNameWithoutExtension(path));

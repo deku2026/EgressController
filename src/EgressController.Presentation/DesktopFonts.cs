@@ -6,7 +6,7 @@ public static class DesktopFonts
 {
     public static FontManagerOptions Options() => new()
     {
-        DefaultFamilyName = "Segoe UI",
+        DefaultFamilyName = "fonts:Inter#Inter",
         FontFallbacks = [new() { FontFamily = new FontFamily("Microsoft YaHei UI") }, new() { FontFamily = new FontFamily("Segoe UI Symbol") }],
     };
 }

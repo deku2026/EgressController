@@ -1,10 +1,63 @@
-<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Presentation.DesktopTheme">
+<Styles xmlns:tokens="using:EgressController.Presentation" xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Presentation.DesktopTheme">
   <Styles.Resources>
-    <SolidColorBrush x:Key="WorkspaceBrush">#F4F6FA</SolidColorBrush>
-    <SolidColorBrush x:Key="SidebarBrush">#EBEFF5</SolidColorBrush>
+    <SolidColorBrush x:Key="HomeBrush" Color="{x:Static tokens:TrafficPalette.HomeColor}"/>
+    <SolidColorBrush x:Key="HomeTextBrush">#6253BB</SolidColorBrush>
+    <SolidColorBrush x:Key="OtherBrush" Color="{x:Static tokens:TrafficPalette.OtherColor}"/>
+    <SolidColorBrush x:Key="OtherTextBrush">#287F91</SolidColorBrush>
+    <SolidColorBrush x:Key="TrackBrush">#EEF0F5</SolidColorBrush>
+    <SolidColorBrush x:Key="RateBrush">#728BAD</SolidColorBrush>
+    <FontFamily x:Key="NumberFont">fonts:Inter#Inter</FontFamily>
+    <ControlTheme x:Key="QuietExpanderToggle" TargetType="ToggleButton">
+      <Setter Property="FocusAdorner" Value="{x:Null}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Padding" Value="8,7"/>
+      <Setter Property="Template"><ControlTemplate>
+        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+          <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" HorizontalContentAlignment="Stretch"/>
+        </Border>
+      </ControlTemplate></Setter>
+      <Style Selector="^:pointerover"><Setter Property="Background" Value="#F1F4F9"/></Style>
+      <Style Selector="^:focus-visible"><Setter Property="BorderBrush" Value="#5062CE"/><Setter Property="Background" Value="#F1F4FC"/></Style>
+    </ControlTheme>
+    <ControlTheme x:Key="QuietExpander" TargetType="Expander">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <StackPanel>
+            <ToggleButton Theme="{StaticResource QuietExpanderToggle}" HorizontalAlignment="Stretch" Name="HeaderButton" IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}" Background="Transparent" BorderThickness="0" Padding="0,8" HorizontalContentAlignment="Stretch" CornerRadius="6">
+              <Grid ColumnDefinitions="*,18" ColumnSpacing="12">
+                <ContentPresenter Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}" VerticalAlignment="Center"/>
+                <PathIcon Grid.Column="1" Name="Chevron" Data="M 2,5 L 8,11 L 14,5" Width="12" Height="12" Foreground="{StaticResource MutedBrush}"/>
+              </Grid>
+            </ToggleButton>
+            <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" IsVisible="{TemplateBinding IsExpanded}" HorizontalContentAlignment="Stretch"/>
+          </StackPanel>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:expanded /template/ PathIcon#Chevron"><Setter Property="RenderTransform"><RotateTransform Angle="180"/></Setter></Style>
+    </ControlTheme>
+    <ControlTheme x:Key="TableRow" TargetType="ListBoxItem">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Template"><ControlTemplate>
+        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6">
+          <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" HorizontalContentAlignment="Stretch"/>
+        </Border>
+      </ControlTemplate></Setter>
+      <Style Selector="^:nth-child(2n)"><Setter Property="Background" Value="#FAFBFD"/></Style>
+      <Style Selector="^:pointerover"><Setter Property="Background" Value="#F0F3F9"/></Style>
+      <Style Selector="^:selected"><Setter Property="Background" Value="#E9EEFA"/></Style>
+      <Style Selector="^:focus-visible"><Setter Property="BorderBrush" Value="#5062CE"/></Style>
+    </ControlTheme>
+    <SolidColorBrush x:Key="WorkspaceBrush">#F3F5F8</SolidColorBrush>
+    <SolidColorBrush x:Key="SidebarBrush">#EBEFF4</SolidColorBrush>
     <SolidColorBrush x:Key="SurfaceBrush">#FFFFFF</SolidColorBrush>
-    <SolidColorBrush x:Key="InkBrush">#202C3D</SolidColorBrush>
-    <SolidColorBrush x:Key="MutedBrush">#5F6D82</SolidColorBrush>
+    <SolidColorBrush x:Key="InkBrush">#252C38</SolidColorBrush>
+    <SolidColorBrush x:Key="MutedBrush">#647084</SolidColorBrush>
     <SolidColorBrush x:Key="LineBrush">#E3E7EF</SolidColorBrush>
     <SolidColorBrush x:Key="AccentBrush">#5062CE</SolidColorBrush>
     <SolidColorBrush x:Key="SuccessBrush">#227957</SolidColorBrush>
@@ -12,6 +65,25 @@
     <SolidColorBrush x:Key="DangerBrush">#B8384A</SolidColorBrush>
     <SolidColorBrush x:Key="TextControlPlaceholderForeground">#637086</SolidColorBrush>
     <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver">#637086</SolidColorBrush>
+    <x:Double x:Key="TextControlPlaceholderOpacity">1</x:Double>
+    <ControlTheme x:Key="ChoiceItem" TargetType="ComboBoxItem">
+      <Setter Property="FocusAdorner" Value="{x:Null}"/><Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{StaticResource InkBrush}"/><Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Padding" Value="8,6"/><Setter Property="Margin" Value="0,1"/><Setter Property="MinHeight" Value="32"/>
+      <Setter Property="FontSize" Value="13"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Template"><ControlTemplate>
+        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+          <Grid ColumnDefinitions="14,*" ColumnSpacing="8">
+            <PathIcon Data="M2 8L6 12L13 3L15 4.5L6 16L0 10Z" Width="12" Height="12" IsVisible="{TemplateBinding IsSelected}" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center"/>
+            <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" VerticalContentAlignment="Center"/>
+          </Grid>
+        </Border>
+      </ControlTemplate></Setter>
+      <Style Selector="^:pointerover"><Setter Property="Background" Value="#F0F3F9"/></Style>
+      <Style Selector="^:selected"><Setter Property="Background" Value="#E9EEFA"/><Setter Property="Foreground" Value="#354AA9"/></Style>
+      <Style Selector="^:focus-visible"><Setter Property="BorderBrush" Value="#5062CE"/></Style>
+      <Style Selector="^:disabled"><Setter Property="Foreground" Value="#7A8495"/></Style>
+    </ControlTheme>
     <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
       <Setter Property="FocusAdorner" Value="{x:Null}"/>
       <Setter Property="Background" Value="White"/>
@@ -19,8 +91,8 @@
       <Setter Property="BorderBrush" Value="#D7DDE7"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="CornerRadius" Value="8"/>
-      <Setter Property="Padding" Value="13,8"/>
-      <Setter Property="MinHeight" Value="36"/>
+      <Setter Property="Padding" Value="12,7"/>
+      <Setter Property="MinHeight" Value="32"/>
       <Setter Property="FontSize" Value="14"/>
       <Setter Property="FontWeight" Value="Medium"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
@@ -74,14 +146,22 @@
       </Style>
     </ControlTheme>
   </Styles.Resources>
+  <Style Selector="TextBlock"><Setter Property="FontFeatures" Value="+tnum"/></Style>
+  <Style Selector="ComboBox.category">
+    <Setter Property="MinHeight" Value="25"/><Setter Property="Padding" Value="7,2"/>
+    <Setter Property="FontSize" Value="12"/><Setter Property="Background" Value="#F0F3F8"/>
+    <Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#526077"/>
+    <Setter Property="CornerRadius" Value="6"/>
+  </Style>
+  <Style Selector="Button.inventory"><Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="5,2"/><Setter Property="FontSize" Value="12"/></Style>
   <Style Selector="Window">
-    <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"/>
-    <Setter Property="FontSize" Value="14"/>
+    <Setter Property="FontFamily" Value="fonts:Inter#Inter"/>
+    <Setter Property="FontSize" Value="13"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="Background" Value="{StaticResource WorkspaceBrush}"/>
   </Style>
   <Style Selector="TextBlock.page-title">
-    <Setter Property="FontSize" Value="26"/>
+    <Setter Property="FontSize" Value="25"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
   <Style Selector="TextBlock.section-title">
@@ -93,7 +173,7 @@
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
   <Style Selector="TextBlock.metric">
-    <Setter Property="FontSize" Value="36"/>
+    <Setter Property="FontSize" Value="32"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
   <Style Selector="TextBlock.muted">
@@ -120,21 +200,21 @@
   </Style>
   <Style Selector="TextBox">
     <Setter Property="PlaceholderForeground" Value="{StaticResource MutedBrush}"/>
-    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="MinHeight" Value="32"/>
     <Setter Property="CornerRadius" Value="8"/>
     <Setter Property="Background" Value="White"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="BorderBrush" Value="#D8DFE9"/>
-    <Setter Property="Padding" Value="11,7"/>
+    <Setter Property="Padding" Value="10,6"/>
   </Style>
   <Style Selector="TextBox /template/ TextBlock#PART_Placeholder"><Setter Property="Opacity" Value="1"/></Style>
   <Style Selector="ComboBox">
-    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="MinHeight" Value="32"/>
     <Setter Property="CornerRadius" Value="8"/>
     <Setter Property="Background" Value="White"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="BorderBrush" Value="#D8DFE9"/>
-    <Setter Property="Padding" Value="10,7"/>
+    <Setter Property="Padding" Value="9,6"/>
   </Style>
   <Style Selector="Button.primary">
     <Setter Property="Background" Value="#5062CE"/>
@@ -172,11 +252,11 @@
   </Style>
   <Style Selector="Border.card">
     <Setter Property="Background" Value="White"/>
-    <Setter Property="CornerRadius" Value="15"/>
-    <Setter Property="Padding" Value="22"/>
-    <Setter Property="BorderBrush" Value="#E6EAF1"/>
-    <Setter Property="BorderThickness" Value="0"/>
-    <Setter Property="BoxShadow" Value="0 5 18 0 #101E3454"/>
+    <Setter Property="CornerRadius" Value="14"/>
+    <Setter Property="Padding" Value="20"/>
+    <Setter Property="BorderBrush" Value="#E5E9F0"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="BoxShadow" Value="0 2 6 0 #08000000"/>
   </Style>
   <Style Selector="Border.list-card">
     <Setter Property="Background" Value="White"/>
@@ -207,8 +287,8 @@
   <Style Selector="Border.app-glyph">
     <Setter Property="Background" Value="#EDF0FA"/>
     <Setter Property="CornerRadius" Value="9"/>
-    <Setter Property="Width" Value="36"/>
-    <Setter Property="Height" Value="36"/>
+    <Setter Property="Width" Value="32"/>
+    <Setter Property="Height" Value="32"/>
   </Style>
   <Style Selector="Border.metric-pill">
     <Setter Property="Background" Value="#E9F4EF"/>
@@ -241,7 +321,7 @@
   <Style Selector="ToolTip">
     <Setter Property="Background" Value="#263449"/>
     <Setter Property="Foreground" Value="White"/>
-    <Setter Property="Padding" Value="10,7"/>
+    <Setter Property="Padding" Value="9,6"/>
   </Style>
   <Style Selector="Ellipse.state-dot">
     <Setter Property="Fill" Value="#8C96A6"/>
@@ -255,8 +335,34 @@
   <Style Selector="Button.menu-action:focus-visible"><Setter Property="Background" Value="#E8EEF9"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="#5062CE"/></Style>
   <Style Selector="Button.menu-danger"><Setter Property="Foreground" Value="#AC3349"/></Style>
   <Style Selector="MenuFlyoutPresenter"><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="6"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Background" Value="White"/></Style>
-  <Style Selector="MenuItem"><Setter Property="CornerRadius" Value="7"/><Setter Property="MinHeight" Value="36"/></Style>
+  <Style Selector="FlyoutPresenter"><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/><Setter Property="Background" Value="{StaticResource SurfaceBrush}"/></Style>
+  <Style Selector="MenuItem"><Setter Property="CornerRadius" Value="7"/><Setter Property="MinHeight" Value="32"/></Style>
   <Style Selector="ToolTip"><Setter Property="CornerRadius" Value="8"/><Setter Property="MaxWidth" Value="520"/></Style>
   <Style Selector="Button.menu-action:disabled"><Setter Property="Foreground" Value="#7A8495"/><Setter Property="Opacity" Value="0.65"/></Style>
   <Style Selector="TextBlock.metric"><Setter Property="FontFeatures" Value="tnum"/></Style>
+  <Style Selector="TextBlock.number"><Setter Property="FontFamily" Value="{StaticResource NumberFont}"/><Setter Property="FontFeatures" Value="+tnum"/></Style>
+  <Style Selector="TextBlock.secondary-metric"><Setter Property="FontFamily" Value="{StaticResource NumberFont}"/><Setter Property="FontSize" Value="23"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <Style Selector="TextBlock.home"><Setter Property="Foreground" Value="{StaticResource HomeTextBrush}"/></Style>
+  <Style Selector="TextBlock.other"><Setter Property="Foreground" Value="{StaticResource OtherTextBrush}"/></Style>
+  <Style Selector="Border.divider"><Setter Property="Width" Value="1"/><Setter Property="Background" Value="{StaticResource LineBrush}"/></Style>
+  <Style Selector="ComboBox.route"><Setter Property="MinHeight" Value="28"/><Setter Property="FontSize" Value="12"/><Setter Property="Padding" Value="8,4"/><Setter Property="Background" Value="#F3F5F9"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="CornerRadius" Value="6"/></Style>
+  <Style Selector="ComboBox.route:pointerover"><Setter Property="BorderBrush" Value="#D7DDE7"/></Style>
+  <Style Selector="ListBox.table"><Setter Property="ItemContainerTheme" Value="{StaticResource TableRow}"/></Style>
+  <Style Selector="Expander"><Setter Property="CornerRadius" Value="8"/><Setter Property="BorderBrush" Value="#E5E9F0"/></Style>
+  <Style Selector="Expander.subtle"><Setter Property="Theme" Value="{StaticResource QuietExpander}"/></Style>
+  <Style Selector="ComboBox">
+    <Style.Resources>
+      <SolidColorBrush x:Key="ComboBoxDropDownBackground">#FFFFFF</SolidColorBrush>
+      <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush">#E3E7EF</SolidColorBrush>
+      <CornerRadius x:Key="OverlayCornerRadius">10</CornerRadius>
+      <Thickness x:Key="ComboBoxDropdownBorderPadding">5</Thickness>
+    </Style.Resources>
+    <Setter Property="ItemContainerTheme" Value="{StaticResource ChoiceItem}"/>
+  </Style>
+  <Style Selector="TextBox"><Style.Resources><x:Double x:Key="TextControlPlaceholderOpacity">1</x:Double></Style.Resources><Setter Property="PlaceholderForeground" Value="#637086"/></Style>
+  <Style Selector="ComboBox /template/ Border#PopupBorder"><Setter Property="Background" Value="{StaticResource SurfaceBrush}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="5"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/></Style>
+  <Style Selector="ComboBox.category /template/ Border#PopupBorder"><Setter Property="MinWidth" Value="152"/></Style>
+  <Style Selector="ListBox.category-nav ListBoxItem"><Setter Property="Padding" Value="10,9"/><Setter Property="Margin" Value="0,1"/><Setter Property="MinHeight" Value="36"/></Style>
+  <Style Selector="Button.inventory-pending"><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/><Setter Property="Background" Value="#FFF0D8"/></Style>
+  <Style Selector="Button.inventory"><Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="5,2"/><Setter Property="FontSize" Value="12"/></Style>
 </Styles>

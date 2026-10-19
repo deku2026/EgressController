@@ -25,12 +25,12 @@ internal static class Program
         if (screenshotFlag >= 0)
         {
             if (screenshotFlag + 1 >= args.Length) throw new ArgumentException("Specify a screenshot output directory.");
-            AppBuilder.Configure<PreviewApplication>().With(DesktopFonts.Options()).UseSkia()
+            AppBuilder.Configure<PreviewApplication>().WithInterFont().With(DesktopFonts.Options()).UseSkia()
                 .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
             Capture(Path.GetFullPath(args[screenshotFlag + 1]));
             return 0;
         }
-        return AppBuilder.Configure<PreviewApplication>().With(DesktopFonts.Options()).UsePlatformDetect().StartWithClassicDesktopLifetime(args);
+        return AppBuilder.Configure<PreviewApplication>().WithInterFont().With(DesktopFonts.Options()).UsePlatformDetect().StartWithClassicDesktopLifetime(args);
     }
 
     private static void Capture(string directory)
@@ -42,6 +42,8 @@ internal static class Program
         RenderChecks.GuardIcons(directory);
         RenderChecks.TrayMenus(directory);
         RenderChecks.TrayPlacement(directory);
+        RenderChecks.MonthlyList(directory);
+        ApplicationChecks.Run(directory);
         foreach (var scenario in new[] { "ready", "offline", "starting", "empty", "telemetry", "failed", "download-timeout" })
         {
             var controller = new PreviewController(scenario, PreviewIcons.Load);
@@ -60,8 +62,23 @@ internal static class Program
             }
             if (scenario == "ready")
             {
+                window.SelectPage("overview"); Dispatcher.UIThread.RunJobs();
+                if (window.GetVisualDescendants().OfType<UsageBar>().Count() < 6)
+                    throw new InvalidOperationException("Monthly application usage rows were not rendered.");
+                var delays = window.GetVisualDescendants().OfType<TextBlock>().Where(text => text.Name is "DirectDelayValue" or "ProxyDelayValue").ToArray();
+                if (delays.Length != 2 || delays[0].FontSize != delays[1].FontSize || Math.Abs(delays[0].TranslatePoint(default, window)!.Value.Y - delays[1].TranslatePoint(default, window)!.Value.Y) > .5)
+                    throw new InvalidOperationException("Latency values have inconsistent size or alignment.");
+                RenderChecks.TrafficContrast(window);
+                window.GetVisualDescendants().OfType<Button>().First(button => button.Content as string == "查看全部应用")
+                    .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                if (vm.SelectedPage.Key != "traffic") throw new InvalidOperationException("Monthly traffic details navigation failed.");
                 window.SelectPage("apps"); vm.Apps.Query = "CLI";
                 RenderChecks.Save(window, Path.Combine(directory, "ready-cli.png")); vm.Apps.Query = "";
+                window.Width = 1920; window.Height = 1080;
+                foreach (string page in new[] { "overview", "traffic", "connections", "apps" })
+                {
+                    window.SelectPage(page); RenderChecks.Save(window, Path.Combine(directory, "wide-" + page + ".png"));
+                }
                 window.Width = 1100; window.Height = 760;
                 foreach (string page in vm.Pages.Select(page => page.Key))
                 {
@@ -101,7 +118,13 @@ internal static class Program
         string? requestedDirectory = null;
         trayWindow.OpenDirectoryRequested += path => requestedDirectory = path;
         var serviceDetails = trayWindow.GetVisualDescendants().OfType<Expander>().First();
-        serviceDetails.IsExpanded = true; Dispatcher.UIThread.RunJobs();
+        var header = serviceDetails.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(button => button.Name == "HeaderButton");
+        header.Focus(Avalonia.Input.NavigationMethod.Tab);
+        trayWindow.KeyPress(Avalonia.Input.Key.Space, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Space, null);
+        trayWindow.KeyRelease(Avalonia.Input.Key.Space, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Space, null);
+        Dispatcher.UIThread.RunJobs();
+        if (!serviceDetails.IsExpanded) throw new InvalidOperationException("Guardian details cannot be expanded with the keyboard.");
+        RenderChecks.Save(trayWindow, Path.Combine(directory, "guard-expanded-compact.png"));
         trayWindow.GetVisualDescendants().OfType<Button>().First(button => button.Content as string == "打开服务日志目录")
             .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         if (requestedDirectory != trayController.Guard.LogDirectory) throw new InvalidOperationException("Guard log-directory request failed.");
@@ -125,7 +148,7 @@ public sealed class PreviewApplication : Application
     public override void Initialize()
     {
         RequestedThemeVariant = ThemeVariant.Light;
-        Styles.Add(new FluentTheme()); Styles.Add(new DesktopTheme());
+        Styles.Add(DesktopTheme.CreateBaseTheme()); Styles.Add(new DesktopTheme());
     }
     public override void OnFrameworkInitializationCompleted()
     {

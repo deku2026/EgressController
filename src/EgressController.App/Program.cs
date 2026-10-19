@@ -30,8 +30,8 @@ class Program
 
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
-            .With(EgressController.Presentation.DesktopFonts.Options())
             .UsePlatformDetect()
             .WithInterFont()
+            .With(EgressController.Presentation.DesktopFonts.Options())
             .LogToTrace();
 }

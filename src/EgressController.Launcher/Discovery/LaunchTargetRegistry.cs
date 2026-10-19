@@ -42,7 +42,13 @@ public sealed class LaunchTargetRegistry
     }
 
     public IReadOnlyList<LaunchTarget> All()
-        => _byId.Values.OrderBy(t => t.Name).ToList();
+    { lock (_gate) return _byId.Values.OrderBy(t => t.Name).ToList(); }
+
+    public void ReplaceAll(IEnumerable<LaunchTarget> targets)
+    {
+        var snapshot = targets.ToArray();
+        lock (_gate) { Clear(); foreach (var target in snapshot) Add(target); }
+    }
 
     public void Clear()
     {
@@ -66,6 +72,8 @@ public sealed class LaunchTargetRegistry
 
     public LaunchTarget? Get(string id)
         => _byId.TryGetValue(id, out var t) ? t : null;
+    public LaunchTarget? Find(string key)
+    { lock (_gate) return _idByKey.TryGetValue(key, out var id) ? _byId.GetValueOrDefault(id) : null; }
 
     public int Count => _byId.Count;
 

@@ -14,7 +14,7 @@ public sealed class TrayApp : Application
     public override void Initialize()
     {
         RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light;
-        Styles.Add(new FluentTheme());
+        Styles.Add(DesktopTheme.CreateBaseTheme());
         Styles.Add(new EgressController.Presentation.DesktopTheme());
     }
     public override void OnFrameworkInitializationCompleted()

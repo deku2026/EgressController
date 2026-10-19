@@ -7,6 +7,64 @@ namespace EgressController.Launcher.Discovery;
 /// </summary>
 public static class ExecutableInventory
 {
+    public static IReadOnlyList<string> AvailableRoots(IEnumerable<string> roots)
+    {
+        var available = new List<string>();
+        foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (!File.GetAttributes(root).HasFlag(FileAttributes.Directory)) throw new IOException("应用目录不是文件夹：" + root);
+                available.Add(root);
+            }
+            catch (DirectoryNotFoundException) { } // Old versions and not-yet-created package data are optional.
+            catch (FileNotFoundException) { }
+            // Access/IO errors propagate. Directory.Exists would turn these into a false
+            // "missing" result and silently publish an incomplete package inventory.
+        }
+        return available;
+    }
+
+    public static IReadOnlyList<string> CollectChecked(IEnumerable<string> roots, string? primary = null, CancellationToken token = default, IReadOnlyList<string>? excludedRoots = null)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visitedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var excluded = (excludedRoots ?? []).Select(Path.GetFullPath).Select(path => path.TrimEnd(Path.DirectorySeparatorChar)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        AddFile(result, primary);
+        foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (excluded.Contains(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar))) continue;
+            ApplicationDirectoryBoundary.RequireScoped(root);
+            if (!Directory.Exists(root)) throw new IOException("应用目录不存在：" + root);
+            if (File.GetAttributes(root).HasFlag(FileAttributes.ReparsePoint)) throw new IOException("安装目录是链接，请选择实际安装目录：" + root);
+            var pending = new Stack<string>(); pending.Push(Path.GetFullPath(root));
+            while (pending.TryPop(out string? directory))
+            {
+                token.ThrowIfCancellationRequested();
+                if (!visitedDirectories.Add(directory)) continue;
+                // Enumerate names/attributes only. Never read game assets or follow a junction
+                // into another product/drive. Incomplete inventories must be reported, not saved.
+                var options = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = false, AttributesToSkip = 0, MatchCasing = MatchCasing.CaseInsensitive };
+                foreach (string file in Directory.EnumerateFiles(directory, "*.exe", options))
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint))
+                        throw new IOException("EXE 是链接，请单独指定实际目标：" + file);
+                    result.Add(Path.GetFullPath(file));
+                }
+                foreach (string child in Directory.EnumerateDirectories(directory, "*", options))
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (excluded.Contains(Path.GetFullPath(child).TrimEnd(Path.DirectorySeparatorChar))) continue;
+                    if (File.GetAttributes(child).HasFlag(FileAttributes.ReparsePoint))
+                        throw new IOException("目录包含链接，请为实际目标单独指定应用目录：" + child);
+                    pending.Push(child);
+                }
+            }
+        }
+        if (result.Count == 0) throw new IOException("没有找到可用于分流的 EXE，请指定应用目录。");
+        return result.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
     private static readonly EnumerationOptions RecursiveExeOptions = new()
     {
         RecurseSubdirectories = true,

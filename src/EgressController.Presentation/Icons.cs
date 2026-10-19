@@ -7,6 +7,7 @@ public static class Icons
 {
     public static Geometry Folder { get; } = For("folder");
     public static Geometry Guardian { get; } = For("guardian");
+    public static Geometry More { get; } = For("more");
     public static Geometry For(string name) => StreamGeometry.Parse(name switch
     {
         "overview" => "M2 2H9V9H2Z M12 2H19V9H12Z M2 12H9V19H2Z M12 12H19V19H12Z",
@@ -23,6 +24,14 @@ public static class Icons
         "power" => "M9 1H12V11H9Z M5 4L7 6C1 10 4 18 10.5 18C17 18 20 10 14 6L16 4C24 10 20 21 10.5 21C1 21-3 10 5 4Z",
         "refresh" => "M17 4L20 1V9H12L15 6C9 1 2 6 4 13L1 14C-2 3 10-3 17 4Z M4 17L1 20V12H9L6 15C12 20 19 15 17 8L20 7C23 18 11 24 4 17Z",
         "more" => "M4 8A2 2 0 1 1 3.99 8Z M11 8A2 2 0 1 1 10.99 8Z M18 8A2 2 0 1 1 17.99 8Z",
+        "uncategorized" => "M2 3H19V18H2Z M4 5V16H17V5Z M7 9H14V11H7Z",
+        "ai" => "M10 0L13 7L20 10L13 13L10 20L7 13L0 10L7 7Z M10 5L8.5 8.5L5 10L8.5 11.5L10 15L11.5 11.5L15 10L11.5 8.5Z",
+        "browser" => "M10 0A10 10 0 1 1 9.99 0Z M10 2A8 8 0 1 0 10.01 2Z M1 9H19V11H1Z M9 1H11V19H9Z",
+        "games" => "M4 5H17L21 16L18 19L13 15H8L3 19L0 16Z M5 7L2 15L3 16L7 13H14L18 16L19 15L16 7Z M5 8H7V10H9V12H7V14H5V12H3V10H5Z M14 9H16V11H14Z M17 12H19V14H17Z",
+        "social" => "M1 2H20V15H8L3 20V15H1Z M3 4V13H5V15L7 13H18V4Z M5 7H16V9H5Z",
+        "media" => "M2 2H19V19H2Z M4 4V17H17V4Z M8 6L14 10.5L8 15Z",
+        "office" => "M6 1H15V5H20V19H1V5H6Z M8 3V5H13V3Z M3 7V10H18V7Z M3 12V17H18V12Z M9 10H12V14H9Z",
+        "development" => "M7 4L0 11L7 18L8.5 16.5L3 11L8.5 5.5Z M15 4L13.5 5.5L19 11L13.5 16.5L15 18L22 11Z M12 2L8 20H10L14 2Z",
         "arrow" => "M10 2L17 9L15 11L11 7V20H8V7L4 11L2 9Z",
         _ => "M10 1A9 9 0 1 1 9.99 1Z M8 8V17H11V8Z M8 4V6H11V4Z",
     });

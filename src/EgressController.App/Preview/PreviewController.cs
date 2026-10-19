@@ -5,7 +5,7 @@ using EgressController.Core.Protection;
 using EgressController.Diagnostics;
 using EgressController.Guardian;
 using EgressController.Rules.Catalog;
-using EgressController.State.Quota;
+using EgressController.State.Traffic;
 using EgressController.Windows.Process;
 
 namespace EgressController.App.Preview;
@@ -17,6 +17,41 @@ public sealed class PreviewController : IAppController
     private static readonly Guid ProxyId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private readonly List<LaunchTarget> _targets = [];
     private readonly List<ProtectionEvent> _events = [];
+    private readonly Dictionary<string, string> _categories = new(StringComparer.Ordinal);
+    public IReadOnlyList<LaunchTarget> CachedTargets => _targets.ToArray();
+    public LaunchTarget? FindApplication(string key) => _targets.FirstOrDefault(item => item.DiscoveryKey == key);
+    public IReadOnlyDictionary<string, string> ApplicationCategories => _categories;
+    public Task<ControllerOperationResult> SetApplicationCategoryAsync(LaunchTarget target, string? category)
+    {
+        if (!ApplicationCategory.IsValid(category)) return Task.FromResult(ControllerOperationResult.Failure("未知分类。"));
+        _categories[target.DiscoveryKey] = category ?? "";
+        return Task.FromResult(ControllerOperationResult.Success());
+    }
+    public int InventoryBuildCount { get; private set; }
+    private LaunchTarget BuildPreviewInventory(LaunchTarget target)
+    {
+        InventoryBuildCount++;
+        string root = target.OwnedRoots.FirstOrDefault() ?? @"C:\Preview\Application";
+        IEnumerable<string> discovered = [target.CanonicalExecutable ?? Path.Combine(root, "app.exe"), Path.Combine(root, "tools", "helper.exe")];
+        if (_scenario == "package-data" && target.Kind == LaunchKind.PackagedAumid)
+            discovered = discovered.Concat(new[] { "2.1.295", "2.1.299" }.Select(version => Path.Combine(target.OwnedRoots[1], "LocalCache", "Roaming", "Claude", "claude-code", version, "mock-hash", "claude.exe")));
+        var updated = target.WithInventory(target.OwnedExecutables.Concat(discovered).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        int index = _targets.FindIndex(item => item.DiscoveryKey == target.DiscoveryKey);
+        if (index >= 0) _targets[index] = updated;
+        Visuals.Update(_targets, Profile); return updated;
+    }
+    public Task<ControllerOperationResult> RefreshApplicationInventoryAsync(LaunchTarget target)
+    {
+        var updated = BuildPreviewInventory(target);
+        var selected = Profile.Applications.FirstOrDefault(item => item.DiscoveryKey == target.DiscoveryKey);
+        return selected is null ? Task.FromResult(ControllerOperationResult.Success()) : SetApplicationsRouteAsync([updated], true, selected.Target);
+    }
+    public Task<ControllerOperationResult> AddManualApplicationAsync(string path, string? replaceKey = null)
+    {
+        _targets.Add(new() { Id = replaceKey ?? "manual:" + path, SavedDiscoveryKey = replaceKey, Name = "手动添加的应用", CanonicalExecutable = path,
+            Command = path, OwnedExecutables = [path], Source = "UI 预览数据", IsManual = true });
+        return Task.FromResult(ControllerOperationResult.Success());
+    }
     private string _scenario;
     private int _sample;
     private readonly PreviewClock _clock = new();
@@ -39,12 +74,14 @@ public sealed class PreviewController : IAppController
         Adapters = [Adapter(HomeId, "Ethernet", "Apple Mobile Device Ethernet", "192.0.2.10", 7), Adapter(ProxyId, "Wi-Fi", "无线网络", "198.51.100.10", 12)];
         Profile = new EgressProfileDocument { DefaultAdapterId = HomeId.ToString(), ProxyAdapterId = ProxyId.ToString(),
             UpstreamPorts = [7890, 7891], UpstreamPort = 7890 }.NormalizeAndValidate();
-        string[] names = ["ChatGPT", "Claude", "Codex", "Google Chrome", "Microsoft Edge", "Windsurf", "Firefox", "LM Studio"];
+        string[] names = ["ChatGPT", "Claude", "Codex", "Google Chrome", "Microsoft Edge", "Windsurf", "Firefox", "LM Studio",
+            "英雄联盟", "WeGame", "Steam", "微信", "Telegram", "VLC media player", "Visual Studio"];
         foreach (string name in names)
         {
             string path = @"C:\Applications\" + name + @"\" + name.Replace(" ", "") + ".exe";
-            _targets.Add(new() { Id = "preview:" + name, Name = name, CatalogId = EgressController.Launcher.Discovery.SupportedApplicationCatalog.ForName(name)?.Id, Kind = LaunchKind.DirectExe,
-                Command = path, CanonicalExecutable = path, OwnedExecutables = [path, Path.Combine(Path.GetDirectoryName(path)!, "tools", "helper.exe")],
+            _targets.Add(new() { Id = "preview:" + name, Name = name, CatalogId = name switch { "英雄联盟" => "league", "Steam" => "steam", "WeGame" => "wegame", _ => EgressController.Launcher.Discovery.SupportedApplicationCatalog.ForName(name)?.Id }, Kind = LaunchKind.DirectExe,
+                Command = path, CanonicalExecutable = path, OwnedExecutables = name is "英雄联盟" or "Steam" or "WeGame" ? [] : [path, Path.Combine(Path.GetDirectoryName(path)!, "tools", "helper.exe")],
+                InventoryReady = name is not ("英雄联盟" or "Steam" or "WeGame"),
                 OwnedRoots = [Path.GetDirectoryName(path)!], Source = "UI 预览数据" });
         }
         foreach (string brand in new[] { "claude", "codex" })
@@ -52,6 +89,16 @@ public sealed class PreviewController : IAppController
             string path = @"C:\Users\Demo\.local\bin\" + brand + ".exe";
             _targets.Add(new() { Id = "cli:" + brand, SavedDiscoveryKey = "cli:" + path, Name = (brand == "claude" ? "Claude" : "Codex") + " CLI",
                 CatalogId = brand, Kind = LaunchKind.CliNative, Command = path, CanonicalExecutable = path, OwnedExecutables = [path], OwnedRoots = [], IconPath = brand, Source = "Windows CLI" });
+        }
+        if (scenario == "package-data")
+        {
+            const string family = "Claude_pzs8sxrjxfjjc";
+            const string install = @"C:\Program Files\WindowsApps\Claude_2.42304.0.0_x64__pzs8sxrjxfjjc";
+            string main = Path.Combine(install, "app", "Claude.exe");
+            _targets[1] = new LaunchTarget { Id = "preview:Claude", Name = "Claude", CatalogId = "claude", Kind = LaunchKind.PackagedAumid,
+                Aumid = family + "!Claude", PackageFamily = family, CanonicalExecutable = main, Command = main,
+                OwnedRoots = EgressController.Launcher.Discovery.PackageExecutableRoots.Resolve(install, null, @"C:\Users\Demo\AppData\Local", family),
+                OwnedExecutables = [main], InventoryReady = false, Source = "UI 预览数据" };
         }
         Profile = Profile with { Applications = _targets.Take(3).Select(target => new EgressApplicationSelection
         { DiscoveryKey = target.DiscoveryKey, DisplayName = target.Name, ExecutablePaths = target.OwnedExecutables,
@@ -61,7 +108,7 @@ public sealed class PreviewController : IAppController
             RuleSets = [new() { Name = "google", Target = EgressRouteTarget.ForPort(7890) }] };
         Catalog = new(new(new string('a', 40), new string('b', 40), new[] { "google", "youtube", "openai", "anthropic", "github", "telegram", "twitter" }
             .Select(name => new SingBoxRuleCatalogEntry(name, "geosite/" + name + ".srs", new string('c', 40), 2048)).ToArray()));
-        Quota = new(500L * 1024 * 1024 * 1024, 380L * 1024 * 1024 * 1024, 62L * 1024 * 1024 * 1024, DateTimeOffset.UtcNow);
+
         Guard = new(new PreviewGuardClient(this), Diagnostics, Path.Combine(Diagnostics.DirectoryPath, "guardian"));
         if (scenario != "empty")
         {
@@ -90,6 +137,7 @@ public sealed class PreviewController : IAppController
         if (scenario == "download-timeout") Diagnostics.Report("启动资源下载", "download.timeout", DownloadStatus);
         if (scenario == "starting") Diagnostics.Info("TUN 启动", "正在准备内核，所选应用暂不能运行");
         Visuals.Update(_targets, Profile);
+        TrafficUsage = CreateUsage(scenario == "empty");
     }
     public Services.ApplicationVisualCatalog Visuals { get; }
     public bool IsPreview => true;
@@ -125,7 +173,8 @@ public sealed class PreviewController : IAppController
     public long TrafficDown => _scenario is "empty" or "starting" or "failed" ? 0 : 551 * 1024 * 1024;
     private long SimulatedUploadRate => _scenario is "ready" or "telemetry" ? (long)((104 + 28 * Math.Sin(_sample * .28) + (_sample % 17 < 3 ? 70 : 0)) * 1024) : 0;
     private long SimulatedDownloadRate => _scenario is "ready" or "telemetry" ? (long)((1320 + 310 * Math.Sin(_sample * .22) + (_sample % 23 < 5 ? 400 : 0)) * 1024) : 0;
-    public EgressQuotaSnapshot Quota { get; private set; }
+    public TrafficUsageSnapshot TrafficUsage { get; set; }
+    public string TrafficUsageError { get; set; } = "";
     public DiagnosticJournal Diagnostics { get; }
     public BoundedLogStore Logs { get; } = new();
     public string LogPath => Diagnostics.LogPath;
@@ -144,8 +193,9 @@ public sealed class PreviewController : IAppController
         IReadOnlyDictionary<string, EgressRouteTarget>? routes = null, CancellationToken cancellationToken = default)
     {
         var next = Profile.Applications.ToDictionary(item => item.DiscoveryKey);
-        foreach (var target in targets)
+        foreach (var item in targets.ToArray())
         {
+            var target = enabled && !item.InventoryReady ? BuildPreviewInventory(item) : item;
             var previous = next.Values.Where(item => target.SelectionKeys.Contains(item.DiscoveryKey)).ToArray();
             foreach (string alias in target.SelectionKeys) next.Remove(alias);
             if (enabled) next[target.DiscoveryKey] = EgressController.Launcher.Discovery.ApplicationCatalogProjection.Merge(target, previous,
@@ -174,13 +224,27 @@ public sealed class PreviewController : IAppController
     public Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default) => Task.FromResult(new SingBoxCatalogUpdateResult(true, Catalog, null));
     public void ClearConnectionHistory() => ConnectionHistory.ClearClosed();
     public void ClearProtectionHistory() => _events.Clear();
-    public void ClearQuotaUsage() => Quota = Quota with { UsedBytes = 0 };
-    public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
-    {
-        if (totalGigabytes < 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes) throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "额度不能为负，剩余额度须在总额范围内。");
-        Quota = new(checked((long)Math.Round(totalGigabytes * 1073741824, MidpointRounding.AwayFromZero)), checked((long)Math.Round(remainingGigabytes * 1073741824, MidpointRounding.AwayFromZero)), 0, DateTimeOffset.UtcNow);
-    }
     public ControllerOperationResult ReportFailure(string stage, string code, string message, Exception? error = null) { Diagnostics.Report(stage, code, message, error); return new(false, message); }
+    private TrafficUsageSnapshot CreateUsage(bool empty)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (empty) return TrafficUsageSnapshot.Empty(today);
+        var entries = new List<TrafficUsage>();
+        var firstOpened = DateTimeOffset.Now.AddDays(-42);
+        var period = TrafficPeriod.At(DateOnly.FromDateTime(firstOpened.Date), today);
+        double[] dailyMib = [264, 176, 122, 588, 70, 45, 22, 12, 80, 32];
+        for (int day = 0; day <= today.DayNumber - period.From.DayNumber; day++)
+        for (int app = 0; app < _targets.Count; app++)
+        {
+            double value = dailyMib[app % dailyMib.Length] * (0.4 + (day * 13 + app * 7) % 21 / 14d);
+            double home = app is 0 or 1 or 8 ? .82 : app == 3 ? .23 : .54;
+            string path = _targets[app].CanonicalExecutable!;
+            long bytes = (long)(value * 1048576);
+            entries.Add(new(path, period.From.AddDays(day), TrafficExit.Home, (long)(bytes * home * .2), (long)(bytes * home * .8)));
+            entries.Add(new(path, period.From.AddDays(day), TrafficExit.Other, (long)(bytes * (1 - home) * .2), (long)(bytes * (1 - home) * .8)));
+        }
+        return new(period.From, period.Through, firstOpened, entries);
+    }
     private static NetworkAdapterInfo Adapter(Guid id, string name, string description, string address, int index) => new()
     { Identity = new(id, name), Description = description, Luid = (ulong)index, IfIndex = index, Ipv6IfIndex = index,
         IsUp = true, Addresses = [IPAddress.Parse(address)], Gateways = [], DnsServers = [], InterfaceType = 6 };

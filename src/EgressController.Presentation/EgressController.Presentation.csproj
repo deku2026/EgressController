@@ -2,6 +2,7 @@
   <PropertyGroup><AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault></PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <ProjectReference Include="..\EgressController.Windows\EgressController.Windows.csproj" />
     <ProjectReference Include="..\EgressController.Guardian\EgressController.Guardian.csproj" />

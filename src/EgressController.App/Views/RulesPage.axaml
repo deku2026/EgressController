@@ -10,26 +10,21 @@
       <TextBlock Text="{Binding Domains.Status}" Classes="muted" TextTrimming="CharacterEllipsis"/>
       <TextBlock Grid.Column="1" Text="{Binding Domains.SelectedSummary}" Classes="muted"/>
     </Grid>
-    <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="18">
+    <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="16">
       <Border Classes="list-card">
         <Grid RowDefinitions="Auto,*,Auto">
-          <Border Padding="20,17" Background="#F9FAFC">
+          <Border Padding="16,14" Background="#F9FAFC">
             <TextBlock Text="规则库" Classes="section-title"/>
           </Border>
           <ListBox Grid.Row="1" ItemsSource="{Binding Domains.Results}" Classes="table">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:RuleEntryViewModel">
-                <Border Padding="18,14" BorderBrush="#E8EDF4" BorderThickness="0,0,0,1">
-                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                    <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Top"/>
-                    <StackPanel Grid.Column="1" Spacing="8">
-                      <TextBlock Text="{Binding Name}" FontWeight="Medium"/>
-                      <Grid ColumnDefinitions="82,*" ColumnSpacing="8">
-                        <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
-                        <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
-                      </Grid>
-                      <TextBlock Text="{Binding Routing.Status}" IsVisible="{Binding Routing.HasStatus}" Classes="warning" TextWrapping="Wrap"/>
-                    </StackPanel>
+                <Border Padding="12,4" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
+                  <Grid ColumnDefinitions="26,*,210" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+                    <CheckBox MinHeight="28" IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}"/>
+                    <ComboBox Grid.Column="2" Classes="route" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Routing.Status}" IsVisible="{Binding Routing.HasStatus}" Classes="muted" FontSize="11.5" TextWrapping="Wrap" Margin="0,3,0,0"/>
                   </Grid>
                 </Border>
               </DataTemplate>
@@ -66,10 +61,7 @@
                           <TextBlock Text="{Binding Domain}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Domain}" FontWeight="Medium"/>
                           <Button Grid.Column="1" Content="移除" Classes="quiet" Command="{Binding RemoveCommand}" IsEnabled="{Binding Routing.CanEdit}"/>
                         </Grid>
-                        <Grid ColumnDefinitions="82,*" ColumnSpacing="8">
-                          <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
-                          <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
-                        </Grid>
+                        <ComboBox Classes="route" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
                         <TextBlock Text="{Binding Routing.Status}" Classes="warning" TextWrapping="Wrap" IsVisible="{Binding Routing.HasStatus}"/>
                         <TextBlock Text="{Binding Status}" Classes="warning" TextWrapping="Wrap"/>
                       </StackPanel>
@@ -86,13 +78,10 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:RuleEntryViewModel">
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="0,0,0,12">
-                      <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Top"/>
+                      <CheckBox MinHeight="28" IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding Routing.CanEdit}" VerticalAlignment="Top"/>
                       <StackPanel Grid.Column="1" Spacing="8">
                         <TextBlock Text="{Binding Name}" FontWeight="Medium"/>
-                        <Grid ColumnDefinitions="82,*" ColumnSpacing="8">
-                          <ComboBox ItemsSource="{Binding Routing.Kinds}" SelectedItem="{Binding Routing.SelectedKind}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
-                          <ComboBox Grid.Column="1" ItemsSource="{Binding Routing.VisibleOptions}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
-                        </Grid>
+                        <ComboBox Classes="route" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch"/>
                         <TextBlock Text="{Binding Routing.Status}" Classes="warning" TextWrapping="Wrap" IsVisible="{Binding Routing.HasStatus}"/>
                       </StackPanel>
                     </Grid>

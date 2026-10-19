@@ -35,8 +35,12 @@ public sealed class ApplicationCatalogProjectionTests
     [InlineData(@"C:\System\IEXPLORE.EXE")]
     [InlineData(@"C:\System\ImagingDevices.exe")]
     [InlineData(@"C:\Tools\claude-ssh-proxy.exe")]
-    public void Nested_browser_or_AI_binary_does_not_classify_an_unrelated_primary(string primary)
-        => Assert.Empty(ApplicationCatalogProjection.Project([Target(primary, @"C:\VS\copilot.exe", @"C:\VS\msedge.exe")]));
+    public void Any_primary_is_visible_but_nested_AI_does_not_change_its_identity(string primary)
+    {
+        var target = Assert.Single(ApplicationCatalogProjection.Project([Target(primary, @"C:\VS\copilot.exe", @"C:\VS\msedge.exe")]));
+        Assert.Equal(Path.GetFileNameWithoutExtension(primary), target.Name);
+        Assert.True(string.IsNullOrEmpty(target.CatalogId));
+    }
 
     [Fact]
     public void Compatible_legacy_selections_merge_but_missing_saved_paths_survive()
@@ -66,9 +70,57 @@ public sealed class ApplicationCatalogProjectionTests
     {
         EgressApplicationSelection[] saved = [Selection(Helper), Selection(Main, null, Helper), Selection(@"C:\VS\devenv.exe")];
         var rows = ApplicationCatalogProjection.RestoreSavedTargets([], saved);
-        Assert.Equal("Claude", Assert.Single(rows).Name);
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, row => row.Name == "Claude");
         var result = ApplicationCatalogProjection.Reconcile(saved, rows);
-        Assert.Contains(Helper, Assert.Single(result).ExecutablePaths);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(Helper, result.Single(item => item.DisplayName == "Claude").ExecutablePaths);
+    }
+
+    [Fact]
+    public void Independently_registered_game_is_not_swallowed_by_launcher_inventory()
+    {
+        string path = @"C:\Steam\steamapps\common\Game\game.exe";
+        var launcher = Target(@"C:\Steam\steam.exe", path);
+        var game = new LaunchTarget { Id = "steam:1", SavedDiscoveryKey = "steam:1", Name = "Game", CanonicalExecutable = path,
+            OwnedExecutables = [path], Source = "Steam 游戏库" };
+        var rows = ApplicationCatalogProjection.Project([launcher, game]);
+        Assert.Equal(2, rows.Count);
+        Assert.DoesNotContain("steam:1", rows.Single(row => row.Name == "steam").RelatedDiscoveryKeys);
+    }
+
+    [Fact]
+    public void Package_identity_wins_over_a_legacy_executable_filename()
+    {
+        var row = Assert.Single(ApplicationCatalogProjection.Project([new() { Id = "codex", Name = "Codex", Kind = LaunchKind.PackagedAumid,
+            PackageFamily = "OpenAI.Codex_abcd", CanonicalExecutable = @"C:\WindowsApps\OpenAI.Codex\ChatGPT.exe" }]));
+        Assert.Equal("Codex", row.Name);
+    }
+
+    [Fact]
+    public void Packaged_helpers_fold_without_eagerly_scanning_files()
+    {
+        var main = new LaunchTarget { Id = "main", Name = "Claude", Kind = LaunchKind.PackagedAumid, PackageFamily = "Claude_test",
+            Aumid = "Claude_test!main", CanonicalExecutable = Main, InventoryReady = false };
+        var helper = new LaunchTarget { Id = "helper", Name = "claude-ssh-proxy", Kind = LaunchKind.PackagedAumid, PackageFamily = "Claude_test",
+            Aumid = "Claude_test!helper", CanonicalExecutable = Helper, InventoryReady = false };
+        var row = Assert.Single(ApplicationCatalogProjection.Project([helper, main]));
+        Assert.Equal("Claude", row.Name); Assert.Contains(helper.DiscoveryKey, row.RelatedDiscoveryKeys);
+        Assert.Empty(row.OwnedExecutables);
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Provider_refresh_keeps_category_and_route_identity_aliases_without_rescanning(bool manual)
+    {
+        var cached = new LaunchTarget { Id = "old", SavedDiscoveryKey = "old:registration", Name = "Chosen name", IsManual = manual,
+            CanonicalExecutable = Main, OwnedRoots = [@"C:\Apps\Claude"], OwnedExecutables = [Main, Helper] };
+        var discovered = new LaunchTarget { Id = "new", SavedDiscoveryKey = "arp:claude", Name = "Claude", InventoryReady = false,
+            CanonicalExecutable = Main, OwnedRoots = [@"C:\Apps\Claude"], RelatedDiscoveryKeys = ["exe:" + Main] };
+        var restored = ApplicationCatalogProjection.RestoreCachedInventory(discovered, cached);
+        Assert.Contains(cached.DiscoveryKey, restored.SelectionKeys); Assert.Contains(discovered.DiscoveryKey, restored.SelectionKeys);
+        Assert.Equal(cached.OwnedExecutables, restored.OwnedExecutables); Assert.True(restored.InventoryReady);
+        if (manual) { Assert.Equal(cached.DiscoveryKey, restored.DiscoveryKey); Assert.Equal("Chosen name", restored.Name); }
     }
 
     [Fact]

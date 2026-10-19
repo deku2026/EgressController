@@ -6,27 +6,39 @@ namespace EgressController.Launcher.Discovery;
 /// <summary>One product row owns its saved recursive paths; process ancestry is never consulted.</summary>
 public static class ApplicationCatalogProjection
 {
+    public static LaunchTarget RestoreCachedInventory(LaunchTarget discovered, LaunchTarget cached)
+    {
+        var target = cached.IsManual ? cached : discovered;
+        var aliases = discovered.SelectionKeys.Concat(cached.SelectionKeys).Where(key => key != target.DiscoveryKey).Distinct(StringComparer.Ordinal).ToArray();
+        bool rootsCovered = target.OwnedRoots.All(root => PackageExecutableRoots.Covers(cached.OwnedRoots, root));
+        return target.WithInventory(cached.OwnedExecutables, cached.InventoryReady && rootsCovered,
+            target.OwnedRoots.Concat(cached.OwnedRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), aliases);
+    }
+
     public static IReadOnlyList<LaunchTarget> Project(IEnumerable<LaunchTarget> discovery)
     {
         var raw = discovery.ToArray();
-        var candidates = raw.Where(SupportedApplicationCatalog.IsSupported)
+        var candidates = raw
             .OrderByDescending(item => item.Kind == LaunchKind.CliNative)
             .ThenByDescending(item => item.Kind == LaunchKind.PackagedAumid)
+            .ThenByDescending(item => item.Source is not (null or "App Paths"))
+            .ThenByDescending(item => item.CanonicalExecutable is not null)
+            .ThenByDescending(item => SupportedApplicationCatalog.Identify(item) is not null)
             .ThenByDescending(item => item.OwnedExecutables.Count).ThenBy(item => item.DiscoveryKey, StringComparer.Ordinal).ToArray();
         var accepted = new List<LaunchTarget>();
         foreach (var candidate in candidates)
         {
-            var definition = SupportedApplicationCatalog.Identify(candidate)!;
+            var definition = SupportedApplicationCatalog.Identify(candidate);
             bool cli = candidate.Kind == LaunchKind.CliNative;
-            if (accepted.Any(owner => SameFile(owner.CanonicalExecutable, candidate.CanonicalExecutable))) continue;
-            if (!cli && accepted.Any(owner => owner.Kind != LaunchKind.CliNative && owner.CatalogId == definition.Id
-                && Contains(owner, candidate.CanonicalExecutable))) continue;
+            if (accepted.Any(owner => SameInstallation(owner, candidate))) continue;
+            if (!cli && accepted.Any(owner => CanFold(owner, candidate))) continue;
             var aliases = raw.Where(item => item != candidate && item.Kind != LaunchKind.CliNative
-                && (SameFile(item.CanonicalExecutable, candidate.CanonicalExecutable) || !cli && Contains(candidate, item.CanonicalExecutable)))
+                && (SameInstallation(item, candidate) || !cli && CanFold(candidate, item)))
                 .SelectMany(item => item.SelectionKeys).Concat(candidate.RelatedDiscoveryKeys).Distinct(StringComparer.Ordinal).ToArray();
             string? icon = candidate.IconPath;
-            if (cli) icon = candidates.FirstOrDefault(item => item.Kind != LaunchKind.CliNative && SupportedApplicationCatalog.Identify(item)?.Id == definition.Id)?.IconPath ?? icon;
-            accepted.Add(Copy(candidate, definition.Name + (cli ? " CLI" : ""), definition.Id, aliases, icon));
+            if (cli && definition is not null) icon = candidates.FirstOrDefault(item => item.Kind != LaunchKind.CliNative && SupportedApplicationCatalog.Identify(item)?.Id == definition.Id)?.IconPath ?? icon;
+            string name = definition is null ? candidate.Name : definition.Name + (cli ? " CLI" : "");
+            accepted.Add(Copy(candidate, name, definition?.Id ?? candidate.CatalogId ?? "", aliases, icon));
         }
         return AssignAliases(accepted);
     }
@@ -37,17 +49,18 @@ public static class ApplicationCatalogProjection
         IReadOnlyList<EgressApplicationSelection> saved)
     {
         var targets = discovered.ToList();
-        foreach (var item in saved.Where(IsSupportedSaved).OrderByDescending(item => SupportedApplicationCatalog.ForExecutable(SelectionPath(item)) is not null || SelectionPath(item) is null))
+        foreach (var item in saved.OrderByDescending(item => SupportedApplicationCatalog.ForExecutable(SelectionPath(item)) is not null || SelectionPath(item) is null))
         {
             if (targets.Any(target => target.SelectionKeys.Contains(item.DiscoveryKey))) continue;
             string? path = SelectionPath(item) ?? item.ExecutablePaths.FirstOrDefault();
-            if (path is not null && targets.Any(target => Contains(target, path))) continue;
+            if (path is not null && SavedDefinition(item) is { } product
+                && targets.Any(target => target.CatalogId == product.Id && Contains(target, path))) continue;
             var definition = SavedDefinition(item);
             bool cli = item.DiscoveryKey.StartsWith("cli:", StringComparison.OrdinalIgnoreCase);
             targets.Add(new()
             {
                 Id = item.DiscoveryKey, SavedDiscoveryKey = item.DiscoveryKey,
-                Name = definition!.Name + (cli ? " CLI" : ""), CatalogId = definition.Id,
+                Name = definition is null ? item.DisplayName ?? Path.GetFileNameWithoutExtension(path) ?? "未命名应用" : definition.Name + (cli ? " CLI" : ""), CatalogId = definition?.Id,
                 Kind = cli ? LaunchKind.CliNative : LaunchKind.DirectExe, CanonicalExecutable = path, Command = path,
                 OwnedExecutables = item.ExecutablePaths, OwnedRoots = item.DirectoryRoots,
                 IconPath = path, Source = "已保存的程序清单", RouteSelected = true,
@@ -99,11 +112,11 @@ public static class ApplicationCatalogProjection
             }
             result.Add(Merge(target, entries, entries[0].Target));
         }
-        result.AddRange(saved.Where(item => !consumed.Contains(item.DiscoveryKey) && IsSupportedSaved(item)));
+        result.AddRange(saved.Where(item => !consumed.Contains(item.DiscoveryKey)));
         return result;
     }
 
-    public static bool IsSupportedSaved(EgressApplicationSelection item) => SavedDefinition(item) is not null;
+    public static bool IsSupportedSaved(EgressApplicationSelection item) => !string.IsNullOrWhiteSpace(item.DiscoveryKey);
 
     public static EgressApplicationSelection Merge(LaunchTarget target, IEnumerable<EgressApplicationSelection> previous, EgressRouteTarget route)
     {
@@ -118,6 +131,23 @@ public static class ApplicationCatalogProjection
     }
 
     private static bool SameFile(string? first, string? second) => !string.IsNullOrWhiteSpace(first) && string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
+    private static bool SameInstallation(LaunchTarget first, LaunchTarget second)
+        => SameFile(first.CanonicalExecutable, second.CanonicalExecutable)
+            || first.Kind != LaunchKind.CliNative && second.Kind != LaunchKind.CliNative
+                && (first.CanonicalExecutable is null || second.CanonicalExecutable is null)
+                && first.OwnedRoots.Count == 1 && second.OwnedRoots.Count == 1
+                && string.Equals(first.OwnedRoots[0], second.OwnedRoots[0], StringComparison.OrdinalIgnoreCase);
+    private static bool CanFold(LaunchTarget owner, LaunchTarget item)
+    {
+        if (owner.Kind == LaunchKind.CliNative || item.Kind == LaunchKind.CliNative || item.IsManual) return false;
+        if (!string.IsNullOrWhiteSpace(owner.PackageFamily) && string.Equals(owner.PackageFamily, item.PackageFamily, StringComparison.OrdinalIgnoreCase)) return true;
+        // Registered products and games remain independent even inside a launcher's tree.
+        // Only secondary executable entries can belong to another visible primary product.
+        if (item.Source is not (null or "App Paths")) return false;
+        if (item.Source == "App Paths" && owner.Source is not (null or "App Paths") && !ApplicationInventoryBoundaries.IsPlatformClient(owner)
+            && item.CanonicalExecutable is { } executable && owner.OwnedRoots.Any(root => ApplicationInventoryBoundaries.IsInside(executable, root))) return true;
+        return Contains(owner, item.CanonicalExecutable);
+    }
     private static bool Contains(LaunchTarget target, string? path) => path is not null && target.OwnedExecutables.Contains(path, StringComparer.OrdinalIgnoreCase);
     private static LaunchTarget Copy(LaunchTarget item, string name, string catalogId, string[] aliases, string? icon) => new()
     {
@@ -125,6 +155,7 @@ public static class ApplicationCatalogProjection
         Kind = item.Kind, Command = item.Command, Arguments = item.Arguments, WorkingDirectory = item.WorkingDirectory,
         Environment = item.Environment, PackageFamily = item.PackageFamily, Aumid = item.Aumid, CanonicalExecutable = item.CanonicalExecutable,
         OwnedRoots = item.OwnedRoots, OwnedExecutables = item.OwnedExecutables, RouteSelected = item.RouteSelected,
+        InventoryReady = item.InventoryReady, IsManual = item.IsManual,
         ResolutionUnsupported = item.ResolutionUnsupported, IconPath = icon, Source = item.Source, Publisher = item.Publisher, Version = item.Version,
     };
 }

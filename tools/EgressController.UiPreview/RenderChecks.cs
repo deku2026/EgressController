@@ -61,6 +61,43 @@ internal static class RenderChecks
         window.Close();
     }
 
+    internal static void TrafficContrast(Window window)
+    {
+        var labels = window.GetVisualDescendants().OfType<TextBlock>()
+            .Where(text => text.Classes.Contains("home") || text.Classes.Contains("other")).ToArray();
+        if (labels.Length < 4) throw new InvalidOperationException("Traffic exit legends are missing.");
+        foreach (var label in labels)
+        {
+            var color = ((ISolidColorBrush)label.Foreground!).Color;
+            if (1.05 / (Luminance(color) + .05) < 4.5) throw new InvalidOperationException("Traffic label contrast is below 4.5:1.");
+        }
+    }
+
+    internal static void MonthlyList(string directory)
+    {
+        var backend = new EgressController.App.Preview.PreviewController();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        backend.TrafficUsage = new(today.AddDays(-29), today, DateTimeOffset.UtcNow, Enumerable.Range(0, 500)
+            .Select(i => new EgressController.State.Traffic.TrafficUsage($@"C:\Mock\app{i:000}.exe", today,
+                EgressController.State.Traffic.TrafficExit.Home, 10, (500 - i) * 1048576L)).ToArray());
+        var vm = new EgressController.App.ViewModels.MainViewModel(backend);
+        var window = new EgressController.App.MainWindow { DataContext = vm, Width = 1100, Height = 760 };
+        window.Show(); window.SelectPage("traffic"); Dispatcher.UIThread.RunJobs();
+        using (window.CaptureRenderedFrame()) { }
+        var list = window.GetVisualDescendants().OfType<EgressController.App.Views.ApplicationTrafficList>().Single();
+        var scroll = list.GetVisualDescendants().OfType<ScrollViewer>().First();
+        scroll.Offset = new Vector(0, 6000); Dispatcher.UIThread.RunJobs();
+        using (window.CaptureRenderedFrame()) { }
+        double offset = scroll.Offset.Y;
+        backend.TrafficUsage = backend.TrafficUsage with { Entries = backend.TrafficUsage.Entries.Select(row => row with { Download = row.Download + 10 }).ToArray() };
+        vm.Refresh(); Save(window, Path.Combine(directory, "traffic-large-list.png"));
+        if (offset < 1000 || Math.Abs(scroll.Offset.Y - offset) > 1)
+            throw new InvalidOperationException("Monthly refresh reset the user's scroll position.");
+        int realized = list.GetVisualDescendants().OfType<UsageBar>().Count();
+        if (realized == 0 || realized > 40) throw new InvalidOperationException("Monthly application rows are not virtualized: " + realized);
+        window.Close();
+    }
+
     internal static void GuardIcons(string directory)
     {
         var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14 };

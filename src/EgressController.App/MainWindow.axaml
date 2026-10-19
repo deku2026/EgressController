@@ -1,12 +1,12 @@
 <Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.App.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.MainWindow" x:DataType="vm:MainViewModel" Title="EgressController" Width="1440" Height="900" MinWidth="1100" MinHeight="760" RequestedThemeVariant="Light">
   <Window.DataTemplates>
     <DataTemplate DataType="vm:RouteOptionViewModel" x:DataType="vm:RouteOptionViewModel">
-      <TextBlock Text="{Binding Label}"/>
+      <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}"/>
     </DataTemplate>
   </Window.DataTemplates>
-  <Grid ColumnDefinitions="220,*">
+  <Grid ColumnDefinitions="204,*">
     <Border Background="{StaticResource SidebarBrush}" BorderBrush="#DEE3EC" BorderThickness="0,0,1,0">
-      <DockPanel Margin="16,24,16,16">
+      <DockPanel Margin="14,24,14,16">
         <StackPanel DockPanel.Dock="Top" Margin="8,0,0,30" Spacing="5">
           <StackPanel Orientation="Horizontal" Spacing="10">
             <Border Width="32" Height="32" Background="#5062CE" CornerRadius="9">
@@ -14,7 +14,7 @@
             </Border>
             <TextBlock Text="Egress" FontSize="23" FontWeight="SemiBold" VerticalAlignment="Center"/>
           </StackPanel>
-          <TextBlock Text="你的网络，由你选择" Classes="muted" Margin="42,0,0,0"/>
+          <TextBlock Text="应用与网络保护" Classes="muted" Margin="42,0,0,0"/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Spacing="12">
           <Border Background="#DEE4ED" Height="1" Margin="8,0"/>
@@ -44,8 +44,8 @@
         </ListBox>
       </DockPanel>
     </Border>
-    <Grid Grid.Column="1" Margin="28,24,28,22" RowDefinitions="Auto,Auto,*">
-      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,22">
+    <Grid Grid.Column="1" Margin="24,24,24,22" MaxWidth="1360" HorizontalAlignment="Stretch" RowDefinitions="Auto,Auto,*">
+      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,20">
         <StackPanel Spacing="6">
           <TextBlock Text="{Binding PageTitle}" Classes="page-title"/>
           <TextBlock Text="{Binding PageDescription}" Foreground="#667184"/>

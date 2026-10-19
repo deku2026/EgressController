@@ -1,6 +1,8 @@
 <Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.App.App" RequestedThemeVariant="Light">
   <Application.Styles>
-    <FluentTheme/>
+    <FluentTheme>
+      <FluentTheme.Palettes><ColorPaletteResources x:Key="Light" Accent="{x:Static ui:DesktopTheme.Accent}"/></FluentTheme.Palettes>
+    </FluentTheme>
     <ui:DesktopTheme/>
   </Application.Styles>
 </Application>

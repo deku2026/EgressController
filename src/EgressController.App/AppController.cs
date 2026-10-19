@@ -17,7 +17,7 @@ using EgressController.SingBox.Configuration;
 using EgressController.SingBox.Core;
 using EgressController.SingBox.Runtime;
 using EgressController.State.Profile;
-using EgressController.State.Quota;
+using EgressController.State.Traffic;
 using EgressController.State.SingBox;
 using EgressController.Transport.Upstream;
 using EgressController.Windows.Network;
@@ -48,7 +48,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     private readonly string _dataRoot;
     private readonly string _rulesetRoot;
     private readonly EgressProfileStore _profileStore;
-    private readonly EgressQuotaStore _quotaStore;
     private readonly SingBoxStateStore _stateStore;
     private readonly INetworkAdapterService _adapterService;
     private readonly NetworkEnvironmentResolver _environmentResolver = new();
@@ -115,7 +114,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         Directory.CreateDirectory(Path.Combine(_dataRoot, "runtime"));
         Directory.CreateDirectory(_rulesetRoot);
         _profileStore = new EgressProfileStore(_dataRoot);
-        _quotaStore = new EgressQuotaStore(_dataRoot);
+        _usageStore = new TrafficUsageStore(_dataRoot, sessionStartedAt: _openedAtUtc);
+        _applicationCatalog = new EgressController.State.Applications.ApplicationCatalogStore(_dataRoot);
         _stateStore = new SingBoxStateStore(_dataRoot);
         _adapterService = new WindowsNetworkAdapterService();
         _profile = ApplicationPathAliases.Expand(LoadProfile(), new ExecutablePathCanonicalizer());
@@ -131,6 +131,9 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             SingBoxFailure.Code(error, "core." + stage), error.Message, error);
         InitializeProtection();
         InitializeGuardian();
+        LoadApplicationCatalog(); // Optional UI cache cannot delay starting protection of saved paths.
+        var usageToken = _lifetimeCts.Token;
+        _ = Task.Run(() => TrafficUsageLoopAsync(usageToken));
     }
 
     public string DataRoot => _dataRoot;
@@ -139,7 +142,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     public string LogPath => Diagnostics.LogPath;
     public EgressProfileDocument Profile => _profile;
     public bool IsUpdatingProfile => _configurationGate.CurrentCount == 0;
-    public EgressQuotaSnapshot Quota => _quotaStore.Load();
     public SingBoxService SingBox => _singBox;
     public ConnectionHistoryStore ConnectionHistory => _connectionHistory;
     public BoundedLogStore Logs => _logs;
@@ -224,59 +226,44 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices;
+    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices.Concat(_catalogNotice.Length == 0 ? [] : new[] { _catalogNotice }).ToArray();
 
     public IReadOnlyList<LaunchTarget> ScanTargets()
     {
-        IReadOnlyList<LaunchTarget> scanned = _targetScanner.Scan();
-        var discovered = scanned.ToList();
-
-        _configurationGate.Wait(_lifetimeCts.Token);
+        _inventoryGate.Wait(_lifetimeCts.Token);
         try
         {
-            string previousSelection = ApplicationRoutingKey(_profile);
-            discovered = ApplicationCatalogProjection.RestoreSavedTargets(discovered, _profile.Applications).ToList();
-            _profile = _profile with { Applications = ApplicationCatalogProjection.Reconcile(_profile.Applications, discovered) };
-            foreach (EgressApplicationSelection selected in _profile.Applications
-                .Where(selected => discovered.All(target => !target.SelectionKeys.Contains(selected.DiscoveryKey))))
+            var scanned = _targetScanner.Scan();
+            var cached = _targets.All();
+            var consumed = new HashSet<string>(StringComparer.Ordinal);
+            var discovered = scanned.Select(target =>
             {
-                discovered.Add(new LaunchTarget
-                {
-                    Id = selected.DiscoveryKey, SavedDiscoveryKey = selected.DiscoveryKey,
-                    Name = selected.DisplayName ?? selected.DiscoveryKey,
-                    CanonicalExecutable = selected.ExecutablePaths.FirstOrDefault(),
-                    Kind = selected.DiscoveryKey.StartsWith("cli:", StringComparison.OrdinalIgnoreCase) ? LaunchKind.CliNative : LaunchKind.DirectExe,
-                    Source = "缓存记录（当前未发现）",
-                    OwnedExecutables = selected.ExecutablePaths,
-                    OwnedRoots = selected.DirectoryRoots,
-                    ResolutionUnsupported = true,
-                });
-            }
-            _targets.Clear();
-            foreach (LaunchTarget target in discovered)
+                var previous = cached.FirstOrDefault(item => item.SelectionKeys.Intersect(target.SelectionKeys, StringComparer.Ordinal).Any());
+                if (previous is null) return target;
+                consumed.Add(previous.DiscoveryKey);
+                return ApplicationCatalogProjection.RestoreCachedInventory(target, previous);
+            }).Concat(cached.Where(item => !consumed.Contains(item.DiscoveryKey))).ToArray();
+            var projected = ApplicationCatalogProjection.Project(discovered);
+            var restored = ApplicationCatalogProjection.RestoreSavedTargets(projected, _profile.Applications);
+            foreach (LaunchTarget target in restored)
             {
                 target.RouteSelected = _profile.Applications.Any(selection => target.SelectionKeys.Contains(selection.DiscoveryKey));
-                _targets.Add(target);
             }
-            ApplicationInventorySnapshot inventory = ApplicationInventorySnapshot.Create(discovered);
-            _profile = _profile with
+            _targets.ReplaceAll(restored);
+            try
             {
-                Applications = _profile.Applications.Select(selection => inventory.TryGet(selection.DiscoveryKey, out var entry) && entry is not null
-                    ? selection with { DisplayName = entry.DisplayName, ExecutablePaths = entry.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                        DirectoryRoots = discovered.Where(target => target.DiscoveryKey == selection.DiscoveryKey).SelectMany(target => target.OwnedRoots)
-                            .Concat(selection.DirectoryRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() }
-                    : selection).ToArray(),
-            };
-            _profile = ApplicationPathAliases.Expand(_profile, new ExecutablePathCanonicalizer());
-            _profileStore.Save(_profile);
-            RefreshProtectedInventory();
-            if (previousSelection != ApplicationRoutingKey(_profile)) _routingDirty = true;
-            Visuals.Update(discovered, _profile);
+                _applicationCatalog.Save(restored);
+                ReloadCategories();
+                _catalogNotice = "";
+            }
+            catch (Exception error) { _catalogNotice = "应用缓存保存失败：" + error.Message; }
+            // Metadata refresh has no authority to change the user's exact routing/protection set.
+            Visuals.Update(restored, _profile);
             _inventoryReady = true;
+            SetMessage($"已发现 {restored.Count} 个应用与 CLI。");
+            return restored;
         }
-        finally { _configurationGate.Release(); }
-        SetMessage($"已扫描 {discovered.Count} 个浏览器、AI 应用与 CLI。" + (_targetScanner.Notices.Count == 0 ? "" : "\n" + string.Join("\n", _targetScanner.Notices)));
-        return discovered;
+        finally { _inventoryGate.Release(); }
     }
 
     public async Task<ControllerOperationResult> SetApplicationsRouteAsync(
@@ -287,7 +274,15 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(targets);
-        string[] keys = targets
+        var requested = targets.ToArray();
+        try
+        {
+            if (enabled)
+                for (int index = 0; index < requested.Length; index++)
+                    if (!requested[index].InventoryReady) requested[index] = await BuildInventoryAsync(requested[index], cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) { return Failure("无法建立完整 EXE 清单：" + error.Message); }
+        string[] keys = requested
             .Where(target => !enabled || target.CanRoute)
             .Select(target => target.DiscoveryKey)
             .Distinct(StringComparer.Ordinal)
@@ -300,7 +295,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 {
                     if (enabled)
                     {
-                        var target = _targets.All().First(item => item.DiscoveryKey == key);
+                        var target = requested.First(item => item.DiscoveryKey == key);
                         var saved = selected.Values.Where(item => target.SelectionKeys.Contains(item.DiscoveryKey)).ToArray();
                         foreach (string alias in target.SelectionKeys) selected.Remove(alias);
                         selected[key] = ApplicationCatalogProjection.Merge(target, saved,
@@ -308,7 +303,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                     }
                     else
                     {
-                        var target = _targets.All().FirstOrDefault(item => item.DiscoveryKey == key);
+                        var target = requested.FirstOrDefault(item => item.DiscoveryKey == key);
                         foreach (string alias in target?.SelectionKeys ?? [key]) selected.Remove(alias);
                     }
                 }
@@ -448,29 +443,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 routes.Remove(name);
         }
         return routes.Values.ToArray();
-    }
-
-    public void ConfigureQuota(decimal totalGigabytes, decimal remainingGigabytes)
-    {
-        const decimal bytesPerGigabyte = 1024m * 1024m * 1024m;
-        if (totalGigabytes < 0 || remainingGigabytes < 0 || remainingGigabytes > totalGigabytes)
-            throw new ArgumentOutOfRangeException(nameof(remainingGigabytes), "当前剩余量必须在 0 和套餐总量之间。");
-        if (totalGigabytes * bytesPerGigabyte > long.MaxValue
-            || remainingGigabytes * bytesPerGigabyte > long.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(nameof(totalGigabytes), "套餐流量过大。");
-        }
-
-        long totalBytes = checked((long)Math.Round(totalGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
-        long remainingBytes = checked((long)Math.Round(remainingGigabytes * bytesPerGigabyte, MidpointRounding.AwayFromZero));
-        _quotaStore.Configure(totalBytes, remainingBytes);
-        SetMessage("默认网卡流量套餐已保存，本地统计已重置。");
-    }
-
-    public void ClearQuotaUsage()
-    {
-        _quotaStore.ClearUsage();
-        SetMessage("已清空本地 默认网卡流量统计。");
     }
 
     public async Task<SingBoxCatalogUpdateResult> RefreshCatalogAsync(CancellationToken cancellationToken = default)
@@ -740,7 +712,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             .Select(item => item.DiscoveryKey + ":" + item.Target + ":"
                 + string.Join("|", item.ExecutablePaths.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))));
 
-    private static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
+    internal static IReadOnlyList<SingBoxApplicationRouteInput> ResolveApplicationRoutes(
         EgressProfileDocument profile, ApplicationInventorySnapshot inventory)
     {
         var routes = new List<SingBoxApplicationRouteInput>();
@@ -751,7 +723,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             if (!target.CanRoute)
                 throw new ControllerPreparationException("application.unresolved", $"应用没有可用于分流匹配的 EXE：{target.DisplayName}。");
             routes.Add(new SingBoxApplicationRouteInput(
-                target.ExecutablePaths.Concat(selection.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                (selection.ExecutablePaths.Count > 0 ? selection.ExecutablePaths : target.ExecutablePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 selection.Target));
         }
         return routes;
@@ -1146,7 +1118,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         long observedStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         var observations = new List<ConnectionObservation>(snapshot.Connections.Count);
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
-        long adapterDelta = 0;
+        var usage = new List<TrafficCounter>(snapshot.Connections.Count);
         lock (_diagnosticsStateGate)
         {
             if (generation != Volatile.Read(ref _diagnosticsGeneration))
@@ -1169,13 +1141,13 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                     && previous.Upload >= 0 && previous.Download >= 0
                     && previous.StartedAtUtc == startedAtUtc && connection.Upload >= previous.Upload && connection.Download >= previous.Download });
                 string? outbound = connection.Chains.FirstOrDefault();
-                if (Guid.TryParse(_profile.DefaultAdapterId, out Guid quotaAdapter)
-                    && string.Equals(outbound, EgressProfileCompiler.AdapterTag(quotaAdapter), StringComparison.OrdinalIgnoreCase))
-                {
-                    adapterDelta = SafeAdd(adapterDelta, previous is null
-                        ? SafeAdd(Math.Max(0, connection.Upload), Math.Max(0, connection.Download))
-                        : SafeAdd(SafeDelta(connection.Upload, previous.Upload), SafeDelta(connection.Download, previous.Download)));
-                }
+                string? processPath = connection.Metadata.ProcessPath;
+                if (!string.IsNullOrWhiteSpace(processPath)
+                    && !ProxyBindings.OwnerPaths.Contains(processPath, StringComparer.OrdinalIgnoreCase)
+                    && !string.Equals(processPath, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(processPath, _coreExecutable, StringComparison.OrdinalIgnoreCase))
+                    usage.Add(new(connection.Id, connection.Start, processPath,
+                        TrafficExitClassifier.Classify(outbound, _profile.DefaultAdapterId), connection.Upload, connection.Download));
                 _connectionRateSamples[connection.Id] = new ConnectionRateSample(
                     observedAtUtc, observedStamp,
                     connection.Upload,
@@ -1193,8 +1165,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
             _connectionsUpdatedAtUtc = observedAtUtc;
             _connectionRatesValid = true;
         }
-        if (adapterDelta > 0)
-            _quotaStore.AddUsage(adapterDelta);
+        RecordTrafficUsage(usage, observedAtUtc);
     }
 
     private static long CalculateRate(long current, long? previous, double elapsedSeconds)
@@ -1204,12 +1175,6 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         double rate = ((double)current - previous.Value) / elapsedSeconds;
         return rate >= long.MaxValue ? long.MaxValue : (long)Math.Round(rate);
     }
-
-    private static long SafeDelta(long current, long previous)
-        => previous >= 0 && current > previous ? current - previous : 0;
-
-    private static long SafeAdd(long left, long right)
-        => left > long.MaxValue - right ? long.MaxValue : left + right;
 
     private static ConnectionObservation ToObservation(
         SingBoxConnection connection,
