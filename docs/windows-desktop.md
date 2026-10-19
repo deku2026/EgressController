@@ -4,6 +4,10 @@
 
 Claude 桌面应用显示为一行，其 resources 下的 SSH 辅助 EXE 仍属于目录扫描后保存的固定清单。CLI 使用相同产品图标并显示 `Claude CLI` / `Codex CLI`，仅保护命令对应的独立 EXE。进程父子关系不参与判定。
 
+MSIX 应用同时关联系统登记的安装/有效目录和当前用户的 `%LOCALAPPDATA%\Packages\<PackageFamilyName>`。家族标识来自 Windows 包身份（注册表兜底通过 `PackageFamilyNameFromFullName` 解析），不使用显示名称或版本前缀猜测；LocalAppData 通过未重定向的 Windows 已知文件夹接口读取。安装位置可在其他盘，版本目录变化也不会改变数据目录的关联。Claude 在该包数据目录中下载的 `claude-code\版本\哈希\claude.exe` 因而与桌面应用同属一个递归清单，无需写死 Claude 或运行时版本。
+
+升级前的旧缓存保留原 EXE，但新增关联目录会使其显示“目录变更 · 待刷新”。在应用列表点击该提示，再点“刷新 EXE 清单”，才重新枚举两处目录并应用到既有出口/守护名单；界面可查看全部递归目录和已保存路径。元数据扫描不会自行扩大保护范围或重启 TUN。不存在的数据目录不创建；无法访问、链接越界等扫描失败保留原清单并显示原因。目录中新出现的 EXE 仍须显式刷新，不使用目录通配规则。独立 `.local\bin\claude.exe` 不属于该包，继续单独选择。
+
 扫描器通过系统 Windows PowerShell 的 `Get-Command` 读取命令 Source，不执行用户配置文件或 AI 命令。已知 npm 包若包含专属原生 EXE，可以解析该路径；只有共享 Node/Python 脚本或无法解析的商店命令别名时，显示扫描提示，不把解释器整体作为 AI 应用保护。
 
 旧的辅助项显示在所属应用中；不同出口保留并提示统一，只有用户明确操作才修改已保存的分流。元数据刷新和分类修改不会重启 TUN。重新选择出口保留以前保存的 EXE 路径；目录新增文件需要明确刷新清单。
@@ -21,6 +25,8 @@ Claude 桌面应用显示为一行，其 resources 下的 SSH 辅助 EXE 仍属�
 ## 隔离预览
 
 ![应用与手动分类](images/applications.png)
+
+![包安装目录与数据目录的递归清单](images/package-inventory.png)
 
 ![游戏单独使用第二张网卡直连](images/game-routing.png)
 

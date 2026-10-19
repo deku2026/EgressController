@@ -52,11 +52,16 @@
                   </StackPanel>
                   <StackPanel Grid.Column="3" Spacing="5" VerticalAlignment="Center">
                     <ComboBox Classes="route" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" AutomationProperties.Name="分流出口"/>
-                    <Button Content="{Binding InventorySummary}" Classes="quiet inventory" HorizontalAlignment="Right" AutomationProperties.Name="查看递归 EXE 清单">
+                    <Button Content="{Binding InventorySummary}" Classes="quiet inventory" Classes.inventory-pending="{Binding HasPendingInventory}" HorizontalAlignment="Right" AutomationProperties.Name="查看递归 EXE 清单">
                       <Button.Flyout><Flyout Placement="BottomEdgeAlignedRight"><StackPanel Width="400" Spacing="12">
                         <TextBlock Text="{Binding Name}" Classes="section-title"/>
                         <TextBlock Text="{Binding InventoryDescription}" Classes="muted" TextWrapping="Wrap"/>
-                        <ScrollViewer MaxHeight="280" HorizontalScrollBarVisibility="Disabled"><SelectableTextBlock Text="{Binding InventoryDetails}" FontSize="12" TextWrapping="Wrap"/></ScrollViewer>
+                        <ScrollViewer MaxHeight="280" HorizontalScrollBarVisibility="Disabled"><StackPanel Spacing="8">
+                          <TextBlock Text="递归目录" FontWeight="Medium" IsVisible="{Binding HasInventoryRoots}"/>
+                          <SelectableTextBlock Text="{Binding InventoryRoots}" Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasInventoryRoots}"/>
+                          <TextBlock Text="EXE 清单" FontWeight="Medium" Margin="0,4,0,0"/>
+                          <SelectableTextBlock Text="{Binding InventoryDetails}" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel></ScrollViewer>
                         <Button Content="刷新 EXE 清单" Command="{Binding RefreshInventoryCommand}" HorizontalAlignment="Left"/>
                         <Button Content="指定安装目录" Click="OnLocateDirectory" Classes="quiet" HorizontalAlignment="Left"/>
                       </StackPanel></Flyout></Button.Flyout>

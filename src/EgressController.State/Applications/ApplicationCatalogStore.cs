@@ -77,16 +77,19 @@ public sealed class ApplicationCatalogStore(string directory)
                     INSERT INTO apps VALUES($id,$name,$kind,$command,$exe,$family,$aumid,$icon,$source,$publisher,$version,$catalog,$manual,$ready)
                     ON CONFLICT(id) DO UPDATE SET name=$name,kind=$kind,command=$command,executable=$exe,
                       family=$family,aumid=$aumid,icon=$icon,source=$source,publisher=$publisher,version=$version,
-                      catalog=$catalog,manual=MAX(manual,$manual),ready=CASE WHEN $manual=1 AND $ready=0 THEN 0 ELSE MAX(ready,$ready) END;
+                      catalog=$catalog,manual=MAX(manual,$manual),ready=CASE WHEN $invalidate=1 THEN 0 ELSE MAX(ready,$ready) END;
                     """;
                 void Add(string name, object? value) => command.Parameters.AddWithValue(name, value ?? DBNull.Value);
                 Add("$id", target.DiscoveryKey); Add("$name", target.Name); Add("$kind", (int)target.Kind); Add("$command", target.Command);
                 Add("$exe", target.CanonicalExecutable); Add("$family", target.PackageFamily); Add("$aumid", target.Aumid); Add("$icon", target.IconPath);
                 Add("$source", target.Source); Add("$publisher", target.Publisher); Add("$version", target.Version); Add("$catalog", target.CatalogId);
-                Add("$manual", target.IsManual); Add("$ready", target.InventoryReady); command.ExecuteNonQuery();
+                Add("$manual", target.IsManual); Add("$ready", target.InventoryReady);
+                Add("$invalidate", !target.InventoryReady && (target.IsManual || target.OwnedExecutables.Count > 0)); command.ExecuteNonQuery();
                 command.CommandText = "INSERT OR IGNORE INTO app_paths(app,kind,path) VALUES($id,$kind,$path)";
                 command.Parameters.Clear(); Add("$id", target.DiscoveryKey); Add("$kind", 0); Add("$path", "");
-                foreach (var (kind, values) in new[] { (0, target.OwnedRoots), (1, target.InventoryReady ? target.OwnedExecutables : Array.Empty<string>()), (2, target.RelatedDiscoveryKeys) })
+                // A pending root expansion still carries the last valid snapshot. Persist it
+                // alongside ready=false so restarting cannot erase the pending-update notice.
+                foreach (var (kind, values) in new[] { (0, target.OwnedRoots), (1, target.OwnedExecutables), (2, target.RelatedDiscoveryKeys) })
                     foreach (string path in values)
                     { command.Parameters["$kind"].Value = kind; command.Parameters["$path"].Value = path; command.ExecuteNonQuery(); }
             }

@@ -90,6 +90,36 @@ internal static class ApplicationChecks
         if (offset < 1000 || Math.Abs(scroll.Offset.Y - offset) > 1) throw new InvalidOperationException("Changing category reset app-list scrolling.");
         if (list.GetVisualDescendants().OfType<AppAvatar>().Count() > 30) throw new InvalidOperationException("App list lost virtualization.");
         largeWindow.Close();
+        PackageInventory(directory);
+    }
+
+    private static void PackageInventory(string directory)
+    {
+        var backend = new PreviewController("package-data", PreviewIcons.Load);
+        var vm = new MainViewModel(backend);
+        var window = new MainWindow { Width = 1100, Height = 760, DataContext = vm };
+        window.Show(); window.SelectPage("apps"); vm.Apps.Query = "Claude";
+        var app = vm.Apps.Entries.Single(item => item.Target.Kind == LaunchKind.PackagedAumid);
+        var cli = vm.Apps.Entries.Single(item => item.Target.Kind == LaunchKind.CliNative);
+        var originalRoute = backend.Profile.Applications.Single(item => item.DiscoveryKey == app.DiscoveryKey).Target;
+        if (!app.HasPendingInventory || backend.InventoryBuildCount != 0)
+            throw new InvalidOperationException("Metadata display must preserve the previous inventory and expose pending roots.");
+        RenderChecks.Save(window, Path.Combine(directory, "package-inventory-pending.png"));
+        var button = window.GetVisualDescendants().OfType<Button>().Single(item => item.Classes.Contains("inventory-pending"));
+        var flyout = (Flyout)button.Flyout!; flyout.ShowAt(button); Dispatcher.UIThread.RunJobs();
+        var top = TopLevel.GetTopLevel((Control)flyout.Content!) ?? throw new InvalidOperationException("Package inventory did not open.");
+        RenderChecks.Save(window, Path.Combine(directory, "package-inventory-window.png"));
+        using (var frame = top.CaptureRenderedFrame() ?? throw new InvalidOperationException("Package inventory not rendered"))
+            frame.Save(Path.Combine(directory, "package-inventory-roots.png"), new PngBitmapEncoderOptions());
+        app.RefreshInventoryCommand.ExecuteAsync(null).GetAwaiter().GetResult(); Dispatcher.UIThread.RunJobs();
+        var selected = backend.Profile.Applications.Single(item => item.DiscoveryKey == app.DiscoveryKey);
+        if (app.HasPendingInventory || backend.InventoryBuildCount != 1 || selected.Target != originalRoute
+            || selected.ExecutablePaths.Count(path => path.Contains(@"\Packages\", StringComparison.OrdinalIgnoreCase)) != 2
+            || selected.ExecutablePaths.Contains(cli.Target.CanonicalExecutable!))
+            throw new InvalidOperationException("Explicit package refresh did not preserve the route/CLI boundary and include both nested runtimes.");
+        using (var frame = top.CaptureRenderedFrame() ?? throw new InvalidOperationException("Updated inventory not rendered"))
+            frame.Save(Path.Combine(directory, "package-inventory-refreshed.png"), new PngBitmapEncoderOptions());
+        flyout.Hide(); RenderChecks.Save(window, Path.Combine(directory, "package-inventory-complete.png")); window.Close();
     }
 
     private static WriteableBitmap WhiteFixture()

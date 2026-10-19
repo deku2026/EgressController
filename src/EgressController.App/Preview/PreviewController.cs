@@ -32,7 +32,10 @@ public sealed class PreviewController : IAppController
     {
         InventoryBuildCount++;
         string root = target.OwnedRoots.FirstOrDefault() ?? @"C:\Preview\Application";
-        var updated = target.WithInventory(target.OwnedExecutables.Concat(new[] { target.CanonicalExecutable ?? Path.Combine(root, "app.exe"), Path.Combine(root, "tools", "helper.exe") }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        IEnumerable<string> discovered = [target.CanonicalExecutable ?? Path.Combine(root, "app.exe"), Path.Combine(root, "tools", "helper.exe")];
+        if (_scenario == "package-data" && target.Kind == LaunchKind.PackagedAumid)
+            discovered = discovered.Concat(new[] { "2.1.295", "2.1.299" }.Select(version => Path.Combine(target.OwnedRoots[1], "LocalCache", "Roaming", "Claude", "claude-code", version, "mock-hash", "claude.exe")));
+        var updated = target.WithInventory(target.OwnedExecutables.Concat(discovered).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
         int index = _targets.FindIndex(item => item.DiscoveryKey == target.DiscoveryKey);
         if (index >= 0) _targets[index] = updated;
         Visuals.Update(_targets, Profile); return updated;
@@ -86,6 +89,16 @@ public sealed class PreviewController : IAppController
             string path = @"C:\Users\Demo\.local\bin\" + brand + ".exe";
             _targets.Add(new() { Id = "cli:" + brand, SavedDiscoveryKey = "cli:" + path, Name = (brand == "claude" ? "Claude" : "Codex") + " CLI",
                 CatalogId = brand, Kind = LaunchKind.CliNative, Command = path, CanonicalExecutable = path, OwnedExecutables = [path], OwnedRoots = [], IconPath = brand, Source = "Windows CLI" });
+        }
+        if (scenario == "package-data")
+        {
+            const string family = "Claude_pzs8sxrjxfjjc";
+            const string install = @"C:\Program Files\WindowsApps\Claude_2.42304.0.0_x64__pzs8sxrjxfjjc";
+            string main = Path.Combine(install, "app", "Claude.exe");
+            _targets[1] = new LaunchTarget { Id = "preview:Claude", Name = "Claude", CatalogId = "claude", Kind = LaunchKind.PackagedAumid,
+                Aumid = family + "!Claude", PackageFamily = family, CanonicalExecutable = main, Command = main,
+                OwnedRoots = EgressController.Launcher.Discovery.PackageExecutableRoots.Resolve(install, null, @"C:\Users\Demo\AppData\Local", family),
+                OwnedExecutables = [main], InventoryReady = false, Source = "UI 预览数据" };
         }
         Profile = Profile with { Applications = _targets.Take(3).Select(target => new EgressApplicationSelection
         { DiscoveryKey = target.DiscoveryKey, DisplayName = target.Name, ExecutablePaths = target.OwnedExecutables,

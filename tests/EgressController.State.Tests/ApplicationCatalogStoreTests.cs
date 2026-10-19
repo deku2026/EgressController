@@ -48,6 +48,28 @@ public sealed class ApplicationCatalogStoreTests : IDisposable
         Assert.Throws<SqliteException>(() => store.Save([Target()]));
         var cached = Assert.Single(Store().Read()); Assert.False(cached.InventoryReady); Assert.Empty(cached.OwnedExecutables);
     }
+    [Fact]
+    public void Newly_associated_root_stays_pending_after_restart_until_an_explicit_complete_inventory_is_saved()
+    {
+        var original = Target(); var store = Store();
+        store.Save([original]); store.SetCategory(original, "ai");
+        var pending = original.WithInventory(original.OwnedExecutables, false, [.. original.OwnedRoots, @"C:\Demo\Local\Packages\Example_pzs8sxrjxfjjc"]);
+        store.Save([pending]);
+        var reloaded = Assert.Single(Store().Read());
+        Assert.False(reloaded.InventoryReady); Assert.Equal(2, reloaded.OwnedRoots.Count);
+        Assert.Equal(original.OwnedExecutables, reloaded.OwnedExecutables); Assert.Equal("ai", Store().Categories()[original.DiscoveryKey]);
+        store.Save([reloaded.WithInventory([.. reloaded.OwnedExecutables, @"C:\Demo\Local\Packages\Example_pzs8sxrjxfjjc\runtime.exe"])]);
+        Assert.True(Assert.Single(Store().Read()).InventoryReady);
+        Assert.Equal(3, Assert.Single(Store().Read()).OwnedExecutables.Count);
+    }
+    [Fact]
+    public void Pending_snapshot_is_preserved_even_when_the_catalog_database_is_new()
+    {
+        var pending = Target().WithInventory(Target().OwnedExecutables, false);
+        Store().Save([pending]);
+        var restored = Assert.Single(Store().Read());
+        Assert.False(restored.InventoryReady); Assert.Equal(pending.OwnedExecutables, restored.OwnedExecutables);
+    }
     public void Dispose()
     {
         string full = Path.GetFullPath(_directory), parent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "EgressController.CatalogTests"));

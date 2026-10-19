@@ -363,5 +363,6 @@
   <Style Selector="ComboBox /template/ Border#PopupBorder"><Setter Property="Background" Value="{StaticResource SurfaceBrush}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="5"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/></Style>
   <Style Selector="ComboBox.category /template/ Border#PopupBorder"><Setter Property="MinWidth" Value="152"/></Style>
   <Style Selector="ListBox.category-nav ListBoxItem"><Setter Property="Padding" Value="10,9"/><Setter Property="Margin" Value="0,1"/><Setter Property="MinHeight" Value="36"/></Style>
+  <Style Selector="Button.inventory-pending"><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/><Setter Property="Background" Value="#FFF0D8"/></Style>
   <Style Selector="Button.inventory"><Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="5,2"/><Setter Property="FontSize" Value="12"/></Style>
 </Styles>

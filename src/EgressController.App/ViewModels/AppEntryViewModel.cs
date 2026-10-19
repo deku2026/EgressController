@@ -66,8 +66,13 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public bool HasConflictingRoutes => _controller.Profile.Applications.Where(item => Target.SelectionKeys.Contains(item.DiscoveryKey)).Select(item => item.Target).Distinct().Count() > 1;
     public string KindLabel => Target.Kind == LaunchKind.CliNative ? "命令行" : Target.Kind == LaunchKind.PackagedAumid ? "应用" : "桌面";
     public string InventoryDetails => string.Join("\n", InventoryPaths);
-    public string InventoryDescription => Target.InventoryReady ? "已保存的完整 EXE 路径。刷新时保留历史路径。" : "尚未建立递归清单。勾选应用或点击刷新时，只扫描该应用目录。";
-    public string InventorySummary => Target.InventoryReady ? $"{InventoryPaths.Count} 个 EXE" : "按需建立清单";
+    public string InventoryRoots => string.Join("\n", Target.OwnedRoots);
+    public bool HasInventoryRoots => Target.OwnedRoots.Count > 0;
+    public bool HasPendingInventory => !Target.InventoryReady && (Target.OwnedExecutables.Count > 0 || Routing.IsSelected);
+    public string InventoryDescription => Target.InventoryReady ? "上次扫描保存的 EXE 清单。新增文件需要刷新，刷新时保留历史路径。"
+        : HasPendingInventory ? "关联目录已增加。刷新 EXE 清单后，新增路径才会应用到分流与守护。"
+        : "尚未建立递归清单。勾选应用或点击刷新时，只扫描下列应用目录。";
+    public string InventorySummary => Target.InventoryReady ? $"{InventoryPaths.Count} 个 EXE" : HasPendingInventory ? "目录变更 · 待刷新" : "按需建立清单";
     public string Command => Target.Command ?? Target.OwnedRoots.FirstOrDefault() ?? Target.Aumid ?? "尚未定位 · 请指定安装目录";
     public string Details => Target.Kind == LaunchKind.PackagedAumid
         ? $"Package · {Target.PackageFamily} · {Target.Aumid} · EXE: {Command}"
@@ -94,6 +99,7 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasConflictingRoutes));
         OnPropertyChanged(nameof(InventorySummary)); OnPropertyChanged(nameof(InventoryDetails));
         OnPropertyChanged(nameof(InventoryDescription));
+        OnPropertyChanged(nameof(InventoryRoots)); OnPropertyChanged(nameof(HasInventoryRoots)); OnPropertyChanged(nameof(HasPendingInventory));
         OnPropertyChanged(nameof(SelectedCategory)); OnPropertyChanged(nameof(CategoryId));
     }
 

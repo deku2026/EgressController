@@ -10,7 +10,8 @@ public static class ApplicationCatalogProjection
     {
         var target = cached.IsManual ? cached : discovered;
         var aliases = discovered.SelectionKeys.Concat(cached.SelectionKeys).Where(key => key != target.DiscoveryKey).Distinct(StringComparer.Ordinal).ToArray();
-        return target.WithInventory(cached.OwnedExecutables, cached.InventoryReady,
+        bool rootsCovered = target.OwnedRoots.All(root => PackageExecutableRoots.Covers(cached.OwnedRoots, root));
+        return target.WithInventory(cached.OwnedExecutables, cached.InventoryReady && rootsCovered,
             target.OwnedRoots.Concat(cached.OwnedRoots).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), aliases);
     }
 
@@ -139,7 +140,7 @@ public static class ApplicationCatalogProjection
     private static bool CanFold(LaunchTarget owner, LaunchTarget item)
     {
         if (owner.Kind == LaunchKind.CliNative || item.Kind == LaunchKind.CliNative || item.IsManual) return false;
-        if (!string.IsNullOrWhiteSpace(owner.PackageFamily) && owner.PackageFamily == item.PackageFamily) return true;
+        if (!string.IsNullOrWhiteSpace(owner.PackageFamily) && string.Equals(owner.PackageFamily, item.PackageFamily, StringComparison.OrdinalIgnoreCase)) return true;
         // Registered products and games remain independent even inside a launcher's tree.
         // Only secondary executable entries can belong to another visible primary product.
         if (item.Source is not (null or "App Paths")) return false;

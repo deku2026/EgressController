@@ -54,8 +54,11 @@ public sealed partial class AppController
         await _inventoryGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            // A catalog refresh may have completed while this action waited for the gate.
+            // Use the current roots (including newly associated package data) for this explicit scan.
+            target = _targets.Find(target.DiscoveryKey) ?? target;
             var paths = await Task.Run(() => target.Kind == LaunchKind.CliNative
-                ? target.OwnedExecutables : ExecutableInventory.CollectChecked(target.OwnedRoots.Where(Directory.Exists), target.CanonicalExecutable, token,
+                ? target.OwnedExecutables : ExecutableInventory.CollectChecked(ExecutableInventory.AvailableRoots(target.OwnedRoots), target.CanonicalExecutable, token,
                     ApplicationInventoryBoundaries.ExcludedRoots(target, _targets.All())), token).ConfigureAwait(false);
             var updated = target.WithInventory(paths.Concat(target.OwnedExecutables).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
             _applicationCatalog.Save([updated]);

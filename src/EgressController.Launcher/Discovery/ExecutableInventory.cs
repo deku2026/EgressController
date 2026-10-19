@@ -7,9 +7,28 @@ namespace EgressController.Launcher.Discovery;
 /// </summary>
 public static class ExecutableInventory
 {
+    public static IReadOnlyList<string> AvailableRoots(IEnumerable<string> roots)
+    {
+        var available = new List<string>();
+        foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (!File.GetAttributes(root).HasFlag(FileAttributes.Directory)) throw new IOException("应用目录不是文件夹：" + root);
+                available.Add(root);
+            }
+            catch (DirectoryNotFoundException) { } // Old versions and not-yet-created package data are optional.
+            catch (FileNotFoundException) { }
+            // Access/IO errors propagate. Directory.Exists would turn these into a false
+            // "missing" result and silently publish an incomplete package inventory.
+        }
+        return available;
+    }
+
     public static IReadOnlyList<string> CollectChecked(IEnumerable<string> roots, string? primary = null, CancellationToken token = default, IReadOnlyList<string>? excludedRoots = null)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visitedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var excluded = (excludedRoots ?? []).Select(Path.GetFullPath).Select(path => path.TrimEnd(Path.DirectorySeparatorChar)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         AddFile(result, primary);
         foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -22,6 +41,7 @@ public static class ExecutableInventory
             while (pending.TryPop(out string? directory))
             {
                 token.ThrowIfCancellationRequested();
+                if (!visitedDirectories.Add(directory)) continue;
                 // Enumerate names/attributes only. Never read game assets or follow a junction
                 // into another product/drive. Incomplete inventories must be reported, not saved.
                 var options = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = false, AttributesToSkip = 0, MatchCasing = MatchCasing.CaseInsensitive };

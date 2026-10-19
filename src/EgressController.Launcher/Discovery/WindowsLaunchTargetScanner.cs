@@ -20,12 +20,14 @@ public sealed class WindowsLaunchTargetScanner
         "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages";
     private const string AppPaths = "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths";
     private const string UninstallRoot = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+    private string _localAppData = "";
 
     public IReadOnlyList<string> Notices { get; private set; } = [];
 
     public IReadOnlyList<LaunchTarget> Scan()
     {
         RuntimeSafety.RequireLiveOperations();
+        _localAppData = WindowsPackageLocations.CurrentUserLocalAppData();
         var registry = new LaunchTargetRegistry();
         DiscoverStorePackages(registry);
         DiscoverInstalledRegistryApps(registry);
@@ -67,7 +69,7 @@ public sealed class WindowsLaunchTargetScanner
                     string effective = package.EffectiveLocation.Path;
                     DiscoverPackageManifest(
                         registry,
-                        package.Id.Name,
+                        package.Id.FullName,
                         package.Id.FamilyName,
                         root,
                         string.Equals(root, effective, StringComparison.OrdinalIgnoreCase) ? null : effective,
@@ -107,10 +109,7 @@ public sealed class WindowsLaunchTargetScanner
                             continue;
 
                         string? packageName = package?.GetValue("DisplayName") as string;
-                        string[] parts = packageKeyName.Split(new[] { "__" }, StringSplitOptions.None);
-                        string family = parts.Length > 1 && parts[^1].Length > 0
-                            ? (parts[0].Length > 0 ? parts[0] : packageKeyName) + "_" + parts[^1]
-                            : packageKeyName;
+                        string family = WindowsPackageLocations.FamilyFromFullName(packageKeyName);
                         DiscoverPackageManifest(registry, packageKeyName, family, root, null, packageName, null);
                     }
                     catch
@@ -149,7 +148,7 @@ public sealed class WindowsLaunchTargetScanner
             XDocument document = XDocument.Load(manifestPath, LoadOptions.None);
             XElement? identity = document.Descendants().FirstOrDefault(e => e.Name.LocalName == "Identity");
             string identityName = (string?)identity?.Attribute("Name") ?? packageName;
-            string family = string.IsNullOrWhiteSpace(packageFamily) ? identityName : packageFamily;
+            string family = string.IsNullOrWhiteSpace(packageFamily) ? WindowsPackageLocations.FamilyFromFullName(packageName) : packageFamily;
 
             foreach (XElement application in document.Descendants().Where(e => e.Name.LocalName == "Application"))
             {
@@ -168,13 +167,7 @@ public sealed class WindowsLaunchTargetScanner
                         identityName)
                     ?? identityName;
 
-                var roots = new[] { installedRoot, effectiveRoot }
-                    .Where(p => !string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
-                    .Select(p => NormalizeRoot(p!))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                if (roots.Length == 0)
-                    continue;
+                var roots = PackageExecutableRoots.Resolve(installedRoot, effectiveRoot, _localAppData, family);
 
                 registry.Add(new LaunchTarget
                 {
