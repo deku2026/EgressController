@@ -31,26 +31,31 @@
             </Button>
           </Grid>
           <Border Grid.Row="1" Background="#F8FAFC" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,1" Padding="14,9">
-            <Grid ColumnDefinitions="24,32,*,184" ColumnSpacing="10"><TextBlock Grid.Column="2" Text="应用" Classes="muted"/><TextBlock Grid.Column="3" Text="分流出口" Classes="muted"/></Grid>
+            <Grid ColumnDefinitions="24,32,*,80,184" ColumnSpacing="10"><TextBlock Grid.Column="2" Text="应用" Classes="muted"/><TextBlock Grid.Column="4" Text="分流出口" Classes="muted"/></Grid>
           </Border>
-          <ListBox Grid.Row="2" Name="ApplicationList" Classes="table" ItemsSource="{Binding Apps.Entries}" AutomationProperties.Name="应用列表">
+          <ListBox Grid.Row="2" Name="ApplicationList" Classes="table" ItemsSource="{Binding Apps.Entries}" AutomationProperties.Name="应用列表"
+                   AutoScrollToSelectedItem="False">
             <ListBox.ItemTemplate><DataTemplate x:DataType="vm:AppEntryViewModel">
-              <Border BorderBrush="#EDF0F5" BorderThickness="0,0,0,1" Padding="14,11">
-                <Grid ColumnDefinitions="24,32,*,184" ColumnSpacing="10">
+              <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="14,9" Height="100">
+                <Grid ColumnDefinitions="24,32,*,80,184" ColumnSpacing="10">
                   <CheckBox IsChecked="{Binding Routing.IsSelected}" IsEnabled="{Binding CanManage}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Name}"/>
                   <ui:AppAvatar Grid.Column="1" Source="{Binding Appearance.Icon}" Cli="{Binding Appearance.IsCli}" Width="32" Height="32" VerticalAlignment="Center"/>
                   <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}"/>
-                    <TextBlock Text="{Binding Command}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Details}"/>
+                    <TextBlock Text="{Binding RowDetail}" Classes="muted" Classes.warning="{Binding HasRowIssue}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding RowDetail}"/>
                     <StackPanel Orientation="Horizontal" Spacing="7">
                       <ComboBox Classes="category" ItemsSource="{Binding Categories}" SelectedItem="{Binding SelectedCategory}" IsEnabled="{Binding CanEditCategory}" Width="102" AutomationProperties.Name="应用分类"/>
                       <TextBlock Text="{Binding KindLabel}" Classes="muted" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <Button Content="旧辅助项出口不同 · 统一" Command="{Binding UnifyRouteCommand}" IsVisible="{Binding HasConflictingRoutes}" Classes="quiet"/>
-                    <TextBlock Text="{Binding CategoryStatus}" Classes="warning" IsVisible="{Binding HasCategoryStatus}" TextWrapping="Wrap"/>
-                    <TextBlock Text="{Binding Routing.Status}" Classes="warning" IsVisible="{Binding Routing.HasStatus}" TextWrapping="Wrap"/>
                   </StackPanel>
-                  <StackPanel Grid.Column="3" Spacing="5" VerticalAlignment="Center">
+                  <Button Grid.Column="3" Classes="launch" IsVisible="{Binding ShowLaunch}" Command="{Binding LaunchCommand}"
+                          VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding LaunchHint}" ToolTip.ShowOnDisabled="True" AutomationProperties.Name="{Binding LaunchHint}">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <PathIcon Data="{x:Static ui:Icons.Play}" Width="10" Height="12" VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding LaunchText}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Button>
+                  <StackPanel Grid.Column="4" Spacing="5" VerticalAlignment="Center">
                     <ComboBox Classes="route" ItemsSource="{Binding Routing.Options}" SelectedItem="{Binding Routing.SelectedRoute}" IsEnabled="{Binding Routing.CanEdit}" HorizontalAlignment="Stretch" AutomationProperties.Name="分流出口"/>
                     <Button Content="{Binding InventorySummary}" Classes="quiet inventory" Classes.inventory-pending="{Binding HasPendingInventory}" HorizontalAlignment="Right" AutomationProperties.Name="查看递归 EXE 清单">
                       <Button.Flyout><Flyout Placement="BottomEdgeAlignedRight"><StackPanel Width="400" Spacing="12">
@@ -63,6 +68,8 @@
                           <SelectableTextBlock Text="{Binding InventoryDetails}" FontSize="12" TextWrapping="Wrap"/>
                         </StackPanel></ScrollViewer>
                         <Button Content="刷新 EXE 清单" Command="{Binding RefreshInventoryCommand}" HorizontalAlignment="Left"/>
+                        <Button Content="旧辅助项出口不同 · 统一出口" Command="{Binding UnifyRouteCommand}" IsVisible="{Binding HasConflictingRoutes}" Classes="quiet"/>
+                        <Button Content="指定主程序 EXE" Click="OnLocateExecutable" IsVisible="{Binding CanChooseMainEntry}" Classes="quiet" HorizontalAlignment="Left"/>
                         <Button Content="指定安装目录" Click="OnLocateDirectory" Classes="quiet" HorizontalAlignment="Left"/>
                       </StackPanel></Flyout></Button.Flyout>
                     </Button>
@@ -76,7 +83,7 @@
             <TextBlock Text="调整搜索，或在应用行中选择这个分类。" Classes="muted" TextWrapping="Wrap" TextAlignment="Center"/>
           </StackPanel>
           <Border Grid.Row="3" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="14,10">
-            <TextBlock Text="勾选后启用分流与保护；未勾选的应用跟随全局规则与默认端口。" Classes="muted" TextWrapping="Wrap"/>
+            <TextBlock Text="勾选后启用分流与保护；保护就绪后可直接启动应用。" Classes="muted" TextWrapping="Wrap"/>
           </Border>
         </Grid>
       </Border>

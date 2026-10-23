@@ -57,6 +57,7 @@ public interface IAppController
     IReadOnlyList<LaunchTarget> ScanTargets();
     IReadOnlyList<LaunchTarget> CachedTargets { get; }
     LaunchTarget? FindApplication(string key);
+    Task<ControllerOperationResult> LaunchApplicationAsync(string discoveryKey);
     IReadOnlyDictionary<string, string> ApplicationCategories { get; }
     Task<ControllerOperationResult> SetApplicationCategoryAsync(LaunchTarget target, string? category);
     Task<ControllerOperationResult> RefreshApplicationInventoryAsync(LaunchTarget target);

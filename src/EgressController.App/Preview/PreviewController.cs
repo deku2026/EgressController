@@ -20,6 +20,17 @@ public sealed class PreviewController : IAppController
     private readonly Dictionary<string, string> _categories = new(StringComparer.Ordinal);
     public IReadOnlyList<LaunchTarget> CachedTargets => _targets.ToArray();
     public LaunchTarget? FindApplication(string key) => _targets.FirstOrDefault(item => item.DiscoveryKey == key);
+    public List<LaunchTarget> LaunchedApplications { get; } = [];
+    public Func<LaunchTarget, Task<ControllerOperationResult>>? LaunchOverride { get; set; }
+    public async Task<ControllerOperationResult> LaunchApplicationAsync(string discoveryKey)
+    {
+        var target = FindApplication(discoveryKey);
+        string? reason = Services.ApplicationLaunchPolicy.BlockReason(target, Profile, IsTunRunning, IsUpdatingProfile, Protection);
+        if (reason is not null) return ControllerOperationResult.Failure(reason);
+        var result = LaunchOverride is null ? ControllerOperationResult.Success() : await LaunchOverride(target!);
+        if (result.Succeeded) LaunchedApplications.Add(target!);
+        return result;
+    }
     public IReadOnlyDictionary<string, string> ApplicationCategories => _categories;
     public Task<ControllerOperationResult> SetApplicationCategoryAsync(LaunchTarget target, string? category)
     {
@@ -186,7 +197,16 @@ public sealed class PreviewController : IAppController
     public IReadOnlyList<string> ManualDomains => Profile.Domains.Select(item => item.Name).ToArray();
     public IReadOnlyList<NetworkAdapterInfo> RefreshAdapters() => Adapters;
     public IReadOnlyList<string> DiscoveryNotices => [];
-    public IReadOnlyList<LaunchTarget> ScanTargets() => _targets;
+    public Func<IReadOnlyList<LaunchTarget>, IReadOnlyList<LaunchTarget>>? ScanOverride { get; set; }
+    public IReadOnlyList<LaunchTarget> ScanTargets()
+    {
+        if (ScanOverride is not null)
+        {
+            var next = ScanOverride(_targets.ToArray()).ToArray();
+            _targets.Clear(); _targets.AddRange(next);
+        }
+        return _targets.ToArray();
+    }
     private Task<ControllerOperationResult> Save(EgressProfileDocument value) { Profile = value.NormalizeAndValidate(); LastMessage = "预览配置已更新"; return Task.FromResult(ControllerOperationResult.Success()); }
     public Task<ControllerOperationResult> SetAdapterRolesAsync(string? directId, string? proxyId) => Save(Profile.SetAdapterRoles(directId, proxyId));
     public Task<ControllerOperationResult> SetApplicationsRouteAsync(IEnumerable<LaunchTarget> targets, bool enabled, EgressRouteTarget? route = null,

@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -43,6 +44,7 @@ internal static class ApplicationChecks
         var vm = new MainViewModel(backend);
         var window = new MainWindow { Width = 1440, Height = 900, DataContext = vm }; window.Show(); window.SelectPage("apps");
         RenderChecks.Save(window, Path.Combine(directory, "apps-white-artwork.png"));
+        LaunchButtons(window, vm, backend, directory);
         var combo = window.GetVisualDescendants().OfType<ComboBox>().First(item => item.Classes.Contains("category"));
         combo.IsDropDownOpen = true; Dispatcher.UIThread.RunJobs();
         var popup = combo.GetTemplateDescendants().OfType<Popup>().Single();
@@ -89,8 +91,68 @@ internal static class ApplicationChecks
         RenderChecks.Save(largeWindow, Path.Combine(directory, "apps-large-list.png"));
         if (offset < 1000 || Math.Abs(scroll.Offset.Y - offset) > 1) throw new InvalidOperationException("Changing category reset app-list scrolling.");
         if (list.GetVisualDescendants().OfType<AppAvatar>().Count() > 30) throw new InvalidOperationException("App list lost virtualization.");
+        list.SelectedItem = visibleRow;
+        var beforeRows = largeVm.Apps.Entries.ToArray();
+        var checkbox = list.GetVisualDescendants().OfType<CheckBox>().First(item => ReferenceEquals(item.DataContext, visibleRow));
+        checkbox.Focus();
+        Dispatcher.UIThread.RunJobs();
+        offset = scroll.Offset.Y;
+        // Providers can return different orders and append a newly installed app. Existing rows,
+        // selection and the viewport must survive, including keyboard focus inside the row.
+        largeBackend.ScanOverride = targets => targets.Reverse().Prepend(new LaunchTarget
+        { Id = "new", Name = "A newly discovered app", CanonicalExecutable = @"C:\Mock\New\app.exe", OwnedExecutables = [@"C:\Mock\New\app.exe"] }).ToArray();
+        largeVm.Apps.ScanCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        RenderChecks.Save(largeWindow, Path.Combine(directory, "apps-refresh-stable.png"));
+        if (Math.Abs(scroll.Offset.Y - offset) > 1 || !ReferenceEquals(list.SelectedItem, visibleRow)
+            || !checkbox.IsFocused || !beforeRows.SequenceEqual(largeVm.Apps.Entries.Take(beforeRows.Length)))
+            throw new InvalidOperationException("Refreshing application metadata moved the viewport, selection, focus or existing rows.");
+        int moves = 0;
+        largeVm.Apps.Entries.CollectionChanged += (_, args) => { if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Move) moves++; };
+        largeVm.Apps.SelectedCategory = largeVm.Apps.Categories.Single(item => item.Id == "");
+        RenderChecks.Save(largeWindow, Path.Combine(directory, "apps-unclassified-static.png"));
+        if (moves != 0 || list.GetVisualDescendants().OfType<AppAvatar>().Count() > 30)
+            throw new InvalidOperationException("Category filtering traversed/moved rows or lost virtualization.");
         largeWindow.Close();
         PackageInventory(directory);
+    }
+
+    private static void LaunchButtons(Window window, MainViewModel vm, PreviewController backend, string directory)
+    {
+        var app = vm.Apps.Entries.First();
+        var button = window.GetVisualDescendants().OfType<Button>().First(item => item.Classes.Contains("launch") && ReferenceEquals(item.DataContext, app));
+        if (!button.IsVisible || !button.IsEffectivelyEnabled) throw new InvalidOperationException("Selected desktop app has no enabled launch button.");
+        var row = button.FindAncestorOfType<ListBoxItem>()!;
+        double height = row.Bounds.Height;
+        app.Routing.IsSelected = false; Dispatcher.UIThread.RunJobs();
+        if (button.IsVisible || Math.Abs(row.Bounds.Height - height) > .1) throw new InvalidOperationException("Unchecking must hide launch without changing row height.");
+        app.Routing.IsSelected = true; Dispatcher.UIThread.RunJobs();
+        var point = button.TranslatePoint(new Point(button.Bounds.Width / 2, button.Bounds.Height / 2), window)
+            ?? throw new InvalidOperationException("Launch button was not laid out.");
+        window.MouseMove(point); RenderChecks.Save(window, Path.Combine(directory, "apps-launch-hover.png"));
+        window.MouseDown(point, MouseButton.Left); RenderChecks.Save(window, Path.Combine(directory, "apps-launch-pressed.png"));
+        window.MouseUp(point, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        if (backend.LaunchedApplications.Count != 1 || backend.LaunchedApplications[0].DiscoveryKey != app.DiscoveryKey)
+            throw new InvalidOperationException("Launch did not use the selected app's primary identity.");
+        button.Focus(NavigationMethod.Tab); window.MouseMove(new Point(0, 0));
+        RenderChecks.Save(window, Path.Combine(directory, "apps-launch-focused.png"));
+        var cli = vm.Apps.Entries.First(item => item.Target.Kind == LaunchKind.CliNative);
+        cli.Routing.IsSelected = true;
+        if (cli.ShowLaunch) throw new InvalidOperationException("CLI must not expose an application launch button.");
+        window.Width = 1100; window.Height = 760;
+        RenderChecks.Save(window, Path.Combine(directory, "apps-launch-compact.png"));
+        backend.LaunchOverride = _ => Task.FromResult(ControllerOperationResult.Failure("主程序文件不存在，请刷新列表或重新指定主程序。"));
+        app.LaunchCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        RenderChecks.Save(window, Path.Combine(directory, "apps-launch-failed.png"));
+        if (!app.HasRowIssue || backend.LaunchedApplications.Count != 1) throw new InvalidOperationException("Launch failure was not kept local to the app row.");
+        window.Width = 1440; window.Height = 900;
+        var offline = new PreviewController("offline", PreviewIcons.Load);
+        var disabledWindow = new MainWindow { Width = 1100, Height = 760, DataContext = new MainViewModel(offline) };
+        disabledWindow.Show(); disabledWindow.SelectPage("apps");
+        RenderChecks.Save(disabledWindow, Path.Combine(directory, "apps-launch-disabled.png"));
+        if (disabledWindow.GetVisualDescendants().OfType<Button>().Any(item => item.Classes.Contains("launch") && item.IsEffectivelyEnabled && item.IsVisible))
+            throw new InvalidOperationException("Protection not ready must disable visible launch controls.");
+        disabledWindow.Close();
     }
 
     private static void PackageInventory(string directory)

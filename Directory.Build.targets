@@ -5,6 +5,6 @@
     <EgressMockOnly Condition="'$(EgressMockOnly)' == ''">true</EgressMockOnly>
   </PropertyGroup>
   <ItemGroup Condition="'$(IsTestProject)' == 'true' and '$(EgressMockOnly)' == 'true'">
-    <Compile Remove="**/*LiveTests.cs;**/DirectSingBoxProcessClientTests.cs;**/ProcessIdentityTests.cs;**/ProcessLauncherTests.cs;**/WindowsNetworkAdapterServiceTests.cs;**/WindowsLaunchTargetScannerTests.cs" />
+    <Compile Remove="**/*LiveTests.cs;**/DirectSingBoxProcessClientTests.cs;**/ProcessIdentityTests.cs;**/WindowsNetworkAdapterServiceTests.cs;**/WindowsLaunchTargetScannerTests.cs" />
   </ItemGroup>
 </Project>

@@ -20,7 +20,7 @@ public sealed class AppsViewModel : ObservableObject
     private bool _isScanning;
     private AppCategoryFilter _selectedCategory;
     private string _discoveryNotice = "";
-    public string DiscoveryNotice { get => _discoveryNotice; private set { SetProperty(ref _discoveryNotice, value); OnPropertyChanged(nameof(HasDiscoveryNotice)); } }
+    public string DiscoveryNotice { get => _discoveryNotice; private set { if (SetProperty(ref _discoveryNotice, value)) OnPropertyChanged(nameof(HasDiscoveryNotice)); } }
     public bool HasDiscoveryNotice => DiscoveryNotice.Length > 0;
 
     public AppsViewModel(IAppController controller)
@@ -36,15 +36,21 @@ public sealed class AppsViewModel : ObservableObject
     }
 
     public IReadOnlyList<AppCategoryFilter> Categories { get; }
-    public AppCategoryFilter SelectedCategory { get => _selectedCategory; set { if (value is not null && SetProperty(ref _selectedCategory, value)) RefreshVisible(); } }
+    public AppCategoryFilter SelectedCategory { get => _selectedCategory; set { if (value is not null && SetProperty(ref _selectedCategory, value)) RefreshVisible(true); } }
     public string CategoryTitle => SelectedCategory.Name;
     public string CategoryDescription => SelectedCategory.Id switch { "all" => "新应用默认未分类 · 勾选后单独分流", "selected" => "已启用单独分流与进程保护的应用", _ => "分类由你决定 · 修改分类不会影响分流" };
 
-    public ObservableCollection<AppEntryViewModel> Entries { get; } = new();
+    private ObservableCollection<AppEntryViewModel> _entries = new();
+    public ObservableCollection<AppEntryViewModel> Entries { get => _entries; private set => SetProperty(ref _entries, value); }
+    public void RefreshLaunchStates()
+    {
+        foreach (var entry in _all.Where(entry => entry.ShowLaunch)) entry.RefreshLaunchState();
+        DiscoveryNotice = string.Join("\n", _controller.DiscoveryNotices);
+    }
     public string Query
     {
         get => _query;
-        set { if (SetProperty(ref _query, value ?? string.Empty)) RefreshVisible(); }
+        set { if (SetProperty(ref _query, value ?? string.Empty)) RefreshVisible(true); }
     }
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public bool IsScanning
@@ -112,20 +118,18 @@ public sealed class AppsViewModel : ObservableObject
         RefreshVisible();
     }
 
-    private void RefreshVisible()
+    private void RefreshVisible() => RefreshVisible(false);
+    private void RefreshVisible(bool filterChanged)
     {
         string query = _query.Trim();
         var visible = _all.Where(entry => MatchesCategory(entry) && (query.Length == 0
             || entry.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
             || entry.KindText.Contains(query, StringComparison.OrdinalIgnoreCase)
             || entry.Command.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
-        for (int index = 0; index < visible.Length; index++)
-        {
-            int current = Entries.IndexOf(visible[index]);
-            if (current < 0) Entries.Insert(index, visible[index]);
-            else if (current != index) Entries.Move(current, index);
-        }
-        while (Entries.Count > visible.Length) Entries.RemoveAt(Entries.Count - 1);
+        // A filter is a single new viewport, not hundreds of Move notifications that make
+        // the virtualizing panel repeatedly anchor and traverse the intervening rows.
+        if (filterChanged && !Entries.SequenceEqual(visible)) Entries = new(visible);
+        else Reconcile(Entries, visible);
         foreach (var category in Categories) category.Count = _all.Count(entry => category.Id == "all" || category.Id == "selected" && entry.Routing.IsSelected
             || category.Id is not ("all" or "selected") && entry.CategoryId == category.Id);
         OnPropertyChanged(nameof(CategoryTitle)); OnPropertyChanged(nameof(CategoryDescription));
@@ -137,21 +141,43 @@ public sealed class AppsViewModel : ObservableObject
     { "all" => true, "selected" => entry.Routing.IsSelected, _ => entry.CategoryId == SelectedCategory.Id };
     private void ReplaceEntries(IReadOnlyList<LaunchTarget> targets)
     {
-        foreach (var item in _all) item.Dispose();
-        _all.Clear(); foreach (var target in targets) _all.Add(new(_controller, target, RefreshVisible));
+        var remaining = targets.DistinctBy(target => target.DiscoveryKey).ToDictionary(target => target.DiscoveryKey, StringComparer.Ordinal);
+        // Existing rows keep their identity, order and in-flight commands. Discoveries are appended;
+        // a metadata refresh must not reset selection/focus or move the apps being read.
+        foreach (var item in _all.ToArray())
+        {
+            if (remaining.Remove(item.DiscoveryKey, out var target)) item.UpdateTarget(target);
+            else { item.Dispose(); _all.Remove(item); }
+        }
+        foreach (var target in targets)
+            if (remaining.Remove(target.DiscoveryKey)) _all.Add(new(_controller, target, RefreshVisible));
         RefreshVisible();
+    }
+    private static void Reconcile(ObservableCollection<AppEntryViewModel> collection, IReadOnlyList<AppEntryViewModel> desired)
+    {
+        var keep = desired.ToHashSet();
+        for (int index = collection.Count - 1; index >= 0; index--)
+            if (!keep.Contains(collection[index])) collection.RemoveAt(index);
+        for (int index = 0; index < desired.Count; index++)
+        {
+            if (index < collection.Count && ReferenceEquals(collection[index], desired[index])) continue;
+            int current = collection.IndexOf(desired[index]);
+            if (current < 0) collection.Insert(index, desired[index]);
+            else if (current != index) collection.Move(current, index);
+        }
+        while (collection.Count > desired.Count) collection.RemoveAt(collection.Count - 1);
     }
     public async Task AddManualAsync(string path, string? replaceKey = null)
     {
         var result = await _controller.AddManualApplicationAsync(path, replaceKey);
-        Status = result.Succeeded ? replaceKey is null ? "应用已添加，尚未启用分流。" : "安装目录已记录；刷新 EXE 清单后应用新的路径。" : result.Error ?? "添加失败";
+        Status = result.Succeeded ? replaceKey is null ? "应用已添加，尚未启用分流。" : "主程序或安装目录已记录；请刷新 EXE 清单后启动。" : result.Error ?? "添加失败";
         if (result.Succeeded) ReplaceEntries(_controller.CachedTargets);
     }
 
     public void RefreshStatuses()
     {
         foreach (AppEntryViewModel entry in _all)
-            entry.RefreshRoute();
+            entry.UpdateTarget(_controller.FindApplication(entry.DiscoveryKey) ?? entry.Target);
         RefreshVisible();
     }
 }

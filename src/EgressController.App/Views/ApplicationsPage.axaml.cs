@@ -12,6 +12,8 @@ public sealed partial class ApplicationsPage : PageView
     private async void OnAddDirectory(object? sender, RoutedEventArgs e) => await PickAsync(true);
     private async void OnLocateDirectory(object? sender, RoutedEventArgs e)
         => await PickAsync(true, (sender as Control)?.DataContext as AppEntryViewModel);
+    private async void OnLocateExecutable(object? sender, RoutedEventArgs e)
+        => await PickAsync(false, (sender as Control)?.DataContext as AppEntryViewModel);
     private async Task PickAsync(bool directory, AppEntryViewModel? entry = null)
     {
         if (DataContext is not MainViewModel vm) return;
