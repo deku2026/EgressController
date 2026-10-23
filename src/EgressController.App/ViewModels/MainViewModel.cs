@@ -112,6 +112,7 @@ public sealed class MainViewModel : ObservableObject
             Domains.RefreshRoutes();
         }
         Domains.RefreshStatus();
+        Apps.RefreshLaunchStates();
         Connections.Refresh();
         Traffic.Refresh();
         Network.Refresh();

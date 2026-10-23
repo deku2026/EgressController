@@ -25,7 +25,11 @@ public static class InstalledApplicationResolver
         {
             try
             {
+                // A directory inventory is not a launch contract. Never choose an arbitrary
+                // helper just because it happens to sort first among the EXEs.
                 entry = topExecutables(root).Where(path => ExistingExecutable(path, fileExists) is not null).Take(64)
+                    .Where(path => Path.GetFileNameWithoutExtension(path).Equals(Path.GetFileName(root), StringComparison.OrdinalIgnoreCase)
+                        || Path.GetFileNameWithoutExtension(path).Equals(app.Name, StringComparison.OrdinalIgnoreCase))
                     .OrderByDescending(path => Path.GetFileNameWithoutExtension(path).Equals(Path.GetFileName(root), StringComparison.OrdinalIgnoreCase))
                     .ThenByDescending(path => Path.GetFileNameWithoutExtension(path).Equals(app.Name, StringComparison.OrdinalIgnoreCase))
                     .ThenBy(path => path, StringComparer.OrdinalIgnoreCase).FirstOrDefault();

@@ -5,6 +5,13 @@ namespace EgressController.Launcher.Tests;
 public sealed class InstalledApplicationTests
 {
     [Fact]
+    public void Unknown_main_is_not_replaced_with_the_first_recursive_or_top_level_helper()
+    {
+        var app = InstalledApplicationResolver.Resolve(new("registered:example", "Example", @"C:\Apps\Example", null, null, null, "登记"),
+            _ => true, _ => true, _ => [@"C:\Apps\Example\a-helper.exe", @"C:\Apps\Example\z-tool.exe"]);
+        Assert.Null(app.CanonicalExecutable); Assert.False(app.CanLaunch); Assert.True(app.CanRoute);
+    }
+    [Fact]
     public void Vendor_registry_resolves_League_without_enumerating_its_directory()
     {
         var record = new InstalledApplication("vendor:lol", "英雄联盟", @"C:\WeGameApps\lol", @"C:\WeGameApps\lol\TCLS\Client.exe", null, null, "平台登记");

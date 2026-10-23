@@ -134,6 +134,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         LoadApplicationCatalog(); // Optional UI cache cannot delay starting protection of saved paths.
         var usageToken = _lifetimeCts.Token;
         _ = Task.Run(() => TrafficUsageLoopAsync(usageToken));
+        _packageUpdatesTask = Task.Run(() => PackageUpdatesLoopAsync(usageToken));
     }
 
     public string DataRoot => _dataRoot;
@@ -226,7 +227,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices.Concat(_catalogNotice.Length == 0 ? [] : new[] { _catalogNotice }).ToArray();
+    public IReadOnlyList<string> DiscoveryNotices => _targetScanner.Notices
+        .Concat(new[] { _catalogNotice, _packageUpdateNotice }.Where(notice => notice.Length > 0)).ToArray();
 
     public IReadOnlyList<LaunchTarget> ScanTargets()
     {
@@ -244,7 +246,8 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 return ApplicationCatalogProjection.RestoreCachedInventory(target, previous);
             }).Concat(cached.Where(item => !consumed.Contains(item.DiscoveryKey))).ToArray();
             var projected = ApplicationCatalogProjection.Project(discovered);
-            var restored = ApplicationCatalogProjection.RestoreSavedTargets(projected, _profile.Applications);
+            var restored = ApplicationCatalogProjection.RestoreSavedTargets(projected, _profile.Applications)
+                .Select(target => PackagePathUpgrade.RestoreInventory(target, _profile)).ToArray();
             foreach (LaunchTarget target in restored)
             {
                 target.RouteSelected = _profile.Applications.Any(selection => target.SelectionKeys.Contains(selection.DiscoveryKey));
@@ -257,11 +260,13 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 _catalogNotice = "";
             }
             catch (Exception error) { _catalogNotice = "应用缓存保存失败：" + error.Message; }
-            // Metadata refresh has no authority to change the user's exact routing/protection set.
+            // A same-family Store update can rebase previously saved relative EXEs. New helper
+            // paths and newly associated data roots still require explicit inventory refresh.
             Visuals.Update(restored, _profile);
+            SynchronizePackagePathsAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
             _inventoryReady = true;
-            SetMessage($"已发现 {restored.Count} 个应用与 CLI。");
-            return restored;
+            SetMessage($"已发现 {restored.Length} 个应用与 CLI。");
+            return _targets.All();
         }
         finally { _inventoryGate.Release(); }
     }
@@ -608,7 +613,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
     {
         _shuttingDown = true;
         _lifetimeCts.Cancel();
-        Task[] background = new[] { _networkMonitorTask, _runtimeMonitorTask, _diagnosticsTask }.OfType<Task>().ToArray();
+        Task[] background = new[] { _networkMonitorTask, _runtimeMonitorTask, _diagnosticsTask, _packageUpdatesTask }.OfType<Task>().ToArray();
         if (_protectionTask is not null) { try { await _protectionTask.ConfigureAwait(false); } catch (OperationCanceledException) { } }
         if (_tunSupervisor is not null) { try { await _tunSupervisor.Pending.ConfigureAwait(false); } catch (OperationCanceledException) { } }
         StopNetworkMonitor();
@@ -984,7 +989,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                 if (!changed && _profileApplied && !_routingDirty)
                     continue;
 
-                await ApplyRuntimeChangeAsync(_routingDirty ? "显式扫描更新了已保存 EXE 清单"
+                await ApplyRuntimeChangeAsync(_routingDirty ? _routingChangeReason
                     : !_profileApplied ? "等待当前配置生效" : "网卡绑定或代理端口身份发生变化", cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1020,7 +1025,7 @@ public sealed partial class AppController : IAppController, IAsyncDisposable
                     StartDiagnostics(LoadControllerEndpoint());
                     StartNetworkMonitor();
                 }
-                SetMessage("检测到网卡或上游代理进程变化，配置已重新校验并应用。");
+                SetMessage("出口或应用路径配置已重新校验并应用。");
             }
             else
             {

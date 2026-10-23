@@ -108,6 +108,11 @@ public sealed class RouteSelectionViewModel : ObservableObject
         // Keep an unchecked row's chosen destination until the user enables it.
         EgressRouteTarget preferred = target ?? _selectedRoute.Target;
         var options = WithCurrent(RouteOptionViewModel.Create(profile, _adapters?.Invoke()), target);
+        if (_options.SequenceEqual(options) && _isSelected == (target is not null) && _selectedRoute.Target == preferred)
+        {
+            _isBusy = false;
+            return; // Keep open selectors and focus intact on a metadata/status-only refresh.
+        }
         _options = options;
         _selectedRoute = options.FirstOrDefault(option => option.Target == preferred) ?? options[0];
         _isSelected = target is not null;

@@ -87,10 +87,10 @@ public sealed class LaunchTarget
                 ? !string.IsNullOrWhiteSpace(CanonicalExecutable ?? Command)
                 : Kind == LaunchKind.PackagedAumid && !string.IsNullOrWhiteSpace(Aumid));
 
-    public LaunchTarget WithInventory(IReadOnlyList<string> paths, bool ready = true, IReadOnlyList<string>? roots = null, IReadOnlyList<string>? aliases = null) => new()
+    public LaunchTarget WithInventory(IReadOnlyList<string> paths, bool ready = true, IReadOnlyList<string>? roots = null, IReadOnlyList<string>? aliases = null, string? executable = null) => new()
     {
-        Id = Id, Name = Name, Kind = Kind, Command = Command, Arguments = Arguments, WorkingDirectory = WorkingDirectory,
-        Environment = Environment, PackageFamily = PackageFamily, Aumid = Aumid, CanonicalExecutable = CanonicalExecutable,
+        Id = Id, Name = Name, Kind = Kind, Command = executable ?? Command, Arguments = Arguments, WorkingDirectory = WorkingDirectory,
+        Environment = Environment, PackageFamily = PackageFamily, Aumid = Aumid, CanonicalExecutable = executable ?? CanonicalExecutable,
         OwnedRoots = roots ?? OwnedRoots, OwnedExecutables = paths, InventoryReady = ready, IsManual = IsManual,
         RouteSelected = RouteSelected, IconPath = IconPath, Source = Source, Publisher = Publisher, Version = Version,
         CatalogId = CatalogId, RelatedDiscoveryKeys = aliases ?? RelatedDiscoveryKeys, SavedDiscoveryKey = SavedDiscoveryKey,

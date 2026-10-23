@@ -34,6 +34,6 @@ C# 不转发业务流量。
 
 ## 不在范围内
 
-不实现 C# HTTP/CONNECT 转发、全局代理接管、PID 决定网络出口、CLI/快捷方式发现、手工 EXE
-添加、订阅/节点/selector/provider 管理或 YAML 配置。应用 PID 和 LaunchSession 只用于连接
-详情或普通启动状态展示；应用启动不是路由前置条件。
+不实现 C# HTTP/CONNECT 转发、PID 决定网络出口、订阅/节点/selector/provider 管理或 YAML
+配置。当前支持原生 CLI 发现、手工 EXE/目录添加及主应用启动；应用启动不是路由前置条件，
+不会创建 LaunchSession 或按父子 PID 扩展成员。

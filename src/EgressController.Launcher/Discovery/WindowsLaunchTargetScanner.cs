@@ -181,8 +181,8 @@ public sealed class WindowsLaunchTargetScanner
                     OwnedRoots = roots,
                     OwnedExecutables = [], InventoryReady = false,
                     RouteSelected = false,
-                    // AUMID activation is valid even when the manifest omits Executable. The
-                    // launch service correlates the resulting process against OwnedRoots.
+                    // Windows activates the registered AUMID. Launch UI separately requires
+                    // a known primary EXE in the saved inventory; no PID/descendant correlation.
                     ResolutionUnsupported = string.IsNullOrWhiteSpace(aumid),
                     IconPath = FindManifestIcon(document, installedRoot, effectiveRoot),
                     Source = "Microsoft Store",

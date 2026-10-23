@@ -239,6 +239,19 @@
     <Setter Property="BorderBrush" Value="Transparent"/>
     <Setter Property="Foreground" Value="#59677E"/>
   </Style>
+  <Style Selector="Button.launch">
+    <Setter Property="Background" Value="#EEF1FF"/>
+    <Setter Property="Foreground" Value="#3F50B2"/>
+    <Setter Property="BorderBrush" Value="#CCD4F4"/>
+    <Setter Property="CornerRadius" Value="9"/>
+    <Setter Property="Padding" Value="9,6"/>
+    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="FontSize" Value="13"/>
+  </Style>
+  <Style Selector="Button.launch:pointerover"><Setter Property="Background" Value="#E1E7FF"/><Setter Property="BorderBrush" Value="#A6B4EB"/></Style>
+  <Style Selector="Button.launch:pressed"><Setter Property="Background" Value="#CED8FA"/><Setter Property="BorderBrush" Value="#7D90D8"/></Style>
+  <Style Selector="Button.launch:focus-visible"><Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/></Style>
+  <Style Selector="Button.launch:disabled"><Setter Property="Background" Value="#F0F2F6"/><Setter Property="Foreground" Value="#737D90"/><Setter Property="BorderBrush" Value="#E0E5EE"/></Style>
   <Style Selector="Button.quiet:pointerover">
     <Setter Property="Background" Value="#E4E9F1"/>
   </Style>

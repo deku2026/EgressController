@@ -1,143 +1,72 @@
 using System.Diagnostics;
 using EgressController.Core.Models;
+using EgressController.Core.Protection;
 
 namespace EgressController.Windows.Process;
 
 /// <summary>
-/// Starts a selected Windows target with its ordinary environment. Network routing is transparent
-/// through sing-box TUN; this service never adds proxy variables, browser arguments, or a local
-/// proxy listener to a child process.
+/// Activates the catalog's primary entry. Launching does not create a routing session, inspect
+/// descendants, or terminate a short-lived activation process. Windows may reuse an existing app.
 /// </summary>
 public sealed class WindowsLaunchService
 {
-    private readonly WindowsProcessIdentityResolver _identity =
-        new(new ExecutablePathCanonicalizer());
-    private readonly Func<string, string?, uint> _activatePackaged;
+    private readonly Action<ProcessStartInfo> _startExecutable;
+    private readonly Action<string, string?> _activatePackaged;
+    private readonly Func<string, bool> _fileExists;
 
-    public WindowsLaunchService()
-        : this(WindowsPackageActivator.ActivateApplication)
+    public WindowsLaunchService() : this(StartExecutable, ActivatePackaged, File.Exists) { }
+
+    internal WindowsLaunchService(Action<ProcessStartInfo> startExecutable,
+        Action<string, string?> activatePackaged, Func<string, bool> fileExists)
     {
+        _startExecutable = startExecutable;
+        _activatePackaged = activatePackaged;
+        _fileExists = fileExists;
     }
 
-    internal WindowsLaunchService(Func<string, string?, uint> activatePackaged)
-        => _activatePackaged = activatePackaged ?? throw new ArgumentNullException(nameof(activatePackaged));
-
-    public bool DirectExecutableStarted { get; private set; }
-
-    public LaunchSession StartPlain(LaunchTarget target)
+    public void Launch(LaunchTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
-        DirectExecutableStarted = false;
-        return target.Kind switch
-        {
-            LaunchKind.PackagedAumid => StartPackaged(target),
-            LaunchKind.DirectExe or LaunchKind.CliNative => StartDirect(target),
-            _ => throw new InvalidOperationException("该目标尚未解析为可安全启动的 Windows 应用。"),
-        };
-    }
+        if (!target.CanLaunch || target.Kind is not (LaunchKind.DirectExe or LaunchKind.PackagedAumid))
+            throw new InvalidOperationException("尚未确定应用主入口，请刷新列表或指定主程序 EXE。");
 
-    private LaunchSession StartDirect(LaunchTarget target)
-    {
-        string executable = target.CanonicalExecutable ?? target.Command
-            ?? throw new InvalidOperationException("目标没有可执行文件路径。");
-        if (!File.Exists(executable))
-            throw new FileNotFoundException("目标文件不存在。", executable);
+        if (target.Kind == LaunchKind.PackagedAumid)
+        {
+            // Always use the registered application identity, even when a package EXE exists.
+            _activatePackaged(target.Aumid!, target.Arguments);
+            return;
+        }
+
+        string executable = target.CanonicalExecutable ?? target.Command!;
+        if (!Path.IsPathFullyQualified(executable) || !Path.GetExtension(executable).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("主程序必须是已确定的 EXE 绝对路径。");
+        if (!_fileExists(executable))
+            throw new FileNotFoundException("主程序文件不存在，请刷新列表或重新指定主程序。", executable);
 
         var startInfo = new ProcessStartInfo
         {
             FileName = executable,
             Arguments = target.Arguments ?? string.Empty,
             WorkingDirectory = string.IsNullOrWhiteSpace(target.WorkingDirectory)
-                ? Path.GetDirectoryName(executable) ?? Environment.CurrentDirectory
-                : target.WorkingDirectory,
+                ? Path.GetDirectoryName(executable)! : target.WorkingDirectory,
             UseShellExecute = false,
-            CreateNoWindow = false,
         };
         if (target.Environment is not null)
-        {
-            foreach ((string key, string value) in target.Environment)
-                startInfo.Environment[key] = value;
-        }
-
-        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Windows 没有返回启动进程。");
-        try
-        {
-            ProcessIdentity identity = _identity.Resolve(checked((uint)process.Id))
-                ?? throw new InvalidOperationException("进程启动后无法读取其身份。");
-            DirectExecutableStarted = true;
-            return NewSession(target, identity);
-        }
-        catch
-        {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch { }
-            throw;
-        }
+            foreach (var (key, value) in target.Environment) startInfo.Environment[key] = value;
+        _startExecutable(startInfo);
     }
 
-    private LaunchSession StartPackaged(LaunchTarget target)
+    private static void StartExecutable(ProcessStartInfo startInfo)
     {
-        if (string.IsNullOrWhiteSpace(target.Aumid))
-            throw new InvalidOperationException("Package 缺少 AUMID，无法启动。");
-
-        // Activating by AUMID returns the app instance that fulfilled the launch contract.
-        // Starting the package EXE directly can return a short-lived delegation process and
-        // leaves status tracking to an unsafe machine-wide same-path guess.
-        uint rootPid = _activatePackaged(target.Aumid, target.Arguments);
-        ProcessIdentity identity = WaitForActivatedIdentity(rootPid)
-            ?? throw new InvalidOperationException($"Windows 返回了 packaged root PID {rootPid}，但无法读取其进程身份。");
-        if (identity.ExePathFinal is null || !IsUnderOwnedRoot(identity.ExePathFinal, target))
-            throw new InvalidOperationException("Package 激活返回的进程不在目标 OwnedRoot 内。");
-        return NewSession(target, identity);
+        RuntimeSafety.RequireLiveOperations();
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Windows 未接受启动请求。");
+        // Do not wait for a PID/window or kill a launcher that hands off to an existing instance.
     }
 
-    private ProcessIdentity? WaitForActivatedIdentity(uint processId)
+    private static void ActivatePackaged(string aumid, string? arguments)
     {
-        DateTime deadline = DateTime.UtcNow.AddSeconds(3);
-        do
-        {
-            ProcessIdentity? identity = _identity.Resolve(processId);
-            if (identity is not null)
-                return identity;
-            Thread.Sleep(40);
-        }
-        while (DateTime.UtcNow < deadline);
-        return null;
+        RuntimeSafety.RequireLiveOperations();
+        _ = WindowsPackageActivator.ActivateApplication(aumid, arguments);
     }
-
-    private static bool IsUnderOwnedRoot(string path, LaunchTarget target)
-    {
-        string normalized = path.Replace('/', '\\').TrimEnd('\\');
-        foreach (string root in target.OwnedRoots)
-        {
-            string normalizedRoot = root.Replace('/', '\\').TrimEnd('\\');
-            if (string.Equals(normalized, normalizedRoot, StringComparison.OrdinalIgnoreCase)
-                || (normalized.Length > normalizedRoot.Length
-                    && normalized.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
-                    && normalized[normalizedRoot.Length] == '\\'))
-                return true;
-        }
-        return false;
-    }
-
-    private static LaunchSession NewSession(LaunchTarget target, ProcessIdentity identity)
-        => new()
-        {
-            SessionId = Guid.NewGuid(),
-            TargetId = target.Id,
-            RootPid = identity.Pid,
-            RootStartTimeUtc = identity.StartTimeUtc,
-            StartedAtUtc = DateTime.UtcNow,
-            CandidatePids = new HashSet<uint> { identity.Pid },
-            ActiveOwnedPids = new HashSet<uint> { identity.Pid },
-            ActiveOwnedProcessStartTimes = new Dictionary<uint, DateTime>
-            {
-                [identity.Pid] = identity.StartTimeUtc,
-            },
-        };
 }

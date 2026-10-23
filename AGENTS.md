@@ -7,6 +7,7 @@
 - Never expand membership from ParentPid, dynamically inherit an application's route for shared tools, or restart TUN because an application/process instance starts.
 - Changing an application’s exit must preserve its saved EXE inventory, including temporarily missing/older paths. The UI, routing compiler and guardian must use the same membership.
 - Directory roots are discovery inputs, not a runtime wildcard that silently enrolls new executable paths. Explicit rescanning/selection can update the saved inventory.
+- Exception authorized for selected Store app upgrades: verify the exact Windows-registered package family (including publisher), then add only existing new-version EXEs at previously saved relative paths. Preserve the original route and old paths. No new helper discovery, data-directory version guessing or process ancestry. A real changed inventory is a configuration change; repeated metadata checks do not restart TUN. Keep upgraded paths protected while configuration application retries.
 - Existing descendant tracking and its tests are not requirements. Remove that behavior instead of preserving it under a different name.
 
 ## Windows application catalog
@@ -60,6 +61,8 @@
 - Read Windows executable icons off the UI thread with bounded shared caching; helper and CLI artwork should reuse their product icon.
 - All application icons use the shared adaptive backing surface. Transparent white/pale artwork needs a dark backing; preserve original brand colors and proportions. Verify application/connection/traffic/detail surfaces and normal/hover/selected states.
 - Validate normal, hover, pressed, focused and disabled states. Use meaningful mock screenshots at ordinary and compact Windows window sizes, not only XAML compilation.
+- Keep application list scrolling. Refresh reuses existing rows/order, selection, keyboard focus and viewport; append new discoveries. Category/search changes publish one filtered result, never a sequence of row moves. Do not add pagination or scrolling animations.
+- Only checked non-CLI applications show Launch. Recheck selection, saved primary EXE, applied routing and protection readiness at invocation; use registered AUMID for MSIX. Never select an arbitrary helper, wait on a PID, auto-relaunch, rebuild inventory or restart TUN from Launch.
 
 ## Workflow and validation
 

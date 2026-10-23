@@ -17,6 +17,32 @@ public sealed partial class AppController
     public LaunchTarget? FindApplication(string key) => _targets.Find(key);
     public IReadOnlyDictionary<string, string> ApplicationCategories => Volatile.Read(ref _applicationCategories);
 
+    public async Task<ControllerOperationResult> LaunchApplicationAsync(string discoveryKey)
+    {
+        if (_shuttingDown || _lifetimeCts.IsCancellationRequested)
+            return ControllerOperationResult.Failure("程序正在退出，未发送启动请求。");
+        // Do not queue a launch behind a potentially long configuration change.
+        if (!await _configurationGate.WaitAsync(0).ConfigureAwait(false))
+            return ControllerOperationResult.Failure("正在应用配置，请稍后启动。");
+        try
+        {
+            return await Task.Run(() =>
+            {
+                if (_shuttingDown || _lifetimeCts.IsCancellationRequested)
+                    return ControllerOperationResult.Failure("程序正在退出，未发送启动请求。");
+                if (!_profileApplied || _routingDirty)
+                    return ControllerOperationResult.Failure("分流配置尚未成功应用，请等待自动恢复后启动。");
+                var target = FindApplication(discoveryKey);
+                string? reason = Services.ApplicationLaunchPolicy.BlockReason(target, Profile, IsTunRunning, false, Protection);
+                if (reason is not null) return ControllerOperationResult.Failure(reason);
+                new EgressController.Windows.Process.WindowsLaunchService().Launch(target!);
+                return ControllerOperationResult.Success();
+            }).ConfigureAwait(false);
+        }
+        catch (Exception error) { return ControllerOperationResult.Failure("启动失败：" + error.Message); }
+        finally { _configurationGate.Release(); }
+    }
+
     private void LoadApplicationCatalog()
     {
         try
@@ -104,8 +130,10 @@ public sealed partial class AppController
                     directory => Directory.EnumerateFiles(directory, "*.exe", SearchOption.TopDirectoryOnly));
                 var target = new LaunchTarget { Id = resolved.Id, SavedDiscoveryKey = resolved.DiscoveryKey, Name = resolved.Name,
                     Kind = resolved.Kind, Command = resolved.Command, CanonicalExecutable = resolved.CanonicalExecutable,
-                    OwnedRoots = resolved.OwnedRoots, OwnedExecutables = [], InventoryReady = false, IsManual = true,
-                    RelatedDiscoveryKeys = resolved.RelatedDiscoveryKeys, IconPath = resolved.IconPath, Source = resolved.Source };
+                    OwnedRoots = resolved.OwnedRoots.Concat(previous?.OwnedRoots ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                    OwnedExecutables = previous?.OwnedExecutables ?? [], InventoryReady = false, IsManual = true,
+                    RelatedDiscoveryKeys = resolved.RelatedDiscoveryKeys.Concat(previous?.RelatedDiscoveryKeys ?? []).Distinct(StringComparer.Ordinal).ToArray(),
+                    IconPath = resolved.IconPath, Source = resolved.Source };
                 _applicationCatalog.Save([target]);
                 var all = _targets.All().Where(item => !target.SelectionKeys.Contains(item.DiscoveryKey)).Append(target).ToArray();
                 _targets.ReplaceAll(ApplicationCatalogProjection.Project(all));

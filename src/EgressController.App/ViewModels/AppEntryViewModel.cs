@@ -12,10 +12,14 @@ namespace EgressController.App.ViewModels;
 public sealed class AppEntryViewModel : ObservableObject, IDisposable
 {
     private readonly IAppController _controller;
-    private readonly LaunchTarget _originalTarget;
+    private LaunchTarget _originalTarget;
     private readonly Action _changed;
     private bool _categoryBusy;
     private string _categoryStatus = "";
+    private bool _launching;
+    private string _launchStatus = "";
+    private bool _launchFailed;
+    private (bool Visible, bool Enabled, string Text, string Hint)? _launchState;
 
     public AppEntryViewModel(IAppController controller, LaunchTarget target, Action changed)
     {
@@ -27,6 +31,8 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
             (enabled, route) => controller.SetApplicationsRouteAsync([Target], enabled, route), changed,
             error => controller.ReportFailure("应用分流", "apps.route", error.Message, error), () => controller.Adapters);
         UnifyRouteCommand = new AsyncRelayCommand(Routing.CommitCurrentAsync);
+        LaunchCommand = new AsyncRelayCommand(LaunchAsync, () => CanLaunch);
+        Routing.PropertyChanged += OnRoutingChanged;
         Appearance = controller.Visuals.ForApplication(target);
         RefreshInventoryCommand = new AsyncRelayCommand(async () =>
         {
@@ -38,6 +44,52 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     }
 
     public IAsyncRelayCommand UnifyRouteCommand { get; }
+    public IAsyncRelayCommand LaunchCommand { get; }
+    public bool ShowLaunch => Routing.IsSelected && !Services.ApplicationLaunchPolicy.IsCli(Target);
+    private string? LaunchBlockReason => !Routing.CanEdit ? "正在保存分流，请稍后启动。"
+        : Services.ApplicationLaunchPolicy.BlockReason(Target, _controller.Profile, _controller.IsTunRunning, _controller.IsUpdatingProfile, _controller.Protection);
+    public bool CanLaunch => ShowLaunch && !_launching && LaunchBlockReason is null;
+    public string LaunchText => _launching ? "启动中" : "启动";
+    public string LaunchHint => _launching ? "正在请求 Windows 打开应用"
+        : LaunchBlockReason ?? "打开 " + Name;
+    public string RowDetail => Routing.HasStatus ? Routing.Status : HasCategoryStatus ? CategoryStatus
+        : _launchStatus.Length > 0 ? _launchStatus : Command;
+    public bool HasRowIssue => Routing.HasStatus || HasCategoryStatus || _launchFailed;
+    private async Task LaunchAsync()
+    {
+        if (!CanLaunch) return;
+        _launching = true; _launchStatus = ""; _launchFailed = false;
+        RefreshLaunchState(); NotifyDetail();
+        try
+        {
+            var result = await _controller.LaunchApplicationAsync(DiscoveryKey);
+            _launchFailed = !result.Succeeded;
+            _launchStatus = result.Succeeded ? "已发送启动请求" : result.Error ?? "启动失败，请重试。";
+        }
+        catch (Exception error) { _launchFailed = true; _launchStatus = "启动失败：" + error.Message; }
+        finally { _launching = false; RefreshLaunchState(); NotifyDetail(); }
+    }
+    private void OnRoutingChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is nameof(Routing.IsSelected) or nameof(Routing.CanEdit)) RefreshLaunchState();
+        if (args.PropertyName is nameof(Routing.Status) or nameof(Routing.HasStatus)) NotifyDetail();
+    }
+    private void NotifyDetail() { OnPropertyChanged(nameof(RowDetail)); OnPropertyChanged(nameof(HasRowIssue)); }
+    public void RefreshLaunchState()
+    {
+        var state = (ShowLaunch, CanLaunch, LaunchText, LaunchHint);
+        if (_launchState == state) return;
+        _launchState = state;
+        OnPropertyChanged(nameof(ShowLaunch)); OnPropertyChanged(nameof(CanLaunch));
+        OnPropertyChanged(nameof(LaunchText)); OnPropertyChanged(nameof(LaunchHint));
+        LaunchCommand.NotifyCanExecuteChanged();
+    }
+    public void UpdateTarget(LaunchTarget target)
+    {
+        _originalTarget = target;
+        foreach (var name in new[] { nameof(Name), nameof(Command), nameof(Details), nameof(KindLabel), nameof(KindText), nameof(CanRoute), nameof(CanManage) }) OnPropertyChanged(name);
+        RefreshRoute(); NotifyDetail();
+    }
     public LaunchTarget Target => _controller.FindApplication(_originalTarget.DiscoveryKey) ?? _originalTarget;
     public IAsyncRelayCommand RefreshInventoryCommand { get; }
     public IReadOnlyList<ApplicationCategory> Categories => ApplicationCategory.BuiltIn;
@@ -48,7 +100,7 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         set { if (value is not null && value.Id != CategoryId && !_categoryBusy) _ = SaveCategoryAsync(value); }
     }
     public bool CanEditCategory => !_categoryBusy;
-    public string CategoryStatus { get => _categoryStatus; private set { SetProperty(ref _categoryStatus, value); OnPropertyChanged(nameof(HasCategoryStatus)); } }
+    public string CategoryStatus { get => _categoryStatus; private set { SetProperty(ref _categoryStatus, value); OnPropertyChanged(nameof(HasCategoryStatus)); NotifyDetail(); } }
     public bool HasCategoryStatus => CategoryStatus.Length > 0;
     private async Task SaveCategoryAsync(ApplicationCategory category)
     {
@@ -90,6 +142,7 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
     public bool HasNoIcon => Icon is null;
     public bool CanRoute => Target.CanRoute;
     public bool CanManage => CanRoute || Routing.IsSelected;
+    public bool CanChooseMainEntry => Target.Kind == LaunchKind.DirectExe;
     public RouteSelectionViewModel Routing { get; }
     public void RefreshRoute()
     {
@@ -97,11 +150,13 @@ public sealed class AppEntryViewModel : ObservableObject, IDisposable
         Routing.Refresh(_controller.Profile, _controller.Profile.Applications.FirstOrDefault(route => route.DiscoveryKey == DiscoveryKey)?.Target
             ?? _controller.Profile.Applications.FirstOrDefault(route => Target.SelectionKeys.Contains(route.DiscoveryKey))?.Target);
         OnPropertyChanged(nameof(HasConflictingRoutes));
+        OnPropertyChanged(nameof(CanChooseMainEntry));
         OnPropertyChanged(nameof(InventorySummary)); OnPropertyChanged(nameof(InventoryDetails));
         OnPropertyChanged(nameof(InventoryDescription));
         OnPropertyChanged(nameof(InventoryRoots)); OnPropertyChanged(nameof(HasInventoryRoots)); OnPropertyChanged(nameof(HasPendingInventory));
         OnPropertyChanged(nameof(SelectedCategory)); OnPropertyChanged(nameof(CategoryId));
+        RefreshLaunchState();
     }
 
-    public void Dispose() { } // The shared presentation cache owns icon lifetime.
+    public void Dispose() => Routing.PropertyChanged -= OnRoutingChanged; // Shared cache owns icons.
 }

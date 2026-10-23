@@ -8,6 +8,7 @@ public static class Icons
     public static Geometry Folder { get; } = For("folder");
     public static Geometry Guardian { get; } = For("guardian");
     public static Geometry More { get; } = For("more");
+    public static Geometry Play { get; } = StreamGeometry.Parse("M5 2.5C5 1.7 5.9 1.2 6.6 1.7L18 9C18.7 9.5 18.7 10.5 18 11L6.6 18.3C5.9 18.8 5 18.3 5 17.5Z");
     public static Geometry For(string name) => StreamGeometry.Parse(name switch
     {
         "overview" => "M2 2H9V9H2Z M12 2H19V9H12Z M2 12H9V19H2Z M12 12H19V19H12Z",
