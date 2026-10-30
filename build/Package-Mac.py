@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an Apple Silicon NativeAOT preview .app, verify it without live initialization, and archive its exact bytes."""
+"""Build the Apple Silicon NativeAOT app/helper, verify only explicit mock entrypoints, and archive exact bytes."""
 import argparse
 import hashlib
 import json
@@ -40,8 +40,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix=".mac-package-", dir=output) as temporary:
         staging = Path(temporary)
         published = staging / "published"
-        run("dotnet", "publish", "src/EgressController.Desktop", "-c", args.configuration, "-r", "osx-arm64",
+        run("dotnet", "publish", "src/EgressController.Desktop", "-m:1", "--disable-build-servers", "-c", args.configuration, "-r", "osx-arm64",
             "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-o", published)
+        helper_published = staging / "helper-published"
+        run("dotnet", "publish", "tools/EgressController.MacHelper", "-m:1", "--disable-build-servers", "-c", args.configuration, "-r", "osx-arm64",
+            "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-o", helper_published)
         binary_name = "EgressController.Desktop"
         if not (published / binary_name).is_file():
             raise RuntimeError("The NativeAOT desktop entrypoint is missing.")
@@ -51,6 +54,9 @@ def main():
         shutil.copytree(published, executable_directory, ignore=shutil.ignore_patterns("*.pdb", "*.dSYM"))
         resources.mkdir(parents=True)
         shutil.copy2(native, executable_directory / native.name)
+        helper_directory = executable_directory / "helper"
+        shutil.copytree(helper_published, helper_directory, ignore=shutil.ignore_patterns("*.pdb", "*.dSYM"))
+        shutil.copy2(native, helper_directory / native.name)
         notices = resources / "Notices"
         notices.mkdir()
         shutil.copy2(ROOT / "LICENSE", notices / "Egress-LICENSE.txt")
@@ -112,13 +118,19 @@ def main():
             metadata["CFBundleIconFile"] = "Egress.icns"
         with (app / "Contents" / "Info.plist").open("wb") as handle:
             plistlib.dump(metadata, handle)
-        (resources / "PREVIEW.txt").write_text(
-            "Egress macOS preview. Default startup is isolated mock mode.\n"
-            "No privileged helper is installed and no real network takeover is enabled.\n"
-            "Source and third-party notices are in the accompanying repository.\n")
+        (resources / "STARTUP.txt").write_text(
+            "Egress macOS. Default startup is production; opening the app does not start TUN.\n"
+            "Use --preview for an isolated UI workspace. Only an explicit Connect action requests privileged installation/takeover.\n"
+            "Development verification uses --mock-smoke/--preview only; no live network acceptance is claimed.\n")
+        # Independently installed code needs its own valid signature; this is a non-standard nested-code directory.
+        run("codesign", "--force", "--sign", "-", helper_directory / native.name)
+        run("codesign", "--force", "--sign", "-", helper_directory / "EgressController.MacHelper")
+        run("codesign", "--verify", "--strict", helper_directory / "EgressController.MacHelper")
         run("codesign", "--force", "--deep", "--sign", "-", app)
         run("codesign", "--verify", "--deep", "--strict", app)
+        run("codesign", "--verify", "--strict", helper_directory / "EgressController.MacHelper")
         run(executable_directory / binary_name, "--mock-smoke")
+        run(helper_directory / "EgressController.MacHelper", "--mock-smoke")
         run("file", executable_directory / binary_name)
         destination = output / "Egress.app"
         if destination.exists():
@@ -132,7 +144,7 @@ def main():
         run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", destination, archive)
         checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
         (output / "SHA256SUMS.txt").write_text(checksum + "  " + archive.name + "\n")
-        print("NativeAOT preview package:", destination)
+        print("NativeAOT macOS package (default production; explicit preview supported):", destination)
         print("Archive:", archive)
 
 

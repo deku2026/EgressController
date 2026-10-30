@@ -37,7 +37,7 @@ uint32_t egress_mac_abi_version(void) { return 1; }
 int32_t egress_mac_path_is_absolute(const char *path) { return path != NULL && path[0] == '/'; }
 int32_t egress_mac_copy_abi_info_json(uint8_t *output, size_t capacity, size_t *required)
 {
-    static const char info[] = "{\"abiVersion\":1,\"privilegedMutationAvailable\":false}";
+    static const char info[] = "{\"abiVersion\":1,\"privilegedMutationAvailable\":true}";
     return copy_bytes(info, sizeof(info) - 1, output, capacity, required);
 }
 int32_t egress_mac_copy_canonical_path(const char *path, uint8_t *output, size_t capacity, size_t *required)

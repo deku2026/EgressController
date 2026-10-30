@@ -12,6 +12,7 @@ using EgressController.Desktop.Presentation.Controls;
 using EgressController.Desktop.Preview;
 using EgressController.Desktop.ViewModels;
 using EgressController.Desktop.Views;
+using EgressController.Policy;
 
 namespace EgressController.MacPreview;
 
@@ -27,6 +28,8 @@ internal static class Program
         string directory = Path.GetFullPath(args[flag + 1]); Directory.CreateDirectory(directory);
         AppBuilder.Configure<DesktopApplication>().WithInterFont().With(MacFonts.Options()).UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
         var log = new BindingLog(); Logger.Sink = log;
+        PassiveReconciliation(directory);
+        if(args.Contains("--passive-checks",StringComparer.Ordinal)){log.Verify();Console.WriteLine("Passive binding reconciliation preserved full policy and clean state.");return 0;}
         foreach (string scenario in new[] { "overview", "apps", "rules", "nodes", "settings", "dsl", "add-apps", "add-rules", "onboarding", "empty", "error", "stopped", "unavailable" })
         {
             var vm = new ShellViewModel(scenario); var window = new MainWindow { DataContext = vm, Width = 1260, Height = 860 }; window.Show();
@@ -44,10 +47,31 @@ internal static class Program
             window.Close();
         }
         Interactions(directory);
+        ProductionCompositionChecks.Run(directory);
         Icon(directory);
         log.Verify();
-        Console.WriteLine("Mac preview: 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, and binding checks passed. Live operations blocked.");
+        Console.WriteLine("Mac preview: 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, binding checks, injected production first-run/native-PNG/empty-telemetry/error-redaction checks passed. Live operations blocked.");
         return 0;
+    }
+    private static void PassiveReconciliation(string directory)
+    {
+        var vm=new ShellViewModel();string saved=PolicyYaml.Write(vm.Document);
+        Check(!vm.HasChanges,"Passive reconciliation test must begin with a clean saved workspace.");
+        var window=new MainWindow{DataContext=vm,Width=1260,Height=860};window.Show();Flush();
+        Check(PolicyYaml.Write(vm.Document)==saved&&!vm.HasChanges,"Attaching compiled UI bindings changed saved policy or marked the workspace dirty.");
+        Click(window,Find<Button>(window,"AppsNav"));Click(window,Find<Button>(window,"AddAppsButton"));
+        Check(vm.AddingApps&&vm.SelectedCatalogCount==0,"Application catalog did not open without selection.");
+        Check(PolicyYaml.Write(vm.Document)==saved&&!vm.HasChanges,"Opening the catalog changed policy or marked it dirty before an explicit selection: policySame="+(PolicyYaml.Write(vm.Document)==saved)+", dirty="+vm.HasChanges);
+        vm.AddAppsCommand.ExecuteAsync().GetAwaiter().GetResult();Flush();
+        Check(PolicyYaml.Write(vm.Document)==saved&&!vm.HasChanges,"Refreshing discovery metadata changed policy or marked the workspace dirty.");
+        var cancel=window.GetVisualDescendants().OfType<Button>().First(button=>button.IsEffectivelyVisible&&button.Content as string=="取消");Click(window,cancel);
+        Check(!vm.AddingApps&&PolicyYaml.Write(vm.Document)==saved&&!vm.HasChanges,"Canceling application discovery changed saved policy or dirty state.");
+        // A previously saved but now-unresolved proxy must remain unresolved, never select the first option.
+        vm.Document.Defaults.Global=ExitChoice.Proxy("saved-missing-global");vm.VisibleApps[0].Model.Via=ExitChoice.Proxy("saved-missing-app-target");vm.VisibleRules[0].Model.Via=ExitChoice.Proxy("saved-missing-rule-target");
+        string unresolved=PolicyYaml.Write(vm.Document);vm.AddAppsCommand.ExecuteAsync().GetAwaiter().GetResult();Flush();
+        Check(PolicyYaml.Write(vm.Document)==unresolved&&!vm.HasChanges,"Passive refresh replaced an unresolved saved proxy choice: global="+vm.Document.Defaults.Global.TargetId+", app="+vm.VisibleApps[0].Model.Via.TargetId+", rule="+vm.VisibleRules[0].Model.Via.TargetId+", dirty="+vm.HasChanges);
+        Check(vm.SelectedGlobalTarget?.Id=="saved-missing-global"&&vm.VisibleApps[0].SelectedProxyTarget?.Id=="saved-missing-app-target"&&vm.VisibleRules[0].SelectedProxyTarget?.Id=="saved-missing-rule-target","Unresolved proxy placeholders did not reflect the saved identities.");
+        Save(window,Path.Combine(directory,"passive-discovery-clean-state.png"));window.Close();
     }
     private static void Interactions(string directory)
     {

@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-PROJECTS = ("EgressController.Policy.Tests", "EgressController.Runtime.Tests", "EgressController.Mac.Tests")
+PROJECTS = ("EgressController.Policy.Tests", "EgressController.Runtime.Tests", "EgressController.Mac.Tests", "EgressController.Client.Tests")
 
 
 def main():

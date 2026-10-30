@@ -3,5 +3,5 @@ namespace EgressController.Desktop.Views;
 
 public partial class ApplicationsView : UserControl
 {
-    public ApplicationsView() => InitializeComponent();
+    public ApplicationsView() { InitializeComponent(); ApplicationArtworkRequests.Attach(this); }
 }

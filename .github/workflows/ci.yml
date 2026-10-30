@@ -37,7 +37,7 @@ jobs:
           path: artifacts/mac-ui/
           if-no-files-found: error
           retention-days: 14
-      - name: Upload verified Apple Silicon preview
+      - name: Upload Apple Silicon app and helper verified with mocks
         uses: actions/upload-artifact@v7
         with:
           name: Egress-osx-arm64

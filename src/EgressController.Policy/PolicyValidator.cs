@@ -22,11 +22,12 @@ public static partial class PolicyValidator
         var memberships = new Dictionary<string, ExitChoice>(StringComparer.Ordinal);
         foreach (var app in doc.Applications)
         {
-            if (!IsExecutablePath(app.BundlePath, allowBundle: true)) errors.Add(new("application.bundle", "应用必须保存规范化的绝对 Bundle 路径。", ObjectId: app.Id));
+            if (!IsExecutablePath(app.BundlePath, allowBundle: true)) errors.Add(new("application.bundle", "应用必须保存规范化的绝对 .app Bundle 路径，不能使用共享目录。", ObjectId: app.Id));
             if (app.ExecutablePaths.Count == 0 && app.Enabled) errors.Add(new("application.inventory", "应用尚未完成显式可执行文件清单扫描。", ObjectId: app.Id));
             foreach (var path in app.ExecutablePaths)
             {
                 if (!IsExecutablePath(path)) errors.Add(new("application.path", "可执行清单必须是规范化绝对文件路径，不能是目录规则。", ObjectId: app.Id));
+                if (!path.StartsWith(app.BundlePath + "/", StringComparison.Ordinal)) errors.Add(new("application.scope", "固定可执行路径必须位于该应用的准确 Bundle 根目录内；不能纳入外部解释器或共享目录。", ObjectId: app.Id));
                 if (app.Enabled && memberships.TryGetValue(path, out var previous) && previous != app.Via) errors.Add(new("application.conflict", "同一可执行路径存在冲突出口，必须显式解决。", ObjectId: app.Id));
                 if (app.Enabled) memberships[path] = app.Via;
             }
@@ -123,7 +124,7 @@ public static partial class PolicyValidator
         }
         foreach (var id in edges.Keys) Visit(id); return result;
     }
-    public static bool IsExecutablePath(string path, bool allowBundle = false) => path.Length <= 4096 && path.StartsWith('/') && (allowBundle || !path.EndsWith('/') && !path.EndsWith(".app", StringComparison.OrdinalIgnoreCase)) && !path.Any(char.IsControl) && !path.Split('/').Any(x => x is "." or "..") && !path.Contains("//", StringComparison.Ordinal);
+    public static bool IsExecutablePath(string path, bool allowBundle = false) => path.Length <= 4096 && path.StartsWith('/') && (allowBundle ? path.EndsWith(".app", StringComparison.OrdinalIgnoreCase) : !path.EndsWith('/') && !path.EndsWith(".app", StringComparison.OrdinalIgnoreCase)) && !path.Any(char.IsControl) && !path.Split('/').Any(x => x is "." or "..") && !path.Contains("//", StringComparison.Ordinal);
     public static bool IsCidr(string value)
     {
         var parts = value.Split('/');

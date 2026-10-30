@@ -5,4 +5,5 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../EgressController.Runtime/EgressController.Runtime.csproj" /></ItemGroup>
 </Project>

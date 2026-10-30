@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><PlatformTarget>AnyCPU</PlatformTarget><OutputType>Exe</OutputType><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable><UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner></PropertyGroup>
+  <ItemGroup><PackageReference Include="xunit.v3"/><Using Include="Xunit"/><ProjectReference Include="../../src/EgressController.Desktop/EgressController.Desktop.csproj"/><ProjectReference Include="../../tools/EgressController.MacHelper/EgressController.MacHelper.csproj"/></ItemGroup>
+</Project>

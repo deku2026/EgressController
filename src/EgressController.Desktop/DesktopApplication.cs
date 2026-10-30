@@ -8,6 +8,8 @@ using EgressController.Desktop.Presentation;
 using EgressController.Desktop.Preview;
 using EgressController.Desktop.ViewModels;
 using EgressController.Desktop.Views;
+using EgressController.Desktop.Production;
+using Avalonia.Threading;
 namespace EgressController.Desktop;
 
 public sealed class DesktopApplication : Application
@@ -16,7 +18,6 @@ public sealed class DesktopApplication : Application
 
     public override void Initialize()
     {
-        PreviewEnvironment.RequireIsolated();
         RequestedThemeVariant = ThemeVariant.Light;
         Styles.Add(new FluentTheme());
         Styles.Add(new MacTheme());
@@ -58,7 +59,30 @@ public sealed class DesktopApplication : Application
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            desktop.MainWindow = new MainWindow { DataContext = new ShellViewModel(Program.Scenario) };
+        {
+            // Argument dispatch enters mock safety before framework startup. A plain launch composes
+            // production services; opening the window alone never starts TUN or installs the helper.
+            var vm = PreviewEnvironment.IsIsolated ? new ShellViewModel(Program.Scenario) : new ShellViewModel(new ProductionClientBackend());
+            var window = new MainWindow { DataContext = vm }; desktop.MainWindow = window;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            bool polling = false, closing = false, closed = false;
+            timer.Tick += async (_, _) =>
+            {
+                if (polling || closing) return; polling = true;
+                try { await vm.RefreshStatusAsync(); } finally { polling = false; }
+            };
+            window.Opened += async (_, _) =>
+            {
+                await vm.InitializeAsync();
+                if (!vm.IsPreview && !closing) timer.Start();
+            };
+            window.Closing += async (_, args) =>
+            {
+                if (closed) return; args.Cancel = true; if (closing) return; closing = true; timer.Stop();
+                try { await vm.DisposeAsync(); }
+                finally { closed = true; window.Close(); }
+            };
+        }
         base.OnFrameworkInitializationCompleted();
     }
 }

@@ -48,16 +48,6 @@ public interface IMacHelperTransport
     Task<MacHelperReply> SendAsync(MacHelperRequest request, CancellationToken cancellationToken = default);
 }
 
-/// <summary>No production helper server/installer is shipped yet. Never reports a simulated takeover as live.</summary>
-public sealed class UnavailableMacHelperTransport : IMacHelperTransport
-{
-    public Task<MacHelperReply> SendAsync(MacHelperRequest request, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new MacHelperReply(false, "helper-not-installed", "Privileged macOS helper is not implemented or installed. Preview cannot start a real TUN.", false, false));
-    }
-}
-
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(MacHelperRequest))]
 [JsonSerializable(typeof(MacHelperReply))]

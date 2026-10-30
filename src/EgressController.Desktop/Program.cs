@@ -6,18 +6,22 @@ namespace EgressController.Desktop;
 public static class Program
 {
     public static string Scenario { get; private set; } = "overview";
+    public static StartupMode Mode { get; private set; } = StartupMode.Production;
     [STAThread]
     public static int Main(string[] args)
     {
-        PreviewEnvironment.Enter(); // Must precede framework, catalog, storage and runtime initialization.
-        if (args.Contains("--live", StringComparer.Ordinal)) throw new InvalidOperationException("This build only supports isolated preview operations.");
-        if (args.Contains("--mock-smoke", StringComparer.Ordinal)) { PreviewChecks.RunAsync().GetAwaiter().GetResult(); Console.WriteLine("Mac desktop mock smoke passed; live initialization was not entered."); return 0; }
-        int index = Array.IndexOf(args, "--scenario"); if (index >= 0 && index + 1 < args.Length) Scenario = args[index + 1];
+        StartupSelection startup;
+        try { startup = StartupArguments.Resolve(args); }
+        catch (ArgumentException exception) { Console.Error.WriteLine(exception.Message); return 2; }
+        try { StartupArguments.EnsureIsolationCompatible(startup.Mode, PreviewEnvironment.IsIsolated || Environment.GetEnvironmentVariable("EGRESS_MOCK_ONLY") == "1"); }
+        catch (InvalidOperationException exception) { Console.Error.WriteLine(exception.Message); return 2; }
+        Mode = startup.Mode; Scenario = startup.Scenario;
+        if (Mode is StartupMode.Preview or StartupMode.MockSmoke) PreviewEnvironment.Enter();
+        if (Mode == StartupMode.MockSmoke) { PreviewChecks.RunAsync().GetAwaiter().GetResult(); Console.WriteLine("Mac desktop mock smoke passed; production initialization was not entered."); return 0; }
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
     public static AppBuilder BuildAvaloniaApp()
     {
-        PreviewEnvironment.RequireIsolated();
         return AppBuilder.Configure<DesktopApplication>().WithInterFont().With(MacFonts.Options()).With(new MacOSPlatformOptions { DisableDefaultApplicationMenuItems = true }).UsePlatformDetect();
     }
 }

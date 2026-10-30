@@ -3,5 +3,5 @@ namespace EgressController.Desktop.Views;
 
 public partial class SetupOverlay : UserControl
 {
-    public SetupOverlay() => InitializeComponent();
+    public SetupOverlay() { InitializeComponent(); ApplicationArtworkRequests.Attach(this); }
 }

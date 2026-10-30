@@ -7,6 +7,9 @@ public static class PreviewChecks
     public static async Task RunAsync()
     {
         PreviewEnvironment.RequireIsolated();
+        bool productionDenied = false; try { StartupArguments.EnsureIsolationCompatible(StartupMode.Production, true); } catch (InvalidOperationException) { productionDenied = true; }
+        Check(productionDenied, "Production mode accepted an inherited mock-only environment.");
+        StartupArguments.EnsureIsolationCompatible(StartupMode.Preview, true); StartupArguments.EnsureIsolationCompatible(StartupMode.Production, false);
         var vm = new ShellViewModel(); Check(vm.ConfigValid, "Initial fixture configuration is invalid: " + vm.CurrentIssue);
         Check(vm.Document.Nodes.Any(x => !x.IsSupported), "Unsupported protocols were silently removed.");
         var app = vm.VisibleApps.First(); string[] inventory = app.Model.ExecutablePaths.ToArray(); app.RouteIndex = 2;

@@ -1,11 +1,13 @@
 using EgressController.Policy;
-using EgressController.Desktop.Preview;
+using EgressController.Desktop.Services;
+using Avalonia.Media;
 
 namespace EgressController.Desktop.ViewModels;
 
 public abstract class RouteRow(Func<string> global, Func<IReadOnlyList<Choice>> choices, Action changed) : Bindable
 {
     protected abstract ExitChoice Exit { get; set; }
+    private bool _publishing;
     public int RouteIndex
     {
         get => (int)Exit.Kind;
@@ -17,37 +19,55 @@ public abstract class RouteRow(Func<string> global, Func<IReadOnlyList<Choice>> 
         }
     }
     public bool ProxyVisible => RouteIndex == 2;
-    public IReadOnlyList<Choice> ProxyChoices => choices();
+    public IReadOnlyList<Choice> ProxyChoices
+    {
+        get
+        {
+            var available=choices();
+            return Exit.Kind==ExitKind.Proxy&&Exit.TargetId is {Length:>0} missing&&!available.Any(choice=>choice.Id==missing)
+                ?available.Append(new Choice(missing,"缺失的已保存目标","请明确重新选择")).ToArray():available;
+        }
+    }
     public Choice? SelectedProxyTarget
     {
         get => ProxyChoices.FirstOrDefault(x => x.Id == Exit.TargetId);
         set
         {
-            if (value is null || Exit.Kind == ExitKind.Proxy && Exit.TargetId == value.Id) return;
+            if (_publishing || value is null || Exit.Kind != ExitKind.Proxy || Exit.TargetId == value.Id) return;
             Exit = ExitChoice.Proxy(value.Id); NotifyRoute(); changed();
         }
     }
     public string RouteDescription => Exit.Kind switch { ExitKind.Home => "家宽直连", ExitKind.NonHome => "非家宽直连", _ => "节点 / 分组" };
     protected void NotifyRoute()
     {
-        Raise(nameof(RouteIndex)); Raise(nameof(ProxyVisible)); Raise(nameof(SelectedProxyTarget)); Raise(nameof(ProxyChoices)); Raise(nameof(RouteDescription));
+        _publishing=true;
+        try
+        {
+            Raise(nameof(RouteIndex)); Raise(nameof(ProxyVisible)); Raise(nameof(ProxyChoices)); Raise(nameof(SelectedProxyTarget)); Raise(nameof(RouteDescription));
+        }
+        finally{_publishing=false;}
     }
 }
 
 public sealed class AppRow : RouteRow
 {
+    private readonly Func<string, ClientApplication?> _metadata;
+    private readonly bool _preview;
+    private IImage? _icon;
+    public IImage? Icon { get => _icon; private set => Set(ref _icon, value); }
+    public void SetIcon(IImage? image) => Icon = image;
     public ManagedApplication Model { get; private set; }
     protected override ExitChoice Exit { get => Model.Via; set => Model.Via = value; }
     public string Name => Model.Name;
-    public string Product => PreviewFixtures.InstalledApplications.FirstOrDefault(x => x.BundlePath == Model.BundlePath)?.Id is "codex" ? "codex" : PreviewFixtures.InstalledApplications.FirstOrDefault(x => x.BundlePath == Model.BundlePath)?.Product ?? "app";
-    public string Category => PreviewFixtures.InstalledApplications.FirstOrDefault(x => x.BundlePath == Model.BundlePath)?.Category ?? "已管理应用";
+    public string Product => _preview ? _metadata(Model.BundlePath)?.Product ?? "app" : "app";
+    public string Category => _metadata(Model.BundlePath)?.Category ?? "已管理应用";
     public string Subtitle => $"{Category} · {Model.ExecutablePaths.Count} 个固定可执行文件";
     public string BundlePath => Model.BundlePath;
     public IReadOnlyList<string> ExecutablePaths => Model.ExecutablePaths;
     public UiCommand RemoveCommand { get; }
-    public AppRow(ManagedApplication model, Func<string> global, Func<IReadOnlyList<Choice>> choices, Action changed, Action<AppRow> remove) : base(global, choices, changed)
+    public AppRow(ManagedApplication model, Func<string> global, Func<IReadOnlyList<Choice>> choices, Action changed, Action<AppRow> remove, Func<string, ClientApplication?> metadata, bool preview) : base(global, choices, changed)
     {
-        Model = model; RemoveCommand = new(() => remove(this));
+        Model = model; _metadata = metadata; _preview = preview; RemoveCommand = new(() => remove(this));
     }
     public bool UpdateModel(ManagedApplication model)
     {
@@ -64,17 +84,20 @@ public sealed class CatalogRow : Bindable
 {
     private bool _selected;
     private readonly Action _changed;
-    public CatalogApplication Model { get; }
+    public ClientApplication Model { get; private set; }
+    private readonly bool _preview; private IImage? _icon; public IImage? Icon { get => _icon; private set => Set(ref _icon, value); }
+    public void SetIcon(IImage? image) => Icon = image;
     public string Name => Model.Name;
-    public string Product => Model.Id == "codex" ? "codex" : Model.Product;
+    public string Product => _preview ? Model.Product : "app";
     public string Subtitle => $"{Model.Category} · {Model.BundlePath}";
-    public bool IsManaged { get; }
+    public bool IsManaged { get; private set; }
     public bool CanSelect => !IsManaged;
     public bool IsSelected { get => _selected; set { if (!IsManaged && Set(ref _selected, value)) _changed(); } }
-    public CatalogRow(CatalogApplication model, Action changed, bool isManaged = false) { Model = model; _changed = changed; IsManaged = isManaged; }
+    public CatalogRow(ClientApplication model, Action changed, bool isManaged, bool preview) { Model = model; _changed = changed; IsManaged = isManaged; _preview = preview; }
+    public void UpdateModel(ClientApplication model, bool managed) { Model = model; IsManaged = managed; if (managed) _selected = false; Raise(nameof(Name)); Raise(nameof(Product)); Raise(nameof(Subtitle)); Raise(nameof(IsManaged)); Raise(nameof(CanSelect)); Raise(nameof(IsSelected)); }
 }
 
-public sealed record RuleContent(IReadOnlyList<DomainRule> Domains, IReadOnlyList<string> Cidrs);
+public sealed record RuleContent(IReadOnlyList<DomainRule> Domains, IReadOnlyList<string> Cidrs, bool Complete = true);
 
 public sealed class RuleRow : RouteRow
 {
@@ -83,7 +106,7 @@ public sealed class RuleRow : RouteRow
     protected override ExitChoice Exit { get => Model.Via; set => Model.Via = value; }
     public string Name => Model.Name;
     public string Product => Model.Id.StartsWith("rule-", StringComparison.Ordinal) ? Model.Id[5..] : Model.IpCidrs.Count > 0 ? "custom" : "domain";
-    public string Subtitle => $"{_content(Model).Domains.Count} 条域名" + (_content(Model).Cidrs.Count > 0 ? $" + {_content(Model).Cidrs.Count} 条 IP/CIDR" : "") + (Model.Sources.Count > 0 ? " · MetaCubeX" : " · 自定义");
+    public string Subtitle => !_content(Model).Complete ? $"{Model.Sources.Count} 个规则来源 · 等待准备" : $"{_content(Model).Domains.Count} 条域名" + (_content(Model).Cidrs.Count > 0 ? $" + {_content(Model).Cidrs.Count} 条 IP/CIDR" : "") + (Model.Sources.Count > 0 ? " · MetaCubeX" : " · 自定义");
     public string MatchSummary => string.Join("\n", _content(Model).Domains.Select(x => $"{x.Kind.ToString().ToLowerInvariant()}: {x.Value}").Concat(_content(Model).Cidrs.Select(x => "cidr: " + x)));
     public UiCommand RemoveCommand { get; }
     public UiCommand MoveUpCommand { get; }
@@ -101,16 +124,17 @@ public sealed class RuleRow : RouteRow
 
 public sealed class RuleSuggestion
 {
-    public string Id { get; }
-    public string Name { get; }
-    public string Product => Id;
-    public string Detail { get; }
+    public ClientRuleCatalogEntry Model { get; }
+    public string Id => Model.Id;
+    public string Name => Model.Name;
+    public string Product => new[] { "openai", "google", "youtube", "github", "netflix", "apple" }.Contains(Model.Id, StringComparer.Ordinal) ? Model.Id : "domain";
+    public string Detail => Model.Detail;
     public bool IsAdded { get; }
     public string AddLabel => IsAdded ? "已添加" : "添加集合";
-    public UiCommand AddCommand { get; }
-    public RuleSuggestion(string id, string name, string detail, Action<string, string> add, bool isAdded = false)
+    public AsyncUiCommand AddCommand { get; }
+    public RuleSuggestion(ClientRuleCatalogEntry model, Func<Task> add, bool isAdded)
     {
-        Id = id; Name = name; Detail = detail; IsAdded = isAdded; AddCommand = new(() => add(id, name), () => !IsAdded);
+        Model = model; IsAdded = isAdded; AddCommand = new(add, () => !IsAdded);
     }
 }
 

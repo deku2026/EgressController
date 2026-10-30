@@ -9,5 +9,6 @@
     <ProjectReference Include="../EgressController.Desktop.Presentation/EgressController.Desktop.Presentation.csproj"/>
     <ProjectReference Include="../EgressController.Policy/EgressController.Policy.csproj"/>
     <ProjectReference Include="../EgressController.Runtime/EgressController.Runtime.csproj"/>
+    <ProjectReference Include="../EgressController.Mac/EgressController.Mac.csproj"/>
   </ItemGroup>
 </Project>

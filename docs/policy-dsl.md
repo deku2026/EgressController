@@ -34,9 +34,14 @@ resolve to two different interfaces. The compiler never chooses another adapter.
 The default China exit is fixed to `nonhome`; the global exit must resolve to a
 real proxy. Every actual proxy socket and DNS bootstrap query uses `nonhome`.
 
-Application membership is an explicit saved `executables` array. `path` identifies
-the app for discovery and display; it is never emitted as an Xray directory
-wildcard. Missing old paths are retained. A route edit changes only `via`.
+Application membership is an explicit saved `executables` array. `path` must be a
+canonical absolute `.app` bundle root; every saved executable must be lexically
+inside that exact root plus `/`. Shared interpreter/bin directories, sibling
+bundles and prefix lookalikes cannot become members. Discovery separately verifies
+physical paths and symlink containment. The root is never emitted as an Xray
+directory wildcard. Missing old paths inside the bundle are retained. Outside
+paths remain visible for explicit repair and block compilation instead of being
+silently removed. A route edit changes only `via`.
 Conflicting routes for the same exact executable are rejected instead of being
 silently unified. No parent PID or descendant relationship is represented.
 
@@ -168,6 +173,64 @@ both files from it, never mix independently replaced files. Old generations are
 retained for rollback. File and directory synchronization preserves the OS's
 durability boundary; this does not claim immunity from hardware or filesystem
 failure.
+
+## Production resource preparation
+
+`ProductionResources` fetches Clash subscriptions and HTTP providers as node
+sources only. Production URLs must use HTTPS. Each operation captures one
+non-home `InterfaceBinding`; redirects, DNS queries and target sockets keep that
+same binding. `BoundDnsResolver` uses the profile's literal DNS upstream through
+bound UDP, retrying a truncated response through bound TCP. It validates the
+transaction, question and bounded alias chain and never uses the system resolver.
+`BoundHttpsResourceTransport` binds before connecting, disables system proxies,
+cookies and automatic redirects, rejects HTTPS downgrades, limits redirects and
+response bytes, and retains normal certificate validation. Binding failure aborts
+the connection. Network exceptions are sanitized without embedding resource URLs
+or credentials. Optional exchange/HTTP factories are injection seams for tests.
+
+The public Meta catalog is read from the official repository's
+[`meta` commit endpoint](https://api.github.com/repos/MetaCubeX/meta-rules-dat/commits/meta)
+and two complete Git subtree indexes under `geo/geosite` and `geo/geoip`.
+Truncated indexes are rejected. A single verified commit pins every raw URL;
+the Git blob identity is checked before parsing. Domain collections use
+`geo/geosite/classical/<name>.yaml` to retain full, suffix, keyword and regex
+conditions; IP collections use `geo/geoip/<name>.yaml`. No MRS, SRS or precompiled
+DAT is downloaded. DSL references remain `geosite/<name>.yaml` and
+`geoip/<name>.yaml`; names may include the catalog's safe `@`, `!` and `+`
+characters. Unknown sources require repair. Preparation always includes both
+China defaults plus requested sources and returns parsed collections, exact DSL
+bindings, and a single generated `geosite.dat`/`geoip.dat` pair for validation and
+atomic runtime generation publication. Explicit refresh replaces validated
+cache entries; normal preparation uses valid cached content first.
+
+`PrivateDiskResourceCache` hashes resource identities into filenames and stores
+each payload together with its SHA-256 in one atomically replaced record. New
+directories are `0700`, files are `0600`, and symlink/public storage is rejected.
+Files and containing directories are synchronized before publication. Corrupt
+cache content is unavailable and may be fetched again through the chosen binding.
+
+`XrayCoreReleaseManager` defaults to the official
+[v26.10.29 Apple Silicon release](https://github.com/XTLS/Xray-core/releases/tag/v26.10.29).
+The archive and accompanying `.dgst` each have independently pinned SHA-256
+identities; the checksum's `SHA2-256` must also match the archive. ZIP paths,
+duplicates, symbolic links and expanded-size limits are checked before extracting
+only the ARM64 Mach-O `xray`. The private executable is published with `0700`
+permissions, rechecked against the cached verified archive and never run by this
+manager. A prepared core is distinct from an installed authorized helper or a
+successful TUN takeover.
+The extracted official ARM64 executable is independently pinned to SHA-256
+`2d4bfa91aae5f90dee691cb5eb794316510c7f6006973eb46e60d7978bb789aa`;
+the privileged installer must enforce that shared pin before any core execution,
+rather than accepting a digest supplied by an unprivileged installation plan.
+
+Node measurements require the actual selected protocol and dialer chain. The
+pinned core's [observatory implementation](https://github.com/XTLS/Xray-core/blob/v26.10.29/app/observatory/observer.go)
+can issue a GET through an outbound without an inbound proxy listener or TUN;
+it reports measured duration in its pinned info log format. A worker must use
+an isolated, explicitly bound configuration, accept only its known outbound tags,
+bind each result to the exact test URL, and report timeout/unavailable when no
+verified observation arrives. Endpoint TCP-connect timing is not a substitute
+for protocol reachability, and fixture observations are never production results.
 
 ## Validation
 

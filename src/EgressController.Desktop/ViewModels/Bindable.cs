@@ -19,10 +19,12 @@ public sealed class UiCommand(Action execute, Func<bool>? canExecute = null) : I
 }
 public sealed class AsyncUiCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
 {
+    public void Refresh() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
     private bool _running;
     public event EventHandler? CanExecuteChanged;
     public bool CanExecute(object? parameter) => !_running && (canExecute?.Invoke() ?? true);
-    public async void Execute(object? parameter)
+    public async void Execute(object? parameter) => await ExecuteAsync(parameter);
+    public async Task ExecuteAsync(object? parameter = null)
     {
         if (!CanExecute(parameter)) return;
         _running = true; CanExecuteChanged?.Invoke(this, EventArgs.Empty);

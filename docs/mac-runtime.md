@@ -1,50 +1,47 @@
 # macOS runtime, isolation and durability
 
-## Current execution boundary
+## Startup and production composition
 
-The default desktop executable is an isolated interactive preview. Its first operation enables `PreviewEnvironment`, before Avalonia, view models, storage, native adapters or transports. `--live` is rejected; `--mock-smoke` runs the real policy/compiler/mock-controller checks and returns before GUI/platform initialization. No Xray process is launched, no privileged helper is installed and no system network settings are changed.
+No arguments selects production. Only explicit `--preview` or `--mock-smoke` enters `PreviewEnvironment` before framework/services/storage/transport initialization. Unknown/conflicting modes and production scenarios are rejected. A mock-only environment prevents production platform operations rather than silently changing the selected mode.
 
-The native bridge implements read-only macOS mechanisms behind an explicit, default-deny `LiveOperationGate`. Preview catalogs, interfaces, icons and downloads are fixtures. The helper wire/request/configuration validators are implemented, but production socket authentication, launchd installation and real DNS/TUN restoration remain separate live-integration work. An unavailable helper is not represented as healthy.
+Production startup reads the private saved draft and actual app/network catalogs. It does not start TUN or request administrator authorization. `ProductionClientBackend` composes real native catalogs/icons, bound HTTPS/DNS resources, private caches/drafts/generations, authenticated helper IPC and `MacXrayCoreRuntime`. Views only call the injected backend. The preview uses a separate fixture implementation and temporary directory; production never receives synthetic nodes, paths, latency or traffic charts.
+
+Clicking Connect validates a policy snapshot and DAT resources, prepares the pinned core, installs/updates the helper if required, waits for a fresh authenticated readiness reply, and applies through `ConfigurationCoordinator`. NativeAOT GUI identity is required for privileged control; the shared `dotnet` host is rejected. Closing the GUI disposes its backend and requests restoration; the helper independently restores on authenticated-client loss.
 
 ## Configuration transaction
 
-`ConfigurationCoordinator` snapshots the typed draft and assets, compiles policy, validates every external DAT reference against the actual protobuf tag/kind, and takes a serialized application lock. Validation precedes core changes.
+The coordinator snapshots policy/assets and validates every external DAT reference against actual protobuf kind/tag before changing the core. Runtime fingerprint is JSON plus sorted asset hashes; generation identity also includes saved DSL. Metadata-only publication does not restart. A disk generation is not assumed to be an actually running core.
 
-- A runtime fingerprint contains Xray JSON plus the sorted resource names and hashes.
-- A generation identity also includes the saved DSL. Metadata-only saves publish a new generation without restarting the mock core.
-- Persisted configuration is distinguished from an actually running core. Starting after a cold launch, or explicitly resuming after Stop, applies even if disk configuration is unchanged.
-- Apply failure/cancellation restores both the prior running generation and prior saved pointer. Recovery is not canceled by the original request. Recovery failure reports protection unavailable, including cancellation followed by failed recovery.
-- Desired DSL retains fixed executable inventories through failed apply/retry. Process starts and telemetry observations are not inputs to the coordinator.
-- Every lifecycle change has a concrete cause. Diagnostic-log failures cannot change the decision.
+Apply failure/cancellation independently attempts core recovery and saved-pointer recovery, even if one fails. Recovery is not canceled by the caller. Failed recovery reports unavailable. Fixed executable inventories remain in the desired policy through retry. Every lifecycle change has a concrete cause; logging failure cannot change its verdict.
 
-`AtomicGenerationStore` writes immutable whole generations, checks their content hashes, flushes files, synchronizes publication directories on macOS/Linux and atomically switches a small pointer. Last verified generations remain available for recovery from corrupt files, malformed/null manifests and corrupt pointers. Sensitive files are created with mode 0600, staging/generation directories with mode 0700; permissions are set at creation, not after writing credentials. The store assumes an application-owned directory, not a shared or attacker-controlled directory.
+`AtomicGenerationStore` publishes immutable verified generations with file/directory fsync and atomic pointer replacement. Drafts preserve incomplete onboarding choices in a checksummed, bounded current/previous store. Sensitive files are created 0600, private directories 0700. Neither store assumes an attacker-controlled shared directory.
 
-## Resources and cancellation
+## Bound resources and probes
 
-`ResourcePreparation` receives an injected transport and an immutable physical-interface binding. No system/direct HTTP client or fallback transport is constructed by the preview. HTTPS URLs and explicit interface identity/BSD names are required. Cache keys include a hash of the source URL, avoiding accidental reuse after a source URL changes without exposing query credentials in file names.
+Each resource operation captures an explicit immutable service/BSD-interface binding and literal DNS IP from the draft. The selected service must still map to that active interface. DNS uses interface-bound UDP with bound TCP for truncation; HTTPS uses bound sockets, certificate verification, bounded redirects and response sizes. No system proxy, default resolver or adapter fallback is constructed.
 
-Startup preparation validates a local cache before requesting a remote resource. Explicit subscription updates use `Refresh`, validating the new response before replacing cache content. Failure keeps the prior cache/runtime. Caller cancellation, replacement cancellation and transport timeout remain distinct; errors identify resource, interface, remote port and stage without dumping endpoint credentials.
+Startup validates caches before network requests; explicit subscription update forces refresh. Providers use the same snapshot. Official Meta indexes are tied to a commit and raw YAML blob hashes before DAT compilation. The core archive, checksum file and extracted ARM64 executable have independent pinned digests. Download/extraction never executes a core.
 
-Each preparation owns and disposes only its own linked cancellation source. Replacement cancels the old operation but cannot dispose its source or let obsolete work overwrite the current progress. Prior failures are bounded history; a successful new operation has a current Ready status.
+Automatic groups are probed using a short-lived unprivileged Xray observatory process with no inbound, TUN or API listener. Only exact pinned observer messages count as results; absent/malformed output is unavailable. Probe files remain private and are removed. All inherited `XRAY_*` and `xray.*` settings are cleared before running any owned core/probe, preventing injected config directories or inherited TUN descriptors.
 
-`SubscriptionReconciler` keeps global/app/rule routes and explicit manual group choices. Missing nodes remain explicit unavailable identities. Fatal subscription structure errors cannot remove previous nodes or selections. Per-node unsupported protocols stay visible and cannot be selected by the compiler.
+Preparation cancellation sources are operation-owned, obsolete work cannot replace current progress, and historical failures are separate from current health. Refresh failures preserve the previous validated cache/runtime. Resource diagnostics identify stage/interface/port without exposing URL credentials.
 
-## Independent verdicts
+## Privileged helper and restoration
 
-Guardian input contains only authenticated main-instance status, TUN takeover, manual-stop status and observation/read freshness. It has no Internet, DNS or latency field. Failed/stale reads produce Unavailable rather than a healthy icon.
+The helper communicates only over a permission-restricted Unix domain socket. It authenticates UID, PID/start identity, executable path/hash and dynamic code identity against root-owned installation metadata. Frames are bounded, sessions/sequences echoed and checked; status observations must be fresh. The helper admits one native TUN and explicit physical interfaces, with no HTTP/SOCKS or network API listeners.
 
-Main network readiness tracks link/IP independently. Internet probes use 30-second rounds, retry after 5 seconds and confirm only three consecutive failures. UI refresh cannot manufacture observations or accelerate the failure counter. Telemetry and accounting have no coordinator/core reference.
+Only the independently pinned official core may be installed/executed as root. User generation files are opened without following links, verified, copied into root-owned immutable generations, rechecked and tested before mutation. No user-writable executable is run as root. Installation stages verified helper/native bytes privately, replaces exact payloads and preserves rollback.
 
-## Usage accounting
+Original DNS dictionaries (including enabled/absent protocol state and unknown plist fields) are durably journaled before mutation. The helper confirms actual TUN address and pinned Xray IPv4/IPv6 route ownership before switching DNS. Stop, core/TUN failure, GUI loss and launchd restart attempt owned-core shutdown and DNS restoration independently. A failed process operation cannot skip DNS restoration; unresolved recovery retains the journal and unavailable status. No Internet/latency/telemetry result is used as a guardian verdict.
 
-The ledger anchors calendar periods to first opening and a saved time zone; successive periods are exactly 30 natural days even across DST. It preserves old totals and classifies increments by the outbound observed at that time.
+## Independent observations and usage
 
-After opening/resume, the first valid observation establishes a baseline and charges no offline bytes. Unavailable, empty partial and invalid observations cannot clear that baseline. Callers may mark an authoritative complete active-connection snapshot to prune closed checkpoints; partial/missing telemetry must never use that flag.
+Guardian input contains authenticated main-instance liveness and actual TUN takeover only. Stale/read failures never produce healthy status. Production UI polls actual helper state; it does not create successful Internet/latency or traffic samples. The independent main-network state machine retains 30-second rounds, 5-second retries and three consecutive failures; no failed display request can restart TUN.
 
-Observation, checkpoint advancement and totals commit under one private lock and one atomic persistence transaction. Schema/counter/key/time-zone/capacity failures stay local to statistics. Valid backups, private file modes, size bounds and rollback preserve the prior totals and first-opening anchor. Snapshot getters return copies; later route changes cannot relabel prior usage.
+The usage ledger supports fixed 30-natural-day periods from first opening and a saved time zone, resume baselines, observed-outbound history and atomic checkpoints/totals. Production currently shows no traffic curve until a real observation source supplies samples; it never substitutes preview observations or estimates. No quota UI is present.
 
-## Verification
+## Verification boundary
 
-`python3 build/Verify-Mac.py` builds the active Mac solution, runs managed mock tests, compiles the C bridge and invokes pure ABI probes, renders UI/control/interaction states, and creates an ad-hoc signed Apple Silicon NativeAOT `.app`. The packaged binary's `--mock-smoke` is executed before distribution. No verification step enables live operations.
+`python3 build/Verify-Mac.py` builds production GUI/helper code, runs only injected mock tests and pure native ABI/route-parser probes, renders isolated UI states and publishes both NativeAOT binaries. Packaged execution is restricted to explicit mock-smoke entrypoints. Computer Use UI checks must launch with `--preview`.
 
-For manual UI checks use `artifacts/package/Egress.app`, which also defaults to preview. Real network acceptance is deliberately unclaimed: it still requires authorized helper installation and separate TCP/UDP, DNS, IPv4/IPv6, Helper, interface-disconnect and recovery tests on the user's two interfaces.
+No automatic check installs launchd jobs, starts a real core/TUN, changes DNS/routes, terminates protected apps or reads the user's real configuration. Live TCP/UDP, DNS, IPv4/IPv6, helper authorization and interface-disconnect behavior remain user-run acceptance; they are not inferred from compilation or mocks.

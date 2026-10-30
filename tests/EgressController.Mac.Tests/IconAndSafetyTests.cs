@@ -78,4 +78,9 @@ public sealed class IconAndSafetyTests
             return [137, 80, 78, 71];
         }
     }
+    private sealed class UnavailableMacHelperTransport : IMacHelperTransport
+    {
+        public Task<MacHelperReply> SendAsync(MacHelperRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new MacHelperReply(false, "helper-not-installed", "Injected disconnected transport.", false, false));
+    }
 }

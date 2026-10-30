@@ -22,6 +22,21 @@ EGRESS_MAC_API int32_t egress_mac_copy_bundle_json(const char *path_utf8, uint8_
 EGRESS_MAC_API int32_t egress_mac_copy_icon_png(const char *path_utf8, uint32_t pixels, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_interfaces_json(uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_dns_json(uint8_t *output, size_t capacity, size_t *required);
+EGRESS_MAC_API uint32_t egress_mac_uid(void);
+EGRESS_MAC_API uint32_t egress_mac_gid(void);
+EGRESS_MAC_API uint32_t egress_mac_euid(void);
+EGRESS_MAC_API int32_t egress_mac_copy_peer_json(int32_t descriptor, uint8_t *output, size_t capacity, size_t *required);
+EGRESS_MAC_API int32_t egress_mac_copy_process_json(int32_t pid, uint8_t *output, size_t capacity, size_t *required);
+EGRESS_MAC_API int32_t egress_mac_copy_file_info(const char *path, uint8_t *output, size_t capacity, size_t *required);
+EGRESS_MAC_API int32_t egress_mac_copy_fd_info(int32_t descriptor, uint8_t *output, size_t capacity, size_t *required);
+EGRESS_MAC_API int32_t egress_mac_verify_process_code(int32_t pid, const char *expected_path);
+EGRESS_MAC_API int32_t egress_mac_set_owner_mode(const char *path, uint32_t uid, uint32_t gid, uint32_t mode);
+EGRESS_MAC_API int32_t egress_mac_bind_socket(int32_t descriptor, const char *interface_name);
+EGRESS_MAC_API int32_t egress_mac_write_dns(const uint8_t *snapshots_json, size_t length, const char *server_ip, int32_t restore);
+EGRESS_MAC_API int32_t egress_mac_tun_present(const char *name);
+EGRESS_MAC_API int32_t egress_mac_tun_takeover(const char *name, const char *ipv4_cidr);
+/* Pure route-byte classifier. Never queries interfaces or the routing table. */
+EGRESS_MAC_API int32_t egress_mac_route_dump_covers_tun(const uint8_t *data, size_t length, uint32_t interface_index);
 #ifdef __cplusplus
 }
 #endif

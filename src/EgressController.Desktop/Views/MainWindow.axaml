@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:views="using:EgressController.Desktop.Views" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.MainWindow" x:DataType="vm:ShellViewModel" Title="Egress — macOS 隔离预览" Width="1260" Height="860" MinWidth="960" MinHeight="660" WindowStartupLocation="CenterScreen" WindowDecorations="Full">
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:views="using:EgressController.Desktop.Views" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.MainWindow" x:DataType="vm:ShellViewModel" Title="{Binding WindowTitle}" Width="1260" Height="860" MinWidth="960" MinHeight="660" WindowStartupLocation="CenterScreen" WindowDecorations="Full">
  <Grid ColumnDefinitions="202,*">
   <Border Background="{StaticResource Sidebar}" BorderBrush="#E5E9F1" BorderThickness="0,0,1,0">
    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="15,25,15,17">
@@ -16,17 +16,17 @@
      <Button Name="SettingsNav" Classes="navigation" Classes.active="{Binding SettingsVisible}" Command="{Binding SettingsCommand}"><Grid ColumnDefinitions="22,*" ColumnSpacing="10"><ui:Glyph Kind="settings" Width="18" Height="18"/><TextBlock Grid.Column="1" Text="设置"/></Grid></Button>
      <Border Height="1" Background="#E0E5EF" Margin="9,0"/>
      <Button Classes="quiet" Command="{Binding OpenLogsCommand}" HorizontalContentAlignment="Left" Padding="12,7"><StackPanel Orientation="Horizontal" Spacing="10"><ui:Glyph Kind="logs" Width="16" Height="16"/><TextBlock Text="日志与诊断" FontSize="11"/></StackPanel></Button>
-     <StackPanel Margin="12,0" Spacing="5"><StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Fill="#D5A55B" Width="5" Height="5"/><TextBlock Text="隔离预览" FontSize="10" Foreground="#9C8055"/></StackPanel><TextBlock Text="macOS · Xray only" FontSize="10" Foreground="#9CA5B5"/></StackPanel>
+     <StackPanel Margin="12,0" Spacing="5"><StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Fill="{Binding ModeBrush}" Width="5" Height="5"/><TextBlock Text="{Binding ModeLabel}" FontSize="10" Foreground="{Binding ModeBrush}"/></StackPanel><TextBlock Text="macOS · Xray only" FontSize="10" Foreground="#9CA5B5"/></StackPanel>
     </StackPanel>
    </Grid>
   </Border>
   <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto">
    <Grid Margin="30,25,30,23" ColumnDefinitions="*,Auto" ColumnSpacing="16">
     <StackPanel Spacing="7"><TextBlock Classes="title" Text="{Binding PageTitle}"/><TextBlock Classes="muted" Text="{Binding PageDescription}"/></StackPanel>
-    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center"><TextBlock Classes="caption" Text="{Binding SaveStatus}"/><Border Background="#FFF8EB" BorderBrush="#F0E3C8" BorderThickness="1" CornerRadius="5" Padding="8,4"><TextBlock Text="PREVIEW" FontSize="9" FontWeight="SemiBold" LetterSpacing=".9" Foreground="#A17E40"/></Border></StackPanel>
+    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center"><TextBlock Classes="caption" Text="{Binding SaveStatus}"/><Button Content="取消操作" Command="{Binding CancelOperationCommand}" IsVisible="{Binding IsBusy}" Classes="quiet" FontSize="10"/><Border IsVisible="{Binding IsPreview}" Background="#FFF8EB" BorderBrush="#F0E3C8" BorderThickness="1" CornerRadius="5" Padding="8,4"><TextBlock Text="PREVIEW" FontSize="9" FontWeight="SemiBold" LetterSpacing=".9" Foreground="#A17E40"/></Border></StackPanel>
    </Grid>
    <Border Grid.Row="1" IsVisible="{Binding HasIssue}" Background="#FFF0F0" BorderBrush="#F1D6D9" BorderThickness="1" CornerRadius="8" Margin="30,0,30,16" Padding="13,10"><TextBlock Text="{Binding CurrentIssue}" Foreground="#A74958" FontSize="12" TextWrapping="Wrap"/></Border>
-   <Grid Grid.Row="2" Margin="30,0,30,22">
+   <Grid Grid.Row="2" Margin="30,0,30,22" IsEnabled="{Binding CanEdit}">
     <views:OverviewView IsVisible="{Binding OverviewVisible}"/><views:ApplicationsView IsVisible="{Binding AppsVisible}"/><views:RulesView IsVisible="{Binding RulesVisible}"/><views:NodesView IsVisible="{Binding NodesVisible}"/><views:SettingsView IsVisible="{Binding SettingsVisible}"/>
    </Grid>
    <Border Grid.Row="3" BorderBrush="#E9ECF2" BorderThickness="0,1,0,0" Background="#FCFDFE" Padding="29,10"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBlock Text="{Binding Notice}" FontSize="10" Foreground="#8993A5" TextTrimming="CharacterEllipsis"/><Button Grid.Column="1" Classes="link" Content="查看诊断" Command="{Binding OpenLogsCommand}" FontSize="10" MinHeight="18"/></Grid></Border>

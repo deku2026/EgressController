@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   macos-preview:
-    name: Verify and package macOS preview
+    name: Verify and package macOS client
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -35,7 +35,7 @@ jobs:
           fi
       - uses: actions/upload-artifact@v7
         with:
-          name: Egress-osx-arm64-preview
+          name: Egress-osx-arm64
           path: artifacts/package/*
           if-no-files-found: error
       - name: Publish existing version tag
@@ -46,5 +46,5 @@ jobs:
         run: >-
           gh release create "$RELEASE_TAG"
           artifacts/package/EgressController-osx-arm64.zip artifacts/package/SHA256SUMS.txt
-          --verify-tag --generate-notes --title "Egress macOS preview $RELEASE_TAG"
-          --notes "Isolated macOS preview with an ad-hoc signed NativeAOT app. No privileged helper or live TUN takeover is enabled."
+          --verify-tag --generate-notes --title "Egress macOS $RELEASE_TAG"
+          --notes "Ad-hoc signed NativeAOT app and privileged helper. Default production startup; explicit --preview for isolated UI. Automated verification uses mocks only; live network acceptance must be performed separately."

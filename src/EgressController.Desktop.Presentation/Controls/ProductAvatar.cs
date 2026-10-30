@@ -9,20 +9,23 @@ namespace EgressController.Desktop.Presentation.Controls;
 public sealed class ProductAvatar : Control
 {
     private static readonly Dictionary<string, Bitmap?> Cache = new(StringComparer.Ordinal);
+    public static readonly StyledProperty<IImage?> SourceProperty=AvaloniaProperty.Register<ProductAvatar,IImage?>(nameof(Source));
+    public IImage? Source{get=>GetValue(SourceProperty);set=>SetValue(SourceProperty,value);}
     public static readonly StyledProperty<string> ProductProperty = AvaloniaProperty.Register<ProductAvatar, string>(nameof(Product), "app");
     public string Product { get => GetValue(ProductProperty); set => SetValue(ProductProperty, value); }
-    static ProductAvatar() => AffectsRender<ProductAvatar>(ProductProperty);
+    static ProductAvatar() => AffectsRender<ProductAvatar>(ProductProperty,SourceProperty);
     public static Bitmap? Artwork(string product)
     {
         if (Cache.TryGetValue(product, out var value)) return value;
+        if(string.IsNullOrEmpty(product)||product.Length>64||!product.All(character=>char.IsAsciiLetterOrDigit(character)||character is '-' or '_'))return null;
         var uri = new Uri($"avares://EgressController.Desktop.Presentation/Assets/{product}.png");
         try { value = AssetLoader.Exists(uri) ? new Bitmap(AssetLoader.Open(uri)) : null; } catch { value = null; }
-        Cache[product] = value; return value;
+        if(value is not null)Cache[product] = value; return value;
     }
     public override void Render(DrawingContext context)
     {
         double side = Math.Min(Bounds.Width, Bounds.Height); if (side < 2) return;
-        var artwork = Artwork(Product); bool dark = ArtworkContrast.NeedsDarkSurface(artwork);
+        var artwork = Source??Artwork(Product); bool dark = ArtworkContrast.NeedsDarkSurface(artwork);
         context.DrawRectangle(dark ? ArtworkContrast.DarkSurface : ArtworkContrast.LightSurface, dark ? ArtworkContrast.DarkEdge : ArtworkContrast.LightEdge, new Rect(.5, .5, side - 1, side - 1), side * .24, side * .24);
         if (artwork is not null)
         {

@@ -36,7 +36,7 @@ The active product is a native Avalonia/.NET macOS client with Xray-core as its 
 
 - Implement in a new Git worktree/branch, never the user's original checkout.
 - Only mocks, injected resources, synthetic bundles and isolated previews for tests. Never start real TUN, terminate real targets, install/change services, modify system DNS/routes/startup or access the user's real configuration for testing.
-- Mock safety precedes all production initialization. Default desktop startup is a labeled isolated preview until live integration is separately authorized and validated. Native compilation/pure ABI probes are allowed; previews cannot query live platform state.
+- Default desktop startup is production. Only explicit --preview or --mock-smoke enables isolated preview before any production initialization. Tests and development screenshots must always use explicit preview/mock entrypoints; never launch the default production app during development validation. Native compilation/pure ABI probes are allowed; previews cannot query live platform state. Real TUN takeover requires the user to explicitly start it in the production UI.
 - Inspect normal/compact rendered windows and hover/pressed/focus/disabled states, not just compilation. Never put private subscriptions/credentials in logs, screenshots, fixtures or commits.
 - Review fixed process scope and guardian/network separation; update concise README plus technical docs. Submit and attach a PR, check CI, and do not merge unless asked.
 

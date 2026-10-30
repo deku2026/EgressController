@@ -51,9 +51,12 @@ serialized as a property list. An absent configuration differs from an explicitl
 The recovery model preserves unknown DNS keys rather than reconstructing a partial server list.
 
 Every physical/native read requires `LiveOperationGate.ForExplicitLiveUse()`. A new gate denies
-operations. `EGRESS_MOCK_ONLY=1` also denies explicit live gates. The UI preview must enter its mock
-mode before composition and inject in-memory adapters. The bridge does not export DNS writes,
-route writes, process termination, startup changes, service installation or Xray execution.
+operations. `EGRESS_MOCK_ONLY=1` also denies explicit live gates. The explicit `--preview` and
+`--mock-smoke` entries enter mock mode before composition and inject in-memory adapters. The default
+desktop entry uses production adapters without elevating the GUI. DNS mutation is exposed only to
+the root helper, with a second native check rejecting both non-root callers and mock mode.
+Resource sockets use native `IP_BOUND_IF` / `IPV6_BOUND_IF` before connect; binding errors fail the
+request. The bound DNS resolver never invokes the system/default resolver.
 
 ## ABI and ownership
 
@@ -64,19 +67,43 @@ The caller allocates and frees its own output; native allocations never cross th
 memory is freed by the same native function. Objective-C exceptions are converted to stable status
 codes. C# bounds output at 16 MiB and allows at most three attempts if a snapshot changes while copying.
 
-## Privileged helper is not shipped
+## Privileged helper lifecycle
 
-The current delivery defines an AOT-friendly protocol and validation boundary; it does **not** install
-or implement a privileged launchd server. `UnavailableMacHelperTransport` always reports
-`helper-not-installed`, with `TunTakenOver=false` and `DnsRestored=false`. A mock may never convert
-this into a live readiness claim.
+`tools/EgressController.MacHelper` supplies the root launchd service; `MacHelperClient` and
+`MacXrayCoreRuntime` implement the production connection and `ICoreRuntime` adapter. Nothing installs
+on startup. The explicit install/apply action invokes `MacHelperInstaller`, whose administrator
+authorization first copies the packaged helper, native library and plan into a root-owned random
+0700 directory. Each copied payload is SHA-256 checked before executing the root-owned installer.
+The existing shared system directory retains its normal 0755 protection; symlinks and writable or
+foreign-owned parents are rejected. Installation pins the authorized GUI executable, UID/GID and
+official Xray executable digest in root-owned metadata. A changed GUI/core identity requires another
+explicit authorized installation. The server only executes its verified private core copy.
 
-IPC frames use a four-byte network-order payload length and at most 1 MiB UTF-8 JSON. The request
-validator requires a verified peer executable, authorized UID, PID plus process-start identity,
-session nonce and increasing sequence. Only inspect, apply-validated-config and stop-and-restore
-operations exist. Apply requests reference owned configuration/core directories, SHA-256 content
-digests and two distinct stable network service IDs. No shell command, arbitrary launch arguments,
-subscription URL or generic filesystem operation is accepted.
+Protocol v2 uses a four-byte network-order length and at most 1 MiB UTF-8 JSON, over a local Unix
+socket. The parent is root owned; the socket is 0600 and owned by the authorized user. The client
+checks ownership, root peer identity and installed helper code identity. The helper obtains actual
+peer UID/GID/PID and process start identity from the kernel, checks the pinned GUI digest and verifies
+the running code signature/CDHash against that pinned executable. Generic interpreter hosts cannot
+stand in for the GUI. Each connection has a session nonce and increasing sequence; replies echo
+both and must be fresh. A failed read clears healthy status. Inspect, validate, apply, heartbeat and
+stop/restore are the complete operations; no shell command, arbitrary arguments or subscription URL
+is accepted through runtime IPC.
+
+The GUI stages whole generations with a digest manifest. The helper opens source descriptors with
+`O_NOFOLLOW`, verifies ownership/type/mode/size, copies into its root-private generation directory,
+and verifies copied content. It validates configuration and DAT references before running the
+pinned Xray with `run -test`; a successful check precedes stopping/replacing the previous runtime.
+The persistent authenticated connection sends heartbeats. EOF, client instance loss, core exit,
+confirmed TUN failure, helper termination or explicit stop drive independent recovery. The helper's
+verdict contains main-instance and TUN facts, never Internet/DoH reachability.
+
+Before DNS changes the helper durably writes its exact recovery snapshot. SystemConfiguration changes
+are committed under a preferences lock; restore reinstates each original plist dictionary, protocol
+presence and enabled state. Recovery runs after crashes/reboots as well as normal stops. TUN status
+requires a running core, an up interface with the pinned Xray Darwin local address (gateway + 1),
+and global IPv4/IPv6 route ownership on that interface. The pinned core's protected default uses eight
+prefixes per family (`1/8`, `2/7`, `4/6`, `8/5`, `16/4`, `32/3`, `64/2`, `128/1`). Host-only,
+interface-scoped, rejected, wrong-interface or malformed routes cannot claim takeover.
 
 `MacHelperConfigurationValidator` independently checks the compiler's generated JSON. It admits one
 native TUN inbound and no local HTTP/SOCKS/control listeners, API, arbitrary file logs or unreviewed
@@ -88,14 +115,10 @@ and a direct global catch-all are rejected. Built-in DNS must be routed to non-h
 hijacking. Tests compile a real policy through `XrayConfigCompiler` and validate the generated bytes
 before exercising tampered configuration variants.
 
-Before a real helper can be enabled, its server must supply actual peer credentials and signature/
-installation identity verification; enforce owner-only Unix socket permissions; open content with
-no-follow, ownership and mode checks; hash the opened descriptors to avoid path races; validate the
-generated Xray configuration semantics; restrict all network mutations to that plan; durably record
-the DNS/route recovery journal before mutation; and authenticate recovery after crashes/reboots.
-The current lexical validator is not a substitute for those OS-level checks. DNS snapshot framing
-validation is also not permission to restore an untrusted property list. Real TCP/UDP/DNS/IPv4/IPv6,
-dual-interface failure behavior, privileges and recovery have not been exercised by mock tests.
+The implementation is compiled and checked through injected tests. Real administrator prompts,
+installation, TCP/UDP/DNS/IPv4/IPv6 takeover, dual-interface failure behavior and system restoration
+are not exercised by automated verification. Those remain explicit user integration acceptance;
+compilation or a mocked green state is never reported as evidence of a working live takeover.
 
 ## Safe validation
 
@@ -107,15 +130,18 @@ python3 build/Build-MacNative.py
 
 The managed suite uses only in-memory application trees, artwork sources and protocol data. It never
 enumerates installed applications or reads live interfaces/DNS. The native script builds the dylib
-and runs CTest probes limited to ABI version, syntactic path validation and buffer-contract checks.
+and runs CTest probes limited to ABI version, syntactic path validation, buffer-contract checks
+and synthetic routing-table byte classification.
 These tests do not invoke the application, artwork or SystemConfiguration exports. Assertions stay
 enabled in Release. This proves compilation and the tested boundary contracts; it does not prove
 that a privileged helper or real TUN is operational.
 
-The affected managed suite passed **81 mock tests** after the executable-type correction. Its
+The affected managed suite passed **87 mock tests** after the production boundary additions. Its
 synthetic stream matrix covers thin 32/64-bit and FAT32/FAT64 byte orders, non-executable file types,
 universal dylibs, mixed slices, Java magic, truncation, overlap, integer bounds, malformed commands
-and execute-mode exclusion. No installed application file was read for this verification.
+and execute-mode exclusion. Additional tests cover injected IPC/runtime flows, malformed and stale
+replies, heartbeat timeout/recovery, installation-plan quoting and default mock gate denial. No
+installed application, real socket peer, real route or DNS state was read for this verification.
 
 `artifacts/macos-native/libEgressMacNative.dylib` must be staged beside the managed/AOT executable
 when packaging live platform access. No runtime library is installed globally by the build script.

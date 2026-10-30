@@ -173,9 +173,37 @@ public sealed class PolicyTests
     [Fact]
     public void MissingSavedPathsAreKeptAndRouteChangesNeverRebuildInventory()
     {
-        var doc = Document(); doc.Applications[0].ExecutablePaths.Add("/Applications/Editor-v1.app/Contents/MacOS/Editor"); var before = doc.Applications[0].ExecutablePaths.ToArray();
+        var doc = Document(); doc.Applications[0].ExecutablePaths.Add("/Applications/Editor.app/Contents/Frameworks/Removed-v1.app/Contents/MacOS/Legacy"); var before = doc.Applications[0].ExecutablePaths.ToArray();
         doc.Applications[0].Via = ExitChoice.NonHome;
         Assert.True(XrayConfigCompiler.Compile(doc, Options()).IsSuccess); Assert.Equal(before, doc.Applications[0].ExecutablePaths);
+        var roundTrip = PolicyYaml.Read(PolicyYaml.Write(doc)); Assert.True(roundTrip.IsSuccess);
+        Assert.Equal(before, roundTrip.Document!.Applications[0].ExecutablePaths);
+    }
+    [Theory]
+    [InlineData("/usr/bin/python3")]
+    [InlineData("/Applications/Editor-v1.app/Contents/MacOS/Editor")]
+    [InlineData("/Applications/Editor.app.evil/Contents/MacOS/Editor")]
+    [InlineData("/Applications/Editor.application/Contents/MacOS/Editor")]
+    public void SavedInventoryCannotEscapeItsExactBundleRootEvenThroughDsl(string path)
+    {
+        var doc = Document(); doc.Applications[0].ExecutablePaths.Add(path);
+        Assert.Contains(PolicyValidator.Validate(doc), diagnostic => diagnostic.Code == "application.scope");
+        Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
+        var read = PolicyYaml.Read(PolicyYaml.Write(doc)); Assert.False(read.IsSuccess);
+        Assert.Contains(read.Diagnostics, diagnostic => diagnostic.Code == "application.scope");
+        Assert.Contains(path, doc.Applications[0].ExecutablePaths); // Invalid selections require repair, never silent removal.
+    }
+    [Theory]
+    [InlineData("/usr/bin")]
+    [InlineData("/Applications")]
+    [InlineData("/")]
+    [InlineData("/Applications/Editor.app/")]
+    public void SharedDirectoriesCannotBecomeApplicationBundleRoots(string root)
+    {
+        var doc = Document(); doc.Applications[0].BundlePath = root;
+        doc.Applications[0].PrimaryExecutable = null; doc.Applications[0].ExecutablePaths = [root.TrimEnd('/') + "/python3"];
+        Assert.Contains(PolicyValidator.Validate(doc), diagnostic => diagnostic.Code == "application.bundle");
+        Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
     }
     [Fact]
     public void MissingPhysicalInterfaceCannotFallBack()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Compile the read-only macOS bridge and run only its pure, offline ABI probes."""
+"""Compile the macOS platform/privilege bridge and run only its pure, offline ABI probes."""
 import argparse
 from pathlib import Path
 import platform
@@ -18,4 +18,4 @@ subprocess.run(["cmake", "-S", str(root / "native" / "macos"), "-B", str(output)
                 "-DCMAKE_BUILD_TYPE=" + arguments.configuration, "-DBUILD_TESTING=ON"], check=True)
 subprocess.run(["cmake", "--build", str(output), "--config", arguments.configuration], check=True)
 subprocess.run(["ctest", "--test-dir", str(output), "--output-on-failure", "-C", arguments.configuration], check=True)
-print("Compiled macOS read-only bridge; pure ABI probes passed. No live platform functions were invoked.")
+print("Compiled macOS platform/privilege bridge; pure ABI probes passed. No live platform functions were invoked.")
