@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework><PlatformTarget>AnyCPU</PlatformTarget>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup><PackageReference Include="Avalonia"/><PackageReference Include="Avalonia.Themes.Fluent"/><PackageReference Include="Avalonia.Fonts.Inter"/></ItemGroup>
+  <ItemGroup><AvaloniaResource Include="Assets/*.png"/><None Update="Assets/SOURCES.md;Assets/LICENSE-*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="licenses/%(Filename)%(Extension)"/></ItemGroup>
+</Project>

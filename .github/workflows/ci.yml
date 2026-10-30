@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -15,55 +14,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test-package:
-    name: Build, test, and package (win-x64)
-    runs-on: windows-latest
+  macos-mock-aot:
+    name: macOS · mock tests, UI and NativeAOT
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       EGRESS_MOCK_ONLY: '1'
-
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      TESTINGPLATFORM_TELEMETRY_OPTOUT: '1'
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Install .NET SDK
-        uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-
-      - name: Restore
-        run: dotnet restore EgressController.slnx
-
-      - name: Build
-        run: dotnet build EgressController.slnx --configuration Release --no-restore -p:EgressMockOnly=true
-
-      - name: Mock-only tests (no live TUN or process termination)
-        shell: pwsh
-        run: ./build/Invoke-Tests.ps1 -Configuration Release -NoBuild
-
-      - name: Render and verify isolated UI previews
-        run: dotnet run --project tools/EgressController.UiPreview -c Release --no-build -- --screenshots artifacts/ui-preview
-
-      - name: Upload UI previews
+      - name: Verify managed architecture, pure C ABI, mock interactions and NativeAOT package
+        run: python3 build/Verify-Mac.py
+      - name: Upload rendered states and interaction evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: EgressController-ui-preview
-          path: artifacts/ui-preview/*.png
+          name: Egress-macOS-ui
+          path: artifacts/mac-ui/
           if-no-files-found: error
           retention-days: 14
-
-      - name: Test release version resolver
-        shell: pwsh
-        run: ./build/Test-ReleaseVersion.ps1
-
-      - name: Create NativeAOT and unsigned MSIX artifacts
-        shell: pwsh
-        run: ./build/Package.ps1 -Version "0.0.${{ github.run_number }}"
-
-      - name: Upload package artifacts
+      - name: Upload verified Apple Silicon preview
         uses: actions/upload-artifact@v7
         with:
-          name: EgressController-win-x64
-          path: artifacts/package/*
+          name: Egress-osx-arm64
+          path: |
+            artifacts/package/EgressController-osx-arm64.zip
+            artifacts/package/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

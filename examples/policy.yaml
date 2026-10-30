@@ -1,0 +1,58 @@
+# Synthetic example only. Interface identities come from the native adapter picker.
+version: 1
+interfaces:
+  home: ethernet-home-stable-id
+  nonhome: ethernet-mobile-stable-id
+defaults:
+  china: nonhome
+  global: {proxy: global-selection}
+  proxy_interface: nonhome
+dns:
+  upstream_ip: 1.1.1.1
+tun:
+  name: utun10
+  ipv4_cidr: 198.18.0.1/30
+  mtu: 1500
+applications:
+  - id: editor
+    name: Example Editor
+    path: /Applications/Example Editor.app
+    primary_executable: /Applications/Example Editor.app/Contents/MacOS/Editor
+    executables:
+      - /Applications/Example Editor.app/Contents/MacOS/Editor
+      - /Applications/Example Editor.app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper
+    via: home
+    enabled: true
+rule_sets:
+  - id: example-service
+    name: Example service
+    sources: []
+    domains:
+      - {kind: suffix, value: example.test}
+    ip_cidrs: [203.0.113.0/24, '2001:db8::/32']
+    via: {proxy: global-selection}
+    enabled: true
+nodes:
+  - id: example-vless
+    name: Example VLESS TLS
+    source_id: example-subscription
+    protocol: vless
+    server: proxy.example.test
+    port: 443
+    user_id: 00000000-0000-4000-8000-000000000001
+    encryption: none
+    network: tcp
+    tls: true
+    server_name: proxy.example.test
+groups:
+  - id: global-selection
+    name: Global
+    source_id: example-subscription
+    kind: select
+    members: [example-vless]
+    selected: example-vless
+subscriptions:
+  - id: example-subscription
+    name: Example subscription
+    url: https://subscription.example.test/clash.yaml
+providers: []

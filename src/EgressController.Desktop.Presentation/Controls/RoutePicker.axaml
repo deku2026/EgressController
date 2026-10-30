@@ -1,0 +1,9 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Desktop.Presentation.Controls.RoutePicker">
+  <Border Background="#F4F5F8" BorderBrush="#E9EBF1" BorderThickness="1" CornerRadius="7" Padding="3">
+    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="2">
+      <Button x:Name="HomeButton" Classes="route home" Click="OnHome" ToolTip.Tip="家宽直连 · 严格绑定家宽网卡" AutomationProperties.Name="家宽直连"><StackPanel Orientation="Horizontal" Spacing="5"><Ellipse Width="5" Height="5" Fill="#8A6FD4"/><TextBlock Text="家宽"/></StackPanel></Button>
+      <Button x:Name="NonHomeButton" Grid.Column="1" Classes="route nonhome" Click="OnNonHome" ToolTip.Tip="非家宽直连 · 严格绑定非家宽网卡" AutomationProperties.Name="非家宽直连"><StackPanel Orientation="Horizontal" Spacing="5"><Ellipse Width="5" Height="5" Fill="#39A2AD"/><TextBlock Text="非家宽"/></StackPanel></Button>
+      <Button x:Name="ProxyButton" Grid.Column="2" Classes="route proxy" Click="OnProxy" ToolTip.Tip="指定节点或分组 · 经非家宽网卡" AutomationProperties.Name="节点或分组"><StackPanel Orientation="Horizontal" Spacing="5"><Ellipse Width="5" Height="5" Fill="#4C82DE"/><TextBlock Text="代理"/></StackPanel></Button>
+    </Grid>
+  </Border>
+</UserControl>

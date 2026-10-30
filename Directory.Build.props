@@ -1,13 +1,13 @@
 <Project>
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
-    <PlatformTarget>x64</PlatformTarget>
+    <PlatformTarget>AnyCPU</PlatformTarget>
 
     <Product>EgressController</Product>
     <Authors>EgressController contributors</Authors>
@@ -17,6 +17,16 @@
     <RepositoryType>git</RepositoryType>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Historical Windows projects are isolated in EgressController.Windows.slnx.
+       New projects inherit the platform-neutral macOS-first baseline above. -->
+  <PropertyGroup>
+    <LegacyWindowsProjects>;EgressController.App;EgressController.Core;EgressController.Diagnostics;EgressController.Guardian;EgressController.GuardService;EgressController.GuardTray;EgressController.Launcher;EgressController.Presentation;EgressController.Rules;EgressController.SingBox;EgressController.State;EgressController.Transport;EgressController.Windows;EgressController.Core.Tests;EgressController.Guardian.Tests;EgressController.Launcher.Tests;EgressController.Rules.Tests;EgressController.SingBox.Tests;EgressController.State.Tests;EgressController.Windows.IntegrationTests;EgressController.UiPreview;TestApp.Helper;TestApp.Parent;TestCliShim;</LegacyWindowsProjects>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([System.String]::Copy('$(LegacyWindowsProjects)').Contains(';$(MSBuildProjectName);'))">
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <!-- AOT and strict warnings apply to product code and tools, but not test executables. -->
