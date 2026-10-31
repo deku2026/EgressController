@@ -6,7 +6,7 @@ namespace EgressController.Runtime.Tests;
 public sealed class ResourceTests
 {
     private static ResourceDescriptor Resource(string id = "catalog", string adapter = "saved-service") => new()
-    { Id = id, Url = new("https://resources.example.invalid/" + id), Interface = new(adapter, adapter == "saved-service" ? "en5" : "en7") };
+    { Id = id, Url = new("https://resources.example.invalid/" + id), Exit = ResourceExitSnapshot.Bound(new(adapter, adapter == "saved-service" ? "en5" : "en7")) };
 
     [Fact]
     public async Task ValidLocalCacheAvoidsRemoteAndCorruptionRecoversThroughSelectedInterface()
@@ -31,9 +31,9 @@ public sealed class ResourceTests
         Assert.Equal(new byte[] { 1 }, await preparation.PrepareAsync(resource, _ => true, TestContext.Current.CancellationToken));
         transport.Add(resource.Url, [2]);
         Assert.Equal(new byte[] { 1 }, await preparation.PrepareAsync(resource, _ => true, TestContext.Current.CancellationToken));
-        var refresh = new ResourceDescriptor { Id = resource.Id, Url = resource.Url, Interface = resource.Interface, CachePolicy = PreparationCachePolicy.Refresh };
+        var refresh = new ResourceDescriptor { Id = resource.Id, Url = resource.Url, Exit = resource.Exit, CachePolicy = PreparationCachePolicy.Refresh };
         Assert.Equal(new byte[] { 2 }, await preparation.PrepareAsync(refresh, _ => true, TestContext.Current.CancellationToken));
-        var changedUrl = new ResourceDescriptor { Id = resource.Id, Url = new("https://resources.example.invalid/updated-source"), Interface = resource.Interface };
+        var changedUrl = new ResourceDescriptor { Id = resource.Id, Url = new("https://resources.example.invalid/updated-source"), Exit = resource.Exit };
         transport.Add(changedUrl.Url, [3]);
         Assert.Equal(new byte[] { 3 }, await preparation.PrepareAsync(changedUrl, _ => true, TestContext.Current.CancellationToken));
         Assert.Equal(3, transport.RequestCount);
@@ -54,7 +54,7 @@ public sealed class ResourceTests
     [Fact]
     public async Task TimeoutAndCallerCancellationRemainDistinct()
     {
-        var timeout = new ResourceDescriptor { Id = "rules", Url = new("https://resources.example.invalid/rules"), Interface = new("service", "en5"), Timeout = TimeSpan.FromMilliseconds(20) };
+        var timeout = new ResourceDescriptor { Id = "rules", Url = new("https://resources.example.invalid/rules"), Exit = ResourceExitSnapshot.Bound(new("service", "en5")), Timeout = TimeSpan.FromMilliseconds(20) };
         var preparation = new ResourcePreparation(new WaitingTransport(), new InMemoryResourceCache());
         var error = await Assert.ThrowsAsync<ResourcePreparationException>(() => preparation.PrepareAsync(timeout, _ => true, TestContext.Current.CancellationToken));
         Assert.True(error.IsTimeout); Assert.Equal(443, error.RemotePort); Assert.Equal(PreparationStage.Downloading, error.Stage);

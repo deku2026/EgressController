@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System.Net.Sockets;
+using EgressController.Runtime;
 
 namespace EgressController.Mac;
 
@@ -19,7 +20,10 @@ public sealed class MacHelperClient : IAsyncDisposable
     private Task? _heartbeat;
     private int _disposed;
     private MacHelperStatus _status = new(false, false, false, false, 0, null, "尚未连接特权服务。", DateTimeOffset.MinValue);
+    private CoreConnectionSnapshot _connections = CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow);
     public MacHelperStatus Status => Volatile.Read(ref _status);
+    /// <summary>Optional cached observations; reading them never sends a request or changes core/protection state.</summary>
+    public CoreConnectionSnapshot ConnectionSnapshot => Volatile.Read(ref _connections);
     public MacHelperClient(LiveOperationGate gate, MacHelperEndpoint? endpoint = null)
         : this(new UnixMacHelperConnection(gate, endpoint ?? MacHelperEndpoint.Installed)) { }
     /// <summary>Injected connections are reserved for isolated tests; no native adapters are created.</summary>
@@ -56,6 +60,7 @@ public sealed class MacHelperClient : IAsyncDisposable
                 || reply.Status.ObservedAt < DateTimeOffset.UtcNow.AddSeconds(-15) || reply.Status.ObservedAt > DateTimeOffset.UtcNow.AddSeconds(5))
                 throw new IOException("Helper reply identity or freshness was not valid.");
             Volatile.Write(ref _status, reply.Status);
+            AcceptConnections(reply.Connections);
             return reply;
         }
         catch
@@ -65,6 +70,21 @@ public sealed class MacHelperClient : IAsyncDisposable
             throw;
         }
         finally { if (locked) _requests.Release(); }
+    }
+    private void AcceptConnections(CoreConnectionSnapshot? connections)
+    {
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            Volatile.Write(ref _connections, CoreConnectionSnapshots.IsValid(connections, now)
+                ? connections! with { Records = System.Array.AsReadOnly(connections.Records.ToArray()) }
+                : CoreConnectionSnapshots.Unavailable(now, "特权服务未提供有效连接观测；核心状态仍独立显示。"));
+        }
+        catch (Exception)
+        {
+            // Optional telemetry must never reach SendAsync's lifecycle/transport failure path.
+            Volatile.Write(ref _connections, CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow));
+        }
     }
     private async Task HeartbeatLoopAsync()
     {

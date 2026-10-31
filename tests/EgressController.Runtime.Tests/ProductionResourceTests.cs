@@ -19,7 +19,7 @@ public sealed class ProductionResourceTests
         var binder = new FailingBinder(); var dns = new FixedResolver(); var transport = new BoundHttpsResourceTransport(binder, dns);
         await Assert.ThrowsAsync<IOException>(async () => await transport.ConnectAsync(new DnsEndPoint("example.test", 443), Binding, TestContext.Current.CancellationToken));
         Assert.Equal(1, binder.Calls); Assert.Equal(1, dns.Calls); Assert.Equal(Binding, binder.Binding);
-        await Assert.ThrowsAsync<ArgumentException>(() => transport.DownloadAsync(new ResourceDescriptor { Id = "x", Url = new("http://example.test"), Interface = Binding }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => transport.DownloadAsync(new ResourceDescriptor { Id = "x", Url = new("http://example.test"), Exit = ResourceExitSnapshot.Bound(Binding) }, TestContext.Current.CancellationToken));
         Assert.Equal(1, binder.Calls);
     }
     [Fact]
@@ -31,7 +31,7 @@ public sealed class ProductionResourceTests
             factories++; Assert.False(sockets.UseProxy); Assert.False(sockets.AllowAutoRedirect); Assert.False(sockets.UseCookies); Assert.NotNull(sockets.ConnectCallback);
             return handler;
         });
-        var descriptor = new ResourceDescriptor { Id = "synthetic", Url = new("https://resource.test/start"), Interface = Binding, MaximumBytes = 3 };
+        var descriptor = new ResourceDescriptor { Id = "synthetic", Url = new("https://resource.test/start"), Exit = ResourceExitSnapshot.Bound(Binding), MaximumBytes = 3 };
         Assert.Equal(new byte[] { 1, 2, 3 }, await transport.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
         Assert.Equal(2, handler.Calls); Assert.Equal(1, factories);
         var downgrade = new BoundHttpsResourceTransport(new FailingBinder(), new FixedResolver(), _ => new HttpFixture { Downgrade = true });

@@ -87,9 +87,9 @@ internal static class ProductionCompositionChecks
         {
             IconRequests++;using var stream=AssetLoader.Open(new Uri("avares://EgressController.Desktop.Presentation/Assets/vscode.png"));using var memory=new MemoryStream();stream.CopyTo(memory);return Task.FromResult<byte[]?>(memory.ToArray());
         }
-        public Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(InterfaceBinding binding,MacPolicyDocument document,CancellationToken cancellationToken=default)=>_fixtures.LoadRuleCatalogAsync(binding,document,cancellationToken);
-        public Task<MacPolicyDocument> ImportSubscriptionAsync(Uri uri,MacPolicyDocument current,InterfaceBinding binding,CancellationToken cancellationToken=default)=>throw new InvalidOperationException("No subscription is configured in this composition test.");
-        public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,InterfaceBinding binding,CancellationToken cancellationToken=default)=>PreparationFailure is {} failure?Task.FromException<ClientPreparedResources>(failure):_fixtures.PrepareResourcesAsync(document,binding,cancellationToken);
+        public Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=>_fixtures.LoadRuleCatalogAsync(document,cancellationToken);
+        public Task<MacPolicyDocument> ImportSubscriptionAsync(Uri uri,MacPolicyDocument current,CancellationToken cancellationToken=default)=>throw new InvalidOperationException("No subscription is configured in this composition test.");
+        public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=>PreparationFailure is {} failure?Task.FromException<ClientPreparedResources>(failure):_fixtures.PrepareResourcesAsync(document,cancellationToken);
         public Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document,InterfaceBinding binding,CancellationToken cancellationToken=default)=>Task.FromResult<IReadOnlyList<GroupProbe>>([]);
         public Task<ApplyResult> ApplyAsync(MacPolicyDocument document,XrayCompileOptions options,IReadOnlyDictionary<string,byte[]> assets,CancellationToken cancellationToken=default)=>Task.FromResult(new ApplyResult(ApplyDisposition.Rejected,null,[new("test.only","This injected composition never starts a network core.")]));
         public Task<bool> StopAsync(CancellationToken cancellationToken=default){Runtime=Runtime with{Running=false};return Task.FromResult(true);}

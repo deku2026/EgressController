@@ -1,0 +1,104 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls"
+ x:Class="EgressController.Desktop.Views.ConnectionWorkspaceView" x:DataType="vm:ConnectionWorkspaceViewModel">
+ <UserControl.Styles>
+  <Style Selector="Button.connection-sort"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="28"/><Setter Property="FontSize" Value="10"/><Setter Property="Foreground" Value="{StaticResource SecondaryInk}"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
+  <Style Selector="TextBlock.connection-label"><Setter Property="FontSize" Value="9"/><Setter Property="Foreground" Value="{StaticResource MutedInk}"/></Style>
+  <Style Selector="TextBlock.connection-value"><Setter Property="FontSize" Value="10.5"/><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style>
+ </UserControl.Styles>
+ <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="11">
+  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+   <Border Background="#EDF1F7" CornerRadius="7" Padding="3">
+    <StackPanel Orientation="Horizontal" Spacing="2">
+     <Button Name="RecentConnectionsButton" Classes="route" Classes.active="{Binding RecentSelected}" Content="{Binding RecentLabel}" Command="{Binding ShowRecentCommand}" Padding="10,5"/>
+     <Button Name="ActiveConnectionsButton" Classes="route" Classes.active="{Binding ActiveOnly}" Content="{Binding ActiveLabel}" Command="{Binding ShowActiveCommand}" Padding="10,5"/>
+    </StackPanel>
+   </Border>
+   <TextBox Name="ConnectionSearch" Grid.Column="1" PlaceholderText="筛选应用、域名或 IP" Text="{Binding Query,Mode=TwoWay}" MinWidth="120" MaxWidth="300" HorizontalAlignment="Right" AutomationProperties.Name="筛选连接"/>
+   <Button Name="PauseConnectionDisplayButton" Grid.Column="2" Content="{Binding PauseLabel}" Command="{Binding TogglePauseCommand}" ToolTip.Tip="{Binding PauseDescription}" FontSize="11"/>
+  </Grid>
+  <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+   <ComboBox Name="CompactConnectionAppFilter" IsVisible="False" Width="145" ItemsSource="{Binding Applications}" SelectedItem="{Binding SelectedApplication,Mode=TwoWay}" AutomationProperties.Name="按应用筛选连接" MinHeight="28" FontSize="10" Padding="8,4"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:ConnectionApplicationFilter"><TextBlock Text="{Binding Name}" FontSize="10"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+   <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="7"><Ellipse Fill="{Binding StatusBrush}" Width="5" Height="5"/><TextBlock Grid.Column="1" Text="{Binding StatusLabel}" FontSize="10" Foreground="{StaticResource SecondaryInk}"/><TextBlock Grid.Column="2" Text="{Binding SourceCaption}" FontSize="10" Foreground="{StaticResource MutedInk}" TextTrimming="CharacterEllipsis"/></Grid>
+   <TextBlock Grid.Column="2" Text="{Binding UpdatedLabel}" FontSize="9" Foreground="{StaticResource MutedInk}"/>
+  </Grid>
+  <Border Grid.Row="2" Classes="card" Padding="0" ClipToBounds="True">
+   <Grid ColumnDefinitions="Auto,*">
+    <Border Name="ConnectionApplicationRail" Width="148" Background="{StaticResource ConnectionRail}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
+     <Grid RowDefinitions="Auto,*">
+      <TextBlock Text="按应用筛选" FontSize="10" Foreground="{StaticResource SecondaryInk}" FontWeight="Medium" Margin="14,15,10,10"/>
+      <ListBox Name="ConnectionApplicationFilter" Grid.Row="1" ItemsSource="{Binding Applications}" SelectedItem="{Binding SelectedApplication,Mode=TwoWay}" ItemContainerTheme="{StaticResource QuietRow}" Padding="5,0,5,5" AutomationProperties.Name="连接应用筛选">
+       <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+       <ListBox.ItemTemplate><DataTemplate x:DataType="vm:ConnectionApplicationFilter">
+        <Grid ColumnDefinitions="25,*,Auto" ColumnSpacing="7" Height="36" Margin="7,0">
+         <ui:Glyph IsVisible="{Binding IsAll}" Kind="apps" Width="18" Height="18" Foreground="#7D90AD"/><ui:ProductAvatar IsVisible="{Binding !IsAll}" Product="{Binding Product}" Source="{Binding Icon}" Width="23" Height="23"/>
+         <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="10.5" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}"/>
+         <TextBlock Grid.Column="2" Text="{Binding Count}" Foreground="{StaticResource MutedInk}" FontSize="9"/>
+        </Grid>
+       </DataTemplate></ListBox.ItemTemplate>
+      </ListBox>
+     </Grid>
+    </Border>
+    <Grid Grid.Column="1" RowDefinitions="*,Auto">
+     <Grid>
+      <ScrollViewer Name="ConnectionHorizontalViewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+       <Grid Width="{Binding #ConnectionHorizontalViewport.Viewport.Width}" MinWidth="690" RowDefinitions="Auto,*">
+        <Border Background="{StaticResource ConnectionHeader}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="11,0">
+         <Grid ColumnDefinitions="12,63,125,*,112,62,67,46" ColumnSpacing="5" Height="33">
+          <Button Grid.Column="1" Classes="connection-sort" Content="{Binding TimeHeader}" Command="{Binding SortTimeCommand}"/>
+          <Button Grid.Column="2" Classes="connection-sort" Content="{Binding ApplicationHeader}" Command="{Binding SortApplicationCommand}"/>
+          <Button Grid.Column="3" Classes="connection-sort" Content="{Binding DestinationHeader}" Command="{Binding SortDestinationCommand}"/>
+          <TextBlock Grid.Column="4" Text="观测出口" Classes="connection-label" FontSize="10"/>
+          <Button Grid.Column="5" Classes="connection-sort" Content="{Binding UploadHeader}" Command="{Binding SortUploadCommand}" HorizontalContentAlignment="Right"/>
+          <Button Grid.Column="6" Classes="connection-sort" Content="{Binding DownloadHeader}" Command="{Binding SortDownloadCommand}" HorizontalContentAlignment="Right"/>
+          <TextBlock Grid.Column="7" Text="协议" Classes="connection-label" FontSize="10" HorizontalAlignment="Center"/>
+         </Grid>
+        </Border>
+        <ListBox Name="ConnectionTable" Grid.Row="1" ItemsSource="{Binding VisibleRows}" SelectedItem="{Binding SelectedConnection,Mode=TwoWay}" ItemContainerTheme="{StaticResource ConnectionRow}" Padding="5,4" AutomationProperties.Name="连接记录">
+         <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+         <ListBox.ItemTemplate><DataTemplate x:DataType="vm:ConnectionRow">
+          <Grid ColumnDefinitions="12,63,125,*,112,62,67,46" ColumnSpacing="5" Margin="5,0" Height="29">
+           <Ellipse Fill="{Binding ActivityBrush}" Width="5" Height="5" ToolTip.Tip="{Binding ActivityLabel}"/>
+           <TextBlock Grid.Column="1" Text="{Binding Time}" FontSize="9.5" Foreground="{StaticResource SecondaryInk}"/>
+           <Grid Grid.Column="2" ColumnDefinitions="22,*" ColumnSpacing="6"><ui:ProductAvatar Product="{Binding Product}" Source="{Binding Icon}" Width="21" Height="21"/><TextBlock Grid.Column="1" Text="{Binding ApplicationName}" FontSize="10.5" TextTrimming="CharacterEllipsis"/></Grid>
+           <TextBlock Grid.Column="3" Text="{Binding Destination}" FontSize="10.5" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Destination}"/>
+           <TextBlock Grid.Column="4" Text="{Binding RouteLabel}" FontSize="10" Foreground="{Binding RouteBrush}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding RouteLabel}"/>
+           <TextBlock Grid.Column="5" Text="{Binding Uploaded}" FontSize="9.5" HorizontalAlignment="Right"/>
+           <TextBlock Grid.Column="6" Text="{Binding Downloaded}" FontSize="9.5" HorizontalAlignment="Right"/>
+           <Border Grid.Column="7" Background="#F0F3F8" CornerRadius="4" Padding="4,3" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock Text="{Binding Transport}" FontSize="8" Foreground="#7B8AA2"/></Border>
+          </Grid>
+         </DataTemplate></ListBox.ItemTemplate>
+        </ListBox>
+       </Grid>
+      </ScrollViewer>
+      <StackPanel IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" MaxWidth="360" Margin="24">
+       <ui:Glyph Kind="globe" Width="26" Height="26" Foreground="#B5C0D2" HorizontalAlignment="Center"/>
+       <TextBlock Text="{Binding EmptyTitle}" FontSize="13" FontWeight="Medium" HorizontalAlignment="Center"/>
+       <TextBlock Text="{Binding EmptyDescription}" TextWrapping="Wrap" TextAlignment="Center" FontSize="10.5" Foreground="{StaticResource SecondaryInk}" LineHeight="17"/>
+       <Button Content="清除筛选" Command="{Binding ResetFiltersCommand}" Classes="link" FontSize="10" HorizontalAlignment="Center"/>
+      </StackPanel>
+     </Grid>
+     <Border Grid.Row="1" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Background="#FCFDFE" Padding="17,14" MinHeight="178">
+      <Grid>
+       <StackPanel IsVisible="{Binding !HasSelection}" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock Text="选择连接，查看实际观测详情" FontSize="11" Foreground="{StaticResource SecondaryInk}"/><TextBlock Text="未知数据保留为空，不推测请求或加密内容。" FontSize="10" Foreground="{StaticResource MutedInk}"/></StackPanel>
+       <Grid IsVisible="{Binding HasSelection}"><Grid DataContext="{Binding SelectedConnection}" x:DataType="vm:ConnectionRow" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
+        <Grid ColumnDefinitions="27,*,Auto" ColumnSpacing="9"><ui:ProductAvatar Product="{Binding Product}" Source="{Binding Icon}" Width="27" Height="27"/><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding ApplicationName}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="{Binding Destination}" FontSize="10" Foreground="{StaticResource SecondaryInk}" TextTrimming="CharacterEllipsis"/></StackPanel><StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5"><Ellipse Width="5" Height="5" Fill="{Binding ActivityBrush}"/><TextBlock Text="{Binding ActivityLabel}" FontSize="9" Foreground="{StaticResource SecondaryInk}"/></StackPanel></Grid>
+        <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="18">
+         <StackPanel Spacing="4"><TextBlock Text="观测出口 / 接口" Classes="connection-label"/><TextBlock Text="{Binding RouteLabel}" Classes="connection-value" Foreground="{Binding RouteBrush}"/><TextBlock Text="{Binding Interface}" Classes="connection-value" Foreground="{StaticResource SecondaryInk}"/></StackPanel>
+         <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="累计上传 / 下载" Classes="connection-label"/><StackPanel Orientation="Horizontal" Spacing="9"><TextBlock Text="{Binding Uploaded}" Classes="connection-value"/><TextBlock Text="{Binding Downloaded}" Classes="connection-value"/></StackPanel><StackPanel Orientation="Horizontal" Spacing="9"><TextBlock Text="{Binding UploadRate}" Classes="connection-value" Foreground="{StaticResource SecondaryInk}"/><TextBlock Text="{Binding DownloadRate}" Classes="connection-value" Foreground="{StaticResource SecondaryInk}"/></StackPanel></StackPanel>
+         <StackPanel Grid.Column="2" Spacing="4"><TextBlock Text="远端 IP / 持续时间" Classes="connection-label"/><TextBlock Text="{Binding RemoteAddress}" Classes="connection-value"/><TextBlock Text="{Binding Duration}" Classes="connection-value" Foreground="{StaticResource SecondaryInk}"/></StackPanel>
+        </Grid>
+        <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="18"><StackPanel Spacing="4"><TextBlock Text="命中规则" Classes="connection-label"/><TextBlock Text="{Binding MatchedRule}" Classes="connection-value" ToolTip.Tip="{Binding MatchedRule}"/></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="开始时间" Classes="connection-label"/><TextBlock Text="{Binding Started}" Classes="connection-value" ToolTip.Tip="{Binding LastObserved}"/></StackPanel></Grid>
+        <Grid Grid.Row="3" ColumnDefinitions="Auto,*" ColumnSpacing="12"><TextBlock Text="{Binding Process}" FontSize="9" Foreground="{StaticResource SecondaryInk}"/><TextBlock Grid.Column="1" Text="{Binding ProcessPath}" FontSize="9" Foreground="{StaticResource MutedInk}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProcessPath}"/></Grid>
+       </Grid></Grid>
+      </Grid>
+     </Border>
+    </Grid>
+   </Grid>
+  </Border>
+  <Grid Grid.Row="3" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+   <TextBlock Text="{Binding Limitation}" IsVisible="{Binding HasLimitation}" FontSize="9" Foreground="{StaticResource MutedInk}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Limitation}"/>
+   <TextBlock Grid.Column="1" Text="{Binding CountLabel}" FontSize="9" Foreground="{StaticResource MutedInk}"/>
+  </Grid>
+ </Grid>
+</UserControl>

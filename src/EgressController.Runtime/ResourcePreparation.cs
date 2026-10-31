@@ -7,12 +7,21 @@ namespace EgressController.Runtime;
 
 public enum PreparationStage { Idle, CheckingCache, Downloading, Validating, Publishing, Ready, Canceled, Failed }
 public enum PreparationCachePolicy { CacheFirst, Refresh }
+public enum ResourceExitKind { BoundInterface, SystemProxy }
+public sealed record ResourceExitSnapshot(ResourceExitKind Kind, InterfaceBinding? Interface = null)
+{
+    public static ResourceExitSnapshot SystemDefault { get; } = new(ResourceExitKind.SystemProxy);
+    public static ResourceExitSnapshot Bound(InterfaceBinding binding) => new(ResourceExitKind.BoundInterface, binding);
+    public string Identity => Kind == ResourceExitKind.SystemProxy ? "system-proxy" : Interface?.StableId ?? "";
+    public bool IsValid => Kind == ResourceExitKind.SystemProxy ? Interface is null
+        : Kind == ResourceExitKind.BoundInterface && !string.IsNullOrWhiteSpace(Interface?.StableId) && !string.IsNullOrWhiteSpace(Interface?.BsdName);
+}
 public sealed record PreparationProgress(long Revision, string ResourceId, PreparationStage Stage, string Message);
 public sealed class ResourceDescriptor
 {
     public required string Id { get; init; }
     public required Uri Url { get; init; }
-    public required InterfaceBinding Interface { get; init; }
+    public required ResourceExitSnapshot Exit { get; init; }
     public int MaximumBytes { get; init; } = 16 * 1024 * 1024;
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
     public string? ExpectedSha256 { get; init; }
@@ -24,18 +33,27 @@ public interface IValidatedResourceCache
     Task<byte[]?> ReadAsync(string id, CancellationToken cancellationToken);
     Task WriteAsync(string id, byte[] bytes, CancellationToken cancellationToken);
 }
-public sealed class ResourcePreparationException(string resourceId, string interfaceId, int remotePort, PreparationStage stage, bool timeout)
-    : IOException($"资源 {resourceId} 在 {stage} 阶段{(timeout ? "超时" : "失败")}；接口 {interfaceId}，远端端口 {remotePort}。")
+public sealed class ResourcePreparationException(string resourceId, string interfaceId, int remotePort, PreparationStage stage, bool timeout,
+    ResourceProxyFailureKind? proxyFailure = null)
+    : IOException(MessageFor(resourceId, interfaceId, stage, timeout, proxyFailure))
 {
     public string ResourceId { get; } = resourceId;
     public string InterfaceId { get; } = interfaceId;
     public int RemotePort { get; } = remotePort;
     public PreparationStage Stage { get; } = stage;
     public bool IsTimeout { get; } = timeout;
+    public ResourceProxyFailureKind? ProxyFailure { get; } = proxyFailure;
+    private static string MessageFor(string id, string exit, PreparationStage stage, bool timeout, ResourceProxyFailureKind? failure)
+    {
+        string label = stage switch { PreparationStage.CheckingCache => "检查缓存", PreparationStage.Downloading => "下载", PreparationStage.Validating => "验证", PreparationStage.Publishing => "保存", _ => "准备" };
+        string help = failure is { } reason ? new ResourceProxyConfigurationException(reason).Message
+            : exit == "system-proxy" ? "请检查当前系统代理或默认网络后重试；可用缓存已保留。" : "请检查所选物理接口后重试；不会切换出口。";
+        return $"资源 {id} {label}{(timeout ? "超时" : "失败")}。{help}";
+    }
 }
 
-/// <summary>Each operation owns its cancellation source and immutable physical-interface snapshot.</summary>
-public sealed class ResourcePreparation(IResourceTransport transport, IValidatedResourceCache cache)
+/// <summary>Each operation owns its cancellation source and explicit resource-only exit selection.</summary>
+public sealed class ResourcePreparation(IResourceTransport transport, IValidatedResourceCache cache, IProgress<PreparationProgress>? progress = null)
 {
     private readonly object _sync = new();
     private long _revision;
@@ -47,9 +65,8 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
     public async Task<byte[]> PrepareAsync(ResourceDescriptor resource, Func<byte[], bool> validate,
         CancellationToken cancellationToken = default)
     {
-        if (resource.Url.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(resource.Interface.StableId)
-            || string.IsNullOrWhiteSpace(resource.Interface.BsdName) || resource.MaximumBytes < 1 || resource.Timeout <= TimeSpan.Zero)
-            throw new ArgumentException("资源必须使用 HTTPS 和明确的物理出口接口。", nameof(resource));
+        if (resource.Url.Scheme != Uri.UriSchemeHttps || !resource.Exit.IsValid || resource.MaximumBytes < 1 || resource.Timeout <= TimeSpan.Zero)
+            throw new ArgumentException("资源必须使用 HTTPS 和明确的资源出口。", nameof(resource));
         using var ownedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         long revision;
         lock (_sync)
@@ -69,16 +86,16 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
             if (cached is not null && Valid(cached))
             { token.ThrowIfCancellationRequested(); Publish(PreparationStage.Ready, "本地缓存可用"); return cached; }
             stage = PreparationStage.Downloading;
-            Publish(stage, "正在通过选定出口获取资源");
+            Publish(stage, resource.Exit.Kind == ResourceExitKind.SystemProxy ? "通过系统当前代理下载；未配置代理时使用系统默认网络" : "通过选定物理接口下载");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(resource.Timeout);
             byte[] downloaded;
             try { downloaded = await transport.DownloadAsync(resource, timeout.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            { throw new ResourcePreparationException(resource.Id, resource.Interface.StableId, resource.Url.Port, stage, timeout: true); }
+            { throw new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: true); }
             stage = PreparationStage.Validating;
             Publish(stage, "正在验证资源");
-            if (!Valid(downloaded)) throw new ResourcePreparationException(resource.Id, resource.Interface.StableId, resource.Url.Port, stage, timeout: false);
+            if (!Valid(downloaded)) throw new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: false);
             stage = PreparationStage.Publishing;
             Publish(stage, "正在保存已验证缓存");
             token.ThrowIfCancellationRequested();
@@ -92,7 +109,8 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             var failure = exception as ResourcePreparationException
-                ?? new ResourcePreparationException(resource.Id, resource.Interface.StableId, resource.Url.Port, stage, timeout: false);
+                ?? new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: false,
+                    proxyFailure: (exception as ResourceProxyConfigurationException)?.Reason);
             lock (_sync)
             {
                 _history.Enqueue(failure);
@@ -111,7 +129,9 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
             && validate(bytes);
         void Publish(PreparationStage next, string message)
         {
-            lock (_sync) { if (_revision == revision) Progress = new(revision, resource.Id, next, message); }
+            PreparationProgress? update = null;
+            lock (_sync) { if (_revision == revision) Progress = update = new(revision, resource.Id, next, message); }
+            if (update is not null) { try { progress?.Report(update); } catch (Exception) { /* Presentation must not affect preparation. */ } }
         }
     }
 
@@ -132,10 +152,12 @@ public sealed class FixtureResourceTransport : IResourceTransport
     private readonly Dictionary<string, byte[]> _resources = new(StringComparer.Ordinal);
     public int RequestCount { get; private set; }
     public List<InterfaceBinding> UsedInterfaces { get; } = [];
+    public List<ResourceExitSnapshot> UsedExits { get; } = [];
     public void Add(Uri uri, byte[] bytes) => _resources[uri.AbsoluteUri] = bytes.ToArray();
     public Task<byte[]> DownloadAsync(ResourceDescriptor resource, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested(); RequestCount++; UsedInterfaces.Add(resource.Interface);
+        cancellationToken.ThrowIfCancellationRequested(); RequestCount++; UsedExits.Add(resource.Exit);
+        if (resource.Exit.Interface is { } binding) UsedInterfaces.Add(binding);
         if (!_resources.TryGetValue(resource.Url.AbsoluteUri, out var bytes)) throw new IOException("Mock resource not found.");
         return Task.FromResult(bytes.ToArray());
     }

@@ -10,7 +10,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
 add_library(EgressMacNative SHARED src/egress_mac.m src/egress_mac_privileges.m)
 target_include_directories(EgressMacNative PUBLIC include)
 target_compile_options(EgressMacNative PRIVATE -fobjc-arc -Wall -Wextra -Wpedantic -Werror)
-target_link_libraries(EgressMacNative PRIVATE "-framework AppKit" "-framework Foundation" "-framework SystemConfiguration" "-framework Security")
+target_link_libraries(EgressMacNative PRIVATE "-framework AppKit" "-framework Foundation" "-framework SystemConfiguration" "-framework Security" "-framework CFNetwork")
 set_target_properties(EgressMacNative PROPERTIES C_VISIBILITY_PRESET hidden OBJC_VISIBILITY_PRESET hidden
   MACOSX_RPATH ON INSTALL_NAME_DIR "@rpath")
 include(CTest)

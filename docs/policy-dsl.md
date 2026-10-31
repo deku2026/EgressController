@@ -32,7 +32,11 @@ serializing the policy never downloads a provider or removes pending definitions
 by the macOS layer to current BSD names immediately before compilation. They must
 resolve to two different interfaces. The compiler never chooses another adapter.
 The default China exit is fixed to `nonhome`; the global exit must resolve to a
-real proxy. Every actual proxy socket and DNS bootstrap query uses `nonhome`.
+real proxy group. Global, enabled application and enabled domain/IP proxy routes
+must reference a group, never a raw node. Manual groups may explicitly select
+node members or nested groups in their declared order. A legacy saved node exit
+is retained with `proxy.group-required` for explicit repair; it is never silently
+wrapped or reassigned. Every actual proxy socket and DNS bootstrap query uses `nonhome`.
 
 Application membership is an explicit saved `executables` array. `path` must be a
 canonical absolute `.app` bundle root; every saved executable must be lexically
@@ -59,11 +63,36 @@ Supported protocol mappings are VLESS (including the complete VLESS Encryption
 string and REALITY), current VMess AEAD, Xray-supported Shadowsocks ciphers,
 Trojan, SOCKS5 and HTTP. RAW/TCP, WebSocket, gRPC and HTTPUpgrade have explicit
 mappings where their protocol/security combination is compatible. An enabled
-Clash `smux`, Shadowsocks plugin, unknown protocol, unknown option, unsupported
+Clash `smux`, an unsupported Shadowsocks plugin/mode, unknown protocol, unknown option, unsupported
 transport detail, or incompatible security choice produces an item diagnostic.
 Disabling `smux` maps to the default non-multiplexed outbound. REALITY's
 `support-x25519mlkem768: true` maps to the pinned core's built-in support; forcing
 that capability off cannot be represented and is rejected.
+
+Shadowsocks `plugin: obfs` with `plugin-opts: {mode: http, host: ...}` uses
+Xray's native RAW HTTP header authenticator; the typed DSL preserves `plugin`,
+`plugin_mode`, `plugin_host` and optional boolean `tcp_fast_open`. Explicit
+Clash `tfo: true`/`false` maps to `sockopt.tcpFastOpen`; absence remains absence.
+The compiler sends HTTP/1.1 `GET /` with the exact camouflage Host (and server
+port unless 80), `Upgrade: websocket` and `Connection: Upgrade`, then the unchanged
+encrypted SS stream. This is HTTP obfuscation, not WebSocket framing. The initial
+response header is removed and SS ciphertext remains unchanged. UDP remains
+native SS UDP on the same explicitly bound non-home socket path. No plugin process,
+local relay, listening port or additional core is introduced. Simple-obfs TLS mode,
+unknown plugin fields, incompatible transport/security, header injection and
+unrecognized plugins remain explicit errors; plugins are never stripped to plain SS.
+
+This mapping follows the server's actual admission/decoding rules in
+[simple-obfs](https://github.com/shadowsocks/simple-obfs/blob/master/src/obfs_http.c),
+the [Mihomo HTTP obfuscation client](https://github.com/MetaCubeX/mihomo/blob/Meta/transport/simple-obfs/http.go),
+and pinned Xray [HTTP header authentication](https://github.com/XTLS/Xray-core/blob/v26.10.29/transport/internet/headers/http/http.go),
+[RAW configuration](https://github.com/XTLS/Xray-core/blob/v26.10.29/infra/conf/transport_method.go)
+and [UDP dialer](https://github.com/XTLS/Xray-core/blob/v26.10.29/transport/internet/udp/dialer.go).
+It preserves protocol admission and encrypted stream semantics; it does not
+reproduce the plugin's randomized curl fingerprint, dynamic Content-Length or
+Sec-WebSocket-Key, which its server does not validate. Live endpoint reachability
+and the pinned native header reader's fragmented-header robustness still require
+user acceptance; parsing/compilation tests do not claim a successful connection.
 
 Shadowsocks 2022 accepts canonical standard Base64 keys: each AES-128 segment
 decodes to 16 bytes; AES-256 and ChaCha segments decode to 32 bytes. AES preserves
@@ -231,6 +260,19 @@ an isolated, explicitly bound configuration, accept only its known outbound tags
 bind each result to the exact test URL, and report timeout/unavailable when no
 verified observation arrives. Endpoint TCP-connect timing is not a substitute
 for protocol reachability, and fixture observations are never production results.
+
+Startup uses `RequiredGroupProbes.Missing(document, options)` and required-only
+observatory mode. Only automatic groups reachable from the global exit and
+enabled application/rule exits contribute requests. Manual groups follow their
+explicit selected member; unrelated automatic groups and unselected branches do
+not trigger subscription-wide probing. Existing fresh observations match both
+node and exact test URL; completed failed observations remain unavailable until
+expiry or explicit retest. Nested automatic groups and automatic dialer
+dependencies are measured in phases, with `GroupSelector` choosing the resolved
+parent candidate between phases. Required-only results include the caller's
+cached observations plus new measurements, without mutating the input. Explicit
+user-triggered full probing remains a separate mode. Internal node probes use a
+temporary explicit selector group, preserving the public group-only exit rule.
 
 ## Validation
 

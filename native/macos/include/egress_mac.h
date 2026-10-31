@@ -11,7 +11,7 @@ extern "C" {
  * All output bytes are caller-owned. required is mandatory and is reset on errors.
  * NULL/0 is a size query. BUFFER_SMALL never writes output. JSON/text excludes NUL.
  * No exception crosses this boundary. Only the ABI/path probes are pure functions.
- * The remaining exports read platform state; there are NO privileged mutation exports. */
+ * Remaining exports read platform state or explicitly guard root-only mutations and mock denial. */
 enum { EGRESS_MAC_OK = 0, EGRESS_MAC_BUFFER_SMALL = 1, EGRESS_MAC_INVALID = -1,
        EGRESS_MAC_UNAVAILABLE = -2, EGRESS_MAC_IO = -3, EGRESS_MAC_INTERNAL = -4 };
 EGRESS_MAC_API uint32_t egress_mac_abi_version(void);
@@ -22,6 +22,11 @@ EGRESS_MAC_API int32_t egress_mac_copy_bundle_json(const char *path_utf8, uint8_
 EGRESS_MAC_API int32_t egress_mac_copy_icon_png(const char *path_utf8, uint32_t pixels, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_interfaces_json(uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_dns_json(uint8_t *output, size_t capacity, size_t *required);
+/* One gated live settings capture; binary plist bytes remain caller-owned and bounded to 256KiB. */
+EGRESS_MAC_API int32_t egress_mac_copy_resource_proxy_settings_plist(uint8_t *output, size_t capacity, size_t *required);
+/* Pure decision from supplied plist only. Never reads current settings, executes PAC or consults credential stores. */
+EGRESS_MAC_API int32_t egress_mac_resolve_resource_proxy_json(const char *url_utf8, const uint8_t *settings_plist, size_t length,
+    uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API uint32_t egress_mac_uid(void);
 EGRESS_MAC_API uint32_t egress_mac_gid(void);
 EGRESS_MAC_API uint32_t egress_mac_euid(void);

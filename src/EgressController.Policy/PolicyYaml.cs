@@ -88,13 +88,22 @@ public static class PolicyYaml
         TransportPath = n.Text("transport_path"),
         TransportHost = n.Text("transport_host"),
         GrpcServiceName = n.Text("grpc_service_name"),
+        Plugin = n.Text("plugin"), PluginMode = n.Text("plugin_mode"), PluginHost = n.Text("plugin_host"),
+        TcpFastOpen = n.Get("tcp_fast_open") is null ? null : n.Boolean("tcp_fast_open"),
         DialerProxyId = Null(n.Text("dialer_proxy")),
         Diagnostics = ReadDiagnostics(n)
     };
-    private static YamlMappingNode WriteNode(ProxyNode n) => new()
+    private static YamlMappingNode WriteNode(ProxyNode n)
     {
+        var result = new YamlMappingNode
+        {
         { "id", n.Id }, { "name", n.Name }, { "source_id", n.SourceId }, { "protocol", n.Protocol.ToString().ToLowerInvariant() }, { "server", n.Server }, { "port", n.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) }, { "user_id", n.UserId }, { "password", n.Password }, { "username", n.Username }, { "cipher", n.Cipher }, { "encryption", n.Encryption }, { "flow", n.Flow }, { "security", n.Security }, { "network", n.Network }, { "tls", n.Tls ? "true" : "false" }, { "skip_certificate_verify", n.SkipCertificateVerify ? "true" : "false" }, { "server_name", n.ServerName }, { "fingerprint", n.Fingerprint }, { "reality_public_key", n.RealityPublicKey }, { "reality_short_id", n.RealityShortId }, { "reality_spider_x", n.RealitySpiderX }, { "alpn", YamlNodes.Sequence(n.Alpn) }, { "transport_path", n.TransportPath }, { "transport_host", n.TransportHost }, { "grpc_service_name", n.GrpcServiceName }, { "dialer_proxy", n.DialerProxyId ?? "" }, { "diagnostics", WriteDiagnostics(n.Diagnostics) }
-    };
+        };
+        if (n.Plugin.Length > 0 || n.PluginMode.Length > 0 || n.PluginHost.Length > 0)
+        { result.Add("plugin", n.Plugin); result.Add("plugin_mode", n.PluginMode); result.Add("plugin_host", n.PluginHost); }
+        if (n.TcpFastOpen is { } tfo) result.Add("tcp_fast_open", tfo ? "true" : "false");
+        return result;
+    }
     private static List<PolicyDiagnostic> ReadDiagnostics(YamlMappingNode n) => n.Items("diagnostics").OfType<YamlMappingNode>().Select(x => new PolicyDiagnostic(x.Text("code"), x.Text("message"), x.Text("severity") == "warning" ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error)).ToList();
     private static YamlSequenceNode WriteDiagnostics(IEnumerable<PolicyDiagnostic> values) => new(values.Select(x => new YamlMappingNode { { "code", x.Code }, { "message", x.Message }, { "severity", x.Severity == DiagnosticSeverity.Warning ? "warning" : "error" } }));
     private static string? Null(string value) => string.IsNullOrEmpty(value) ? null : value;

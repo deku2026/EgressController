@@ -17,6 +17,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     private MacHelperApplyPlan? _active;
     private string? _tunName, _tunCidr, _failure;
     private bool _dnsRestored = true;
+    private XrayConnectionObserver? _observer;
     private static string JournalPath => Path.Combine(MacHelperPaths.PrivateRoot, "recovery.json");
 
     public async Task ValidateAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken)
@@ -88,7 +89,8 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         _dnsRestored = false; _failure = null;
         try
         {
-            _core = StartCore(directory, testOnly: false);
+            _observer = new XrayConnectionObserver(plan.GenerationId);
+            _core = StartCore(directory, testOnly: false, _observer);
             var identity = native.ReadProcess(_core.Id);
             HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns, _core.Id, identity.StartedAtMicroseconds), HelperHostJson.Default.RecoveryJournal));
             _active = plan;
@@ -139,6 +141,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             return Task.CompletedTask;
         }).ConfigureAwait(false);
         _dnsRestored = outcome.DnsRestored;
+        if (outcome.CoreStopped) _observer?.MarkUnavailable();
         if (outcome.CoreStopped) _active = null;
         if (!outcome.CoreStopped || !outcome.DnsRestored)
         { _failure = outcome.DnsRestored ? "core-stop-unconfirmed" : "dns-restore-failed"; throw new IOException("Network restoration remains incomplete."); }
@@ -155,7 +158,9 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         if (_active is not null && (!running || !takenOver)) _failure ??= running ? "tun-unavailable" : "core-exited";
         return new(true, running, takenOver, _dnsRestored, running ? _core!.Id : 0, _active?.GenerationId, _failure, DateTimeOffset.UtcNow, installation.XraySha256);
     }
-    private static Process StartCore(string workingDirectory, bool testOnly)
+    public CoreConnectionSnapshot ReadConnections() => _observer?.Snapshot(DateTimeOffset.UtcNow)
+        ?? CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow, "核心尚未运行，暂无连接观测。");
+    private static Process StartCore(string workingDirectory, bool testOnly, XrayConnectionObserver? observer = null)
     {
         var start = new ProcessStartInfo(MacHelperPaths.InstalledXray)
         {
@@ -169,13 +174,9 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         start.ArgumentList.Add("-config"); start.ArgumentList.Add(Path.Combine(workingDirectory, "xray.json"));
         XrayProcessEnvironment.Configure(start, workingDirectory);
         var child = Process.Start(start) ?? throw new IOException("Xray did not start.");
-        _ = DrainAsync(child.StandardOutput); _ = DrainAsync(child.StandardError);
+        _ = XrayConnectionOutputPump.DrainAsync(child.StandardOutput, observer);
+        _ = XrayConnectionOutputPump.DrainAsync(child.StandardError, observer);
         return child;
-    }
-    private static async Task DrainAsync(StreamReader reader)
-    {
-        try { var buffer = new char[2048]; while (await reader.ReadAsync(buffer).ConfigureAwait(false) > 0) { } }
-        catch (Exception error) when (error is IOException or ObjectDisposedException) { }
     }
     private static async Task StopOwnedCoreAsync(Process process)
     {

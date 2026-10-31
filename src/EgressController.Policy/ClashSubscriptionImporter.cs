@@ -93,7 +93,7 @@ public static class ClashSubscriptionImporter
 
     private static ProxyNode ReadNode(YamlMappingNode value, string sourceId, string scope)
     {
-        var reality = value.Map("reality-opts"); var ws = value.Map("ws-opts"); var grpc = value.Map("grpc-opts"); var httpUpgrade = value.Map("http-upgrade-opts");
+        var reality = value.Map("reality-opts"); var ws = value.Map("ws-opts"); var grpc = value.Map("grpc-opts"); var httpUpgrade = value.Map("http-upgrade-opts"); var plugin = value.Map("plugin-opts");
         var node = new ProxyNode
         {
             Name = value.Text("name"),
@@ -120,16 +120,20 @@ public static class ClashSubscriptionImporter
             DialerProxyId = string.IsNullOrEmpty(value.Text("dialer-proxy")) ? null : value.Text("dialer-proxy"),
             TransportPath = ws.Text("path", httpUpgrade.Text("path")),
             TransportHost = ws.Map("headers").Text("Host", ws.Map("headers").Text("host", httpUpgrade.Text("host"))),
-            GrpcServiceName = grpc.Text("grpc-service-name")
+            GrpcServiceName = grpc.Text("grpc-service-name"),
+            Plugin = value.Text("plugin"), PluginMode = plugin.Text("mode"), PluginHost = plugin.Text("host"),
+            TcpFastOpen = value.Get("tfo") is null ? null : value.Boolean("tfo")
         };
         node.Id = StableId("node", scope, string.Join('\n', value.Text("type"), node.Server.ToLowerInvariant(), node.Port, node.UserId, node.Username, node.Network, node.ServerName, node.Flow));
         if (node.Protocol == NodeProtocol.Unsupported) node.Diagnostics.Add(new("node.unsupported-protocol", "节点协议不受当前 Xray 编译器支持。", ObjectId: node.Id));
         if (value.Integer("alterId", value.Integer("alter-id")) != 0) node.Diagnostics.Add(new("node.legacy-vmess", "不支持带 alterId 的旧 VMess。", ObjectId: node.Id));
-        if (value.Get("plugin") is not null || value.Get("plugin-opts") is not null) node.Diagnostics.Add(new("node.plugin", "Shadowsocks 插件无法等价转换。", ObjectId: node.Id));
+        if (value.Get("plugin-opts") is not null && value.Get("plugin-opts") is not YamlMappingNode
+            || plugin.Keys().Any(key => key is not ("mode" or "host" or "<<"))) node.Diagnostics.Add(new("node.plugin-options", "该插件选项尚未实现等价转换；未静默忽略。", ObjectId: node.Id));
+        if (value.Get("tfo") is not null && (value.Get("tfo") is not YamlScalarNode tfo || !bool.TryParse(tfo.Value, out _))) node.Diagnostics.Add(new("node.tfo", "TCP Fast Open 选项必须是明确布尔值。", ObjectId: node.Id));
         if (node.Network is not ("tcp" or "ws" or "grpc" or "httpupgrade")) node.Diagnostics.Add(new("node.transport", "该节点传输方式尚未实现等价转换。", ObjectId: node.Id));
         if (value.Map("smux").Boolean("enabled") || value.Boolean("smux") || value.Get("packet-encoding") is not null || value.Get("xhttp-opts") is not null || value.Get("h2-opts") is not null || value.Get("http-opts") is not null || value.Get("ws-opts") is YamlMappingNode wsOpts && (wsOpts.Get("max-early-data") is not null || wsOpts.Get("early-data-header-name") is not null)) node.Diagnostics.Add(new("node.unsupported-option", "节点包含尚未实现等价转换的传输选项。", ObjectId: node.Id));
         if (value.Get("udp") is not null && !value.Boolean("udp", true)) node.Diagnostics.Add(new("node.udp-disabled", "节点禁止 UDP 的语义尚未实现，未静默启用 UDP。", ObjectId: node.Id));
-        var supportedKeys = new HashSet<string>(["<<", "name", "type", "server", "port", "uuid", "password", "username", "cipher", "encryption", "flow", "network", "tls", "skip-cert-verify", "servername", "sni", "client-fingerprint", "reality-opts", "alpn", "dialer-proxy", "ws-opts", "grpc-opts", "http-upgrade-opts", "udp", "alterId", "alter-id", "smux", "icon"], StringComparer.Ordinal);
+        var supportedKeys = new HashSet<string>(["<<", "name", "type", "server", "port", "uuid", "password", "username", "cipher", "encryption", "flow", "network", "tls", "skip-cert-verify", "servername", "sni", "client-fingerprint", "reality-opts", "alpn", "dialer-proxy", "ws-opts", "grpc-opts", "http-upgrade-opts", "udp", "alterId", "alter-id", "smux", "icon", "plugin", "plugin-opts", "tfo"], StringComparer.Ordinal);
         if (value.Keys().Any(key => !supportedKeys.Contains(key))) node.Diagnostics.Add(new("node.unknown-option", "节点包含未识别选项，不能确认等价行为。", ObjectId: node.Id));
         if (ws.Map("headers").Keys().Any(key => !key.Equals("Host", StringComparison.OrdinalIgnoreCase))) node.Diagnostics.Add(new("node.ws-headers", "自定义 WebSocket 头尚未实现等价转换。", ObjectId: node.Id));
         if (grpc.Keys().Any(key => key is not ("grpc-service-name" or "<<")) || reality.Keys().Any(key => key is not ("public-key" or "short-id" or "spider-x" or "support-x25519mlkem768" or "<<")) || ws.Keys().Any(key => key is not ("path" or "headers" or "<<"))) node.Diagnostics.Add(new("node.nested-option", "节点嵌套选项尚未实现等价转换。", ObjectId: node.Id));

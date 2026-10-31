@@ -136,7 +136,7 @@ These tests do not invoke the application, artwork or SystemConfiguration export
 enabled in Release. This proves compilation and the tested boundary contracts; it does not prove
 that a privileged helper or real TUN is operational.
 
-The affected managed suite covers **88 tests**, including the pure native deployment probe. Its
+The affected managed suite covers **143 tests**, including the pure native deployment probe. Its
 synthetic stream matrix covers thin 32/64-bit and FAT32/FAT64 byte orders, non-executable file types,
 universal dylibs, mixed slices, Java magic, truncation, overlap, integer bounds, malformed commands
 and execute-mode exclusion. Additional tests cover injected IPC/runtime flows, malformed and stale
@@ -169,3 +169,73 @@ and an explicit `--preview` profile with `EGRESS_MOCK_ONLY=1`. Rider's **Generat
 imports these when an older run configuration already exists. Production GUI debugging does not
 ship/install the helper. Use the packaged NativeAOT `.app` for explicit live takeover; the
 authenticated helper boundary is unchanged.
+
+## Passive connection observations
+
+The helper continuously drains Xray's inherited stdout/stderr pipes. `XrayConnectionOutputPump`
+keeps at most 4,096 characters for one line, discards oversize lines through the next newline and
+continues draining even if parsing fails. `XrayConnectionObserver` retains at most 128 sanitized
+records in memory; raw output is never sent to the GUI or written to per-connection disk logs.
+Only the pinned TUN/access/dispatcher message grammar is admitted. Actual source/destination,
+transport, outbound and rule tags are retained. Session correlation is scoped to a generation;
+new TUN processing events receive distinct identities even if a core session identifier collides.
+Non-TUN access records, credential-shaped destinations and unrecognized output are ignored.
+
+`MacHelperWireReply.Connections` is optional and piggybacks on existing authenticated replies.
+It does not introduce a network control listener or an observation request that could interrupt
+the main-instance heartbeat. The helper catches snapshot failures outside lifecycle handling.
+The client exposes `ConnectionSnapshot` from a detached bounded cache; malformed optional JSON,
+invalid rows and missing snapshots only mark observations unavailable. They do not invalidate an
+otherwise valid helper status, close the authenticated connection or restart/restore the core.
+The payload's cumulative string and record limits keep escaped JSON below the existing 1 MiB
+frame limit. Availability, known record eviction and capability limitations are explicit.
+
+The stock v26.10.29 binary does **not** supply a complete active-connection table, close events,
+per-connection byte counters or successful process PID/path observations. These fields remain
+unknown; an access record never implies a currently active connection or zero traffic. The GUI
+can label a recorded application rule but cannot turn that into an observed executable/PID.
+This lossy history must not be fed to the authoritative usage ledger or guardian.
+
+These limits are grounded in the pinned official sources: the [TUN handler](https://github.com/XTLS/Xray-core/blob/v26.10.29/proxy/tun/handler.go)
+uses counters shared by the inbound; the [access-message model](https://github.com/XTLS/Xray-core/blob/v26.10.29/common/log/access.go)
+contains endpoint/detour facts, while the [dispatcher](https://github.com/XTLS/Xray-core/blob/v26.10.29/app/dispatcher/default.go)
+emits session/rule decisions. The [routing API registration](https://github.com/XTLS/Xray-core/blob/v26.10.29/app/router/command/command.go)
+does not attach a routing-statistics channel, and its protocol has no per-connection counters or
+process identity. Adding a Unix-domain gRPC endpoint therefore cannot supply the missing facts.
+
+Synthetic tests cover source/rule association, IPv6, session collisions, sensitive-line rejection,
+bounded concurrent snapshots, pipe failure/oversize recovery, malformed optional JSON, worst-case
+escaped payload size and independent healthy helper status. Controller tests instantiate only an
+in-memory environment: telemetry faults cannot request restoration. No core, socket, installed
+helper, network state or user configuration is accessed by these tests.
+
+The independent configuration validator also admits the compiler's exact Shadowsocks obfs/http
+RAW header mapping and explicit boolean proxy TCP Fast Open. It rejects other header types,
+response overrides, extra headers, Host injection/port mismatch, TLS combinations, non-Shadowsocks
+disguises and system-outbound TCP Fast Open. Generated policy fixtures pass before tamper tests.
+
+## Resource bootstrap proxy
+
+Resources bootstrap through an explicit `SystemProxy` exit; they do not require selected interfaces,
+the new Xray core or another client's TUN. The core's own home/non-home binding remains independent.
+`NativeMacResourceProxyResolver` captures a static CFNetwork decision for each HTTPS destination,
+including redirects, against one lazily captured environment/static binary-plist snapshot per operation, then gives the transport one fixed proxy. Cached resources do not capture proxy settings. Failure never tries the next proxy
+or a direct fallback. Only an explicit `kCFProxyTypeNone` decision or an applicable environment
+bypass selects direct access. Static HTTP/HTTPS tunneling decisions use HTTP CONNECT; SOCKS uses
+SOCKS5. PAC, unknown types, empty results and read errors fail closed with fixed actionable messages.
+The bridge never downloads/executes PAC or consults Keychain.
+
+Applicable `https_proxy`/`HTTPS_PROXY` and then `all_proxy`/`ALL_PROXY` override system settings.
+Malformed nonempty overrides fail closed. `no_proxy`/`NO_PROXY` exact-host and leading-dot bypasses
+follow the .NET environment-proxy behavior; lowercase values take precedence. An HTTP-only override
+does not apply to these HTTPS resources. Credentials remain in proxy authentication, are removed
+from the proxy URI, and cannot appear through the native proxy DTO's `ToString()`.
+
+This resolver deliberately avoids `HttpClient.DefaultProxy`: the [.NET macOS implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/MacProxy.cs)
+does not recognize static SOCKS decisions, cannot distinguish missing PAC results from direct access,
+and executes PAC synchronously. Static native decoding avoids those fallback/cancellation gaps.
+The transport requires an explicitly supplied resolver; it has no implicit default-proxy path.
+
+The native proxy export is compiled but never invoked during automated validation. Pure JSON and
+injected environment tests cover static decisions, ordered fallback rejection, PAC/invalid errors,
+HTTPS/ALL overrides, bypasses, secret redaction, capacity limits and the default denied gate.

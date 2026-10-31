@@ -22,12 +22,16 @@ internal static class Program
     public static int Main(string[] args)
     {
         PreviewEnvironment.Enter();
-        PreviewChecks.RunAsync().GetAwaiter().GetResult();
+        bool connectionChecksOnly = args.Contains("--connection-checks", StringComparer.Ordinal);
+        if (!connectionChecksOnly) PreviewChecks.RunAsync().GetAwaiter().GetResult();
         int flag = Array.IndexOf(args, "--screenshots"); if (flag < 0) flag = Array.IndexOf(args, "--output");
         if (flag < 0 || flag + 1 >= args.Length) throw new ArgumentException("Use --screenshots <absolute-output-directory>.");
         string directory = Path.GetFullPath(args[flag + 1]); Directory.CreateDirectory(directory);
         AppBuilder.Configure<DesktopApplication>().WithInterFont().With(MacFonts.Options()).UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
         var log = new BindingLog(); Logger.Sink = log;
+        ConnectionAttemptChecks.Run(directory);
+        ConnectionWorkspaceChecks.Run(directory);
+        if(connectionChecksOnly){log.Verify();Console.WriteLine("Connection-attempt phases, cancel/retry and production wording; workspace input, truthful sparse facts, sorting, virtualization and stable refresh checks passed; live operations blocked.");return 0;}
         PassiveReconciliation(directory);
         if(args.Contains("--passive-checks",StringComparer.Ordinal)){log.Verify();Console.WriteLine("Passive binding reconciliation preserved full policy and clean state.");return 0;}
         foreach (string scenario in new[] { "overview", "apps", "rules", "nodes", "settings", "dsl", "add-apps", "add-rules", "onboarding", "empty", "error", "stopped", "unavailable" })
@@ -50,7 +54,7 @@ internal static class Program
         ProductionCompositionChecks.Run(directory);
         Icon(directory);
         log.Verify();
-        Console.WriteLine("Mac preview: 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, binding checks, injected production first-run/native-PNG/empty-telemetry/error-redaction checks passed. Live operations blocked.");
+        Console.WriteLine("Mac preview: connection-attempt phases/cancel/retry/production wording, connection filtering/sorting, truthful sparse observations, virtualization and viewport preservation; 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, binding checks, injected production first-run/native-PNG/empty-telemetry/error-redaction checks passed. Live operations blocked.");
         return 0;
     }
     private static void PassiveReconciliation(string directory)

@@ -27,15 +27,22 @@ public sealed class PolicyTests
     {
         var imported = ClashSubscriptionImporter.Import(Subscription, "source");
         var node = imported.Nodes.First(x => x.Name == "vless-pq");
+        var groups = imported.Groups.ToList(); groups.Add(new() { Id = "fixture-global", Name = "Fixture global group", Kind = GroupKind.Select, MemberIds = [node.Id], SelectedMemberId = node.Id });
         return new()
         {
             Interfaces = new() { HomeId = "home-stable", NonHomeId = "mobile-stable" },
-            Defaults = new() { Global = ExitChoice.Proxy(node.Id) },
+            Defaults = new() { Global = ExitChoice.Proxy("fixture-global") },
             Nodes = imported.Nodes.ToList(),
-            Groups = imported.Groups.ToList(),
+            Groups = groups,
             Applications = [new() { Id = "editor", Name = "Editor", BundlePath = "/Applications/Editor.app", PrimaryExecutable = "/Applications/Editor.app/Contents/MacOS/Editor", ExecutablePaths = ["/Applications/Editor.app/Contents/MacOS/Editor", "/Applications/Editor.app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper"], Via = ExitChoice.Home }],
-            RuleSets = [new() { Id = "service", Name = "Service", Domains = [new(DomainMatchKind.Suffix, "example.test")], IpCidrs = ["203.0.113.0/24"], Via = ExitChoice.Proxy(node.Id) }]
+            RuleSets = [new() { Id = "service", Name = "Service", Domains = [new(DomainMatchKind.Suffix, "example.test")], IpCidrs = ["203.0.113.0/24"], Via = ExitChoice.Proxy("fixture-global") }]
         };
+    }
+    internal static void SelectGlobalNode(MacPolicyDocument document, string nodeId)
+    {
+        var group = document.Groups.FirstOrDefault(item => item.Id == "fixture-global");
+        if (group is null) { group = new() { Id = "fixture-global", Name = "Fixture group", Kind = GroupKind.Select }; document.Groups.Add(group); }
+        group.MemberIds = [nodeId]; group.SelectedMemberId = nodeId; document.Defaults.Global = ExitChoice.Proxy(group.Id);
     }
     internal static XrayCompileOptions Options() => new() { Interfaces = [new("home-stable", "en0"), new("mobile-stable", "en7")] };
 
@@ -238,8 +245,8 @@ public sealed class PolicyTests
     [Fact]
     public void ReferencedUnsupportedNodeAndDialerCycleFailClosed()
     {
-        var doc = Document(); doc.Defaults.Global = ExitChoice.Proxy(doc.Nodes[2].Id); Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
-        doc.Defaults.Global = ExitChoice.Proxy(doc.Nodes[0].Id); doc.Nodes[0].DialerProxyId = doc.Nodes[1].Id;
+        var doc = Document(); SelectGlobalNode(doc, doc.Nodes[2].Id); Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
+        SelectGlobalNode(doc, doc.Nodes[0].Id); doc.Nodes[0].DialerProxyId = doc.Nodes[1].Id;
         Assert.Contains(PolicyValidator.Validate(doc), x => x.Code == "proxy.cycle"); Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
     }
     [Fact]
@@ -308,7 +315,7 @@ public sealed class PolicyTests
     [InlineData("dns")]
     public void ReservedOutboundTagsCannotBecomeProxyIdentities(string id)
     {
-        var doc = Document(); doc.Nodes[0].Id = id; doc.Defaults.Global = ExitChoice.Proxy(id); doc.RuleSets.Clear();
+        var doc = Document(); doc.Nodes[0].Id = id; SelectGlobalNode(doc, id); doc.RuleSets.Clear();
         Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
     }
     [Theory]
@@ -321,7 +328,7 @@ public sealed class PolicyTests
     {
         var imported = ClashSubscriptionImporter.Import("proxies: [{name: synthetic, type: " + type + ", server: proxy.example.test, port: 443, " + fields + "}]", "synthetic");
         var node = Assert.Single(imported.Nodes); Assert.True(node.IsSupported);
-        var doc = Document(); doc.Nodes = [node]; doc.Groups.Clear(); doc.RuleSets.Clear(); doc.Defaults.Global = ExitChoice.Proxy(node.Id);
+        var doc = Document(); doc.Nodes = [node]; doc.Groups.Clear(); doc.RuleSets.Clear(); SelectGlobalNode(doc, node.Id);
         var compiled = XrayConfigCompiler.Compile(doc, Options()); Assert.True(compiled.IsSuccess, string.Join(',', compiled.Diagnostics.Select(x => x.Code)));
         using var json = JsonDocument.Parse(compiled.Json!); Assert.Contains(json.RootElement.GetProperty("outbounds").EnumerateArray(), x => x.GetProperty("protocol").GetString() == protocol);
     }
@@ -342,7 +349,7 @@ public sealed class PolicyTests
     {
         var imported = ClashSubscriptionImporter.Import("proxies: [{name: proxy, type: vless, server: proxy.example.test, port: 443, uuid: 00000000-0000-4000-8000-000000000001, tls: true, " + extra + "}]", "source");
         var node = Assert.Single(imported.Nodes); Assert.False(node.IsSupported); Assert.Contains(node.Diagnostics, x => x.Code == code);
-        var doc = Document(); doc.Nodes = [node]; doc.RuleSets.Clear(); doc.Groups.Clear(); doc.Defaults.Global = ExitChoice.Proxy(node.Id);
+        var doc = Document(); doc.Nodes = [node]; doc.RuleSets.Clear(); doc.Groups.Clear(); SelectGlobalNode(doc, node.Id);
         Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
     }
     [Fact]
@@ -360,9 +367,10 @@ public sealed class PolicyTests
         Assert.True(imported.IsSuccess); Assert.True(imported.Nodes.Count > 20); Assert.True(imported.Groups.Count > 5);
         var supported = imported.Nodes.Count(x => x.IsSupported);
         Assert.True(supported >= 4, "Expected the synthetic-equivalent VLESS/REALITY and SOCKS proxy-chain shapes to remain supported.");
+        Assert.True(imported.Nodes.Where(node => node.Protocol == NodeProtocol.Shadowsocks).All(node => node.IsSupported), "All provided Shadowsocks/obfs-http nodes must be supported without dropping plugin or TFO semantics.");
         foreach (var node in imported.Nodes.Where(x => x.IsSupported))
         {
-            var doc = Document(); doc.Nodes = imported.Nodes.ToList(); doc.Groups = imported.Groups.ToList(); doc.Defaults.Global = ExitChoice.Proxy(node.Id); doc.RuleSets.Clear();
+            var doc = Document(); doc.Nodes = imported.Nodes.ToList(); doc.Groups = imported.Groups.ToList(); SelectGlobalNode(doc, node.Id); doc.RuleSets.Clear();
             var compiled = XrayConfigCompiler.Compile(doc, Options());
             Assert.True(compiled.IsSuccess, "Private compile diagnostic codes: " + string.Join(',', compiled.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error).Select(x => x.Code).Distinct()));
         }

@@ -16,13 +16,13 @@ Apply failure/cancellation independently attempts core recovery and saved-pointe
 
 `AtomicGenerationStore` publishes immutable verified generations with file/directory fsync and atomic pointer replacement. Drafts preserve incomplete onboarding choices in a checksummed, bounded current/previous store. Sensitive files are created 0600, private directories 0700. Neither store assumes an attacker-controlled shared directory.
 
-## Bound resources and probes
+## Resource bootstrap and bound runtime probes
 
-Each resource operation captures an explicit immutable service/BSD-interface binding and literal DNS IP from the draft. The selected service must still map to that active interface. DNS uses interface-bound UDP with bound TCP for truncation; HTTPS uses bound sockets, certificate verification, bounded redirects and response sizes. No system proxy, default resolver or adapter fallback is constructed.
+Resource bootstrap now defaults to a captured macOS static system-proxy/default-network decision, independently of TUN and policy interface selection. It captures applicable environment overrides and system proxy settings lazily once per operation, then resolves destination-specific bypasses against that same snapshot, including redirects/providers/catalog/raw data and core checksum/archive. Configured proxy failure never retries direct; PAC, malformed settings and read errors are actionable failures. Cached resources do not require any system proxy read. HTTPS certificates, redirect schemes, response sizes, cancellation, cache validation and atomic publication remain enforced. Explicitly bound transports remain available as a distinct typed resource exit and cannot be confused with system bootstrap.
 
 Startup validates caches before network requests; explicit subscription update forces refresh. Providers use the same snapshot. Official Meta indexes are tied to a commit and raw YAML blob hashes before DAT compilation. The core archive, checksum file and extracted ARM64 executable have independent pinned digests. Download/extraction never executes a core.
 
-Automatic groups are probed using a short-lived unprivileged Xray observatory process with no inbound, TUN or API listener. Only exact pinned observer messages count as results; absent/malformed output is unavailable. Probe files remain private and are removed. All inherited `XRAY_*` and `xray.*` settings are cleared before running any owned core/probe, preventing injected config directories or inherited TUN descriptors.
+Startup probes only missing fresh URL-specific observations in reachable automatic groups and dialer dependencies, following the explicit member of manual groups. It does not probe unrelated subscription nodes; the explicit measurement action may still test the whole catalog. Automatic groups are probed using a short-lived unprivileged Xray observatory process with no inbound, TUN or API listener. Only exact pinned observer messages count as results; absent/malformed output is unavailable. Probe files remain private and are removed. All inherited `XRAY_*` and `xray.*` settings are cleared before running any owned core/probe, preventing injected config directories or inherited TUN descriptors.
 
 Preparation cancellation sources are operation-owned, obsolete work cannot replace current progress, and historical failures are separate from current health. Refresh failures preserve the previous validated cache/runtime. Resource diagnostics identify stage/interface/port without exposing URL credentials.
 
@@ -45,3 +45,9 @@ The usage ledger supports fixed 30-natural-day periods from first opening and a 
 `python3 build/Verify-Mac.py` builds production GUI/helper code, runs only injected mock tests and pure native ABI/route-parser probes, renders isolated UI states and publishes both NativeAOT binaries. Packaged execution is restricted to explicit mock-smoke entrypoints. Computer Use UI checks must launch with `--preview`.
 
 No automatic check installs launchd jobs, starts a real core/TUN, changes DNS/routes, terminates protected apps or reads the user's real configuration. Live TCP/UDP, DNS, IPv4/IPv6, helper authorization and interface-disconnect behavior remain user-run acceptance; they are not inferred from compilation or mocks.
+
+## Connection activity
+
+`XrayConnectionObserver` parses only the pinned core stdout/stderr grammar into bounded in-memory records. Optional snapshots piggyback on authenticated helper replies; malformed, stale, oversized or failing observation data cannot invalidate a valid lifecycle status or stop/restart the core. No API/control listener or per-connection disk log is introduced. Actual destination, transport, outbound and matched-rule tags may be displayed; unknown PID/path, bytes and active/closed states remain unknown. Access-history rows are never silently treated as active connections or fed into the usage ledger.
+
+Desktop labels match the applied generation, never the editable draft. The running generation remains pinned through metadata-only publications; observed route classification and names stay stable across later edits. The virtualized UI supports search/app filters/sorting and a selected detail pane while preserving the inspected row and focus as new records arrive. Development screenshots and populated fixtures use explicit isolated previews only.

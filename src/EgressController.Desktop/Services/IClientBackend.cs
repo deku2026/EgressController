@@ -13,6 +13,8 @@ public sealed record ClientRuntimeState(bool Running, bool Available, bool Helpe
 public sealed record ClientRuleCatalogEntry(string Id, string Name, string Detail, IReadOnlyList<string> Sources);
 public sealed record ClientPreparedResources(IReadOnlyList<RuleSourceBinding> Bindings,
     IReadOnlyDictionary<string, byte[]> Assets, IReadOnlyDictionary<string, GeoRuleSet> Sources);
+public enum ConnectionAttemptStage { Validating, Resources, Core, Authorization, Connecting, Ready }
+public sealed record ClientOperationProgress(ConnectionAttemptStage Stage, string Detail);
 
 /// <summary>Application services are composed at the entrypoint; views never construct production adapters.</summary>
 public interface IClientBackend : IAsyncDisposable
@@ -20,19 +22,25 @@ public interface IClientBackend : IAsyncDisposable
     bool IsPreview { get; }
     DateTimeOffset Now { get; }
     string LogDirectory { get; }
+    void SetProgressSink(IProgress<ClientOperationProgress>? progress) { }
+    Task<ConnectionWorkspaceSnapshot> ReadConnectionsAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(new ConnectionWorkspaceSnapshot([], Now, false, "当前没有连接观测数据。"));
     Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ClientApplication>> DiscoverApplicationsAsync(CancellationToken cancellationToken = default);
     Task<ClientApplication> BuildInventoryAsync(ClientApplication application, IReadOnlyList<string> savedPaths,
         CancellationToken cancellationToken = default);
     Task<byte[]?> LoadIconAsync(string bundlePath, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(InterfaceBinding binding, MacPolicyDocument document,
+    Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(MacPolicyDocument document,
         CancellationToken cancellationToken = default);
-    Task<MacPolicyDocument> ImportSubscriptionAsync(Uri url, MacPolicyDocument current, InterfaceBinding binding,
+    Task<MacPolicyDocument> ImportSubscriptionAsync(Uri url, MacPolicyDocument current,
         CancellationToken cancellationToken = default);
-    Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document, InterfaceBinding binding,
+    Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, InterfaceBinding binding,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options,
+        CancellationToken cancellationToken = default) => ProbeAsync(document,
+            options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);
     Task<ApplyResult> ApplyAsync(MacPolicyDocument document, XrayCompileOptions options,
         IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default);
     Task<bool> StopAsync(CancellationToken cancellationToken = default);

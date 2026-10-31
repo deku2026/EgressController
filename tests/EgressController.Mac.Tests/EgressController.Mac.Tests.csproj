@@ -12,5 +12,6 @@
     <Using Include="Xunit" />
     <ProjectReference Include="../../src/EgressController.Mac/EgressController.Mac.csproj" />
     <ProjectReference Include="../../src/EgressController.Policy/EgressController.Policy.csproj" />
+    <ProjectReference Include="../../tools/EgressController.MacHelper/EgressController.MacHelper.csproj" />
   </ItemGroup>
 </Project>

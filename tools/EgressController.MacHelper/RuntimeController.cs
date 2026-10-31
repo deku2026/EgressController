@@ -1,4 +1,5 @@
 using EgressController.Mac;
+using EgressController.Runtime;
 
 namespace EgressController.MacHelper;
 
@@ -8,6 +9,7 @@ public interface IPrivilegedRuntimeEnvironment
     Task ApplyAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken);
     Task RestoreAsync(CancellationToken cancellationToken);
     MacHelperStatus Inspect();
+    CoreConnectionSnapshot ReadConnections() => CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow);
 }
 
 /// <summary>Independent from Internet reachability, probes, telemetry and diagnostics.</summary>
@@ -28,7 +30,7 @@ public sealed class RuntimeController(IPrivilegedRuntimeEnvironment environment)
             }
             else if (request.Command == MacHelperCommand.StopAndRestore) await environment.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
             else if (request.Command is not (MacHelperCommand.Inspect or MacHelperCommand.Heartbeat)) throw new InvalidDataException("Unsupported helper command.");
-            return new(request.SessionId, request.Sequence, true, "ok", "", SafeInspect());
+            return new(request.SessionId, request.Sequence, true, "ok", "", SafeInspect(), SafeConnections());
         }
         catch (OperationCanceledException)
         {
@@ -63,5 +65,15 @@ public sealed class RuntimeController(IPrivilegedRuntimeEnvironment environment)
         try { return environment.Inspect(); }
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
         { return new(true, false, false, false, 0, null, "status-unavailable", DateTimeOffset.UtcNow); }
+    }
+    private CoreConnectionSnapshot SafeConnections()
+    {
+        try
+        {
+            var snapshot = environment.ReadConnections();
+            return CoreConnectionSnapshots.IsValid(snapshot, DateTimeOffset.UtcNow) ? snapshot with { Records = snapshot.Records.ToArray() }
+                : CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow);
+        }
+        catch (Exception) { return CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow); }
     }
 }

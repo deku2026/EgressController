@@ -30,7 +30,7 @@ public sealed class SubscriptionTests
         var policy = ConfigurationTests.Policy();
         var replacement = ConfigurationTests.Policy().Nodes[0]; replacement.Id = "node-2";
         var merged = SubscriptionReconciler.Merge(policy, "example", new([replacement], [], [], []));
-        Assert.Equal("node-1", merged.Defaults.Global.TargetId);
+        Assert.Equal("group-1", merged.Defaults.Global.TargetId);
         var missing = merged.Nodes.Single(node => node.Id == "node-1");
         Assert.False(missing.IsSupported);
         Assert.Contains(missing.Diagnostics, item => item.Code == "subscription.removed");

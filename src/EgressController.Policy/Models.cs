@@ -109,6 +109,10 @@ public sealed class ProxyNode
     public string TransportPath { get; set; } = "";
     public string TransportHost { get; set; } = "";
     public string GrpcServiceName { get; set; } = "";
+    public string Plugin { get; set; } = "";
+    public string PluginMode { get; set; } = "";
+    public string PluginHost { get; set; } = "";
+    public bool? TcpFastOpen { get; set; }
     public string? DialerProxyId { get; set; }
     public List<PolicyDiagnostic> Diagnostics { get; set; } = [];
     public bool IsSupported => Protocol != NodeProtocol.Unsupported && !Diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error);

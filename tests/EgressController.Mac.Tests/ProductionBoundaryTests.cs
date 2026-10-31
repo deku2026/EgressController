@@ -40,7 +40,8 @@ public sealed class ProductionBoundaryTests
         var document = new MacPolicyDocument
         {
             Interfaces = new() { HomeId = "home-before-edit", NonHomeId = "nonhome-before-edit" },
-            Defaults = new() { Global = ExitChoice.Proxy("node") },
+            Defaults = new() { Global = ExitChoice.Proxy("selected-group") },
+            Groups = [new() { Id = "selected-group", Name = "Synthetic selection", SourceId = "test", Kind = GroupKind.Select, MemberIds = ["node"], SelectedMemberId = "node" }],
             Nodes = [new() { Id = "node", SourceId = "test", Name = "Node", Protocol = NodeProtocol.Vless,
                 Server = "proxy.example.invalid", Port = 443, Tls = true, UserId = "11111111-1111-1111-1111-111111111111" }]
         };

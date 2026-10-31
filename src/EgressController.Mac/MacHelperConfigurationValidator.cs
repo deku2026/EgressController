@@ -86,8 +86,8 @@ public static class MacHelperConfigurationValidator
                         && (!IPAddress.TryParse(address, out var ip) || !IPAddress.IsLoopback(ip)), "local-proxy", "A node cannot reference a local proxy relay.");
                     Need(settings.GetProperty("port").TryGetInt32(out int port) && port is > 0 and <= 65535, "node-port", "Invalid remote node port.");
                 }
-                JsonElement stream = Object(outbound.GetProperty("streamSettings"), "sockopt", "network", "security", "tlsSettings", "realitySettings", "wsSettings", "grpcSettings", "httpupgradeSettings");
-                JsonElement socket = Object(stream.GetProperty("sockopt"), "interface", "domainStrategy", "dialerProxy");
+                JsonElement stream = Object(outbound.GetProperty("streamSettings"), "sockopt", "network", "security", "tlsSettings", "realitySettings", "wsSettings", "grpcSettings", "httpupgradeSettings", "rawSettings");
+                JsonElement socket = Object(stream.GetProperty("sockopt"), "interface", "domainStrategy", "dialerProxy", "tcpFastOpen");
                 string expectedInterface = protocol == "freedom" && tag == "home" ? homeInterface : nonHomeInterface;
                 Need(Text(socket, "interface") == expectedInterface && Text(socket, "domainStrategy") == "ForceIP", "outbound-interface", "Every dialer must bind its assigned physical interface with no automatic fallback.");
                 if (socket.TryGetProperty("dialerProxy", out var dialer))
@@ -95,6 +95,9 @@ public static class MacHelperConfigurationValidator
                     Need(ProxyProtocols.Contains(protocol), "direct-dialer", "System/direct outbounds cannot inherit a proxy dialer.");
                     dialers[tag] = dialer.GetString() ?? "";
                 }
+                if (socket.TryGetProperty("tcpFastOpen", out var fastOpen))
+                    Need(ProxyProtocols.Contains(protocol) && fastOpen.ValueKind is JsonValueKind.True or JsonValueKind.False,
+                        "socket-fast-open", "Proxy TCP Fast Open must be an explicit boolean.");
                 if (stream.TryGetProperty("network", out var network)) Need(network.GetString() is "raw" or "ws" or "grpc" or "httpupgrade", "transport", "Unsupported proxy transport.");
                 if (stream.TryGetProperty("security", out var security)) Need(security.GetString() is "tls" or "reality" or "none", "stream-security", "Unsupported stream security.");
                 if (stream.TryGetProperty("tlsSettings", out var tls)) Object(tls, "serverName", "allowInsecure", "alpn", "fingerprint");
@@ -102,6 +105,7 @@ public static class MacHelperConfigurationValidator
                 if (stream.TryGetProperty("wsSettings", out var ws)) Object(ws, "path", "host");
                 if (stream.TryGetProperty("grpcSettings", out var grpc)) Object(grpc, "serviceName");
                 if (stream.TryGetProperty("httpupgradeSettings", out var upgrade)) Object(upgrade, "path", "host");
+                if (stream.TryGetProperty("rawSettings", out var raw)) ValidateShadowsocksHttpHeader(protocol, settings, stream, raw);
             }
             Need(Text(outbounds[0], "tag") == "blocked" && protocols.GetValueOrDefault("blocked") == "blackhole"
                 && protocols.GetValueOrDefault("home") == "freedom" && protocols.GetValueOrDefault("nonhome") == "freedom" && protocols.GetValueOrDefault("dns") == "dns",
@@ -168,6 +172,34 @@ public static class MacHelperConfigurationValidator
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or ArgumentException)
         { return new(false, "configuration-shape", "Configuration is malformed or does not match the admitted generated shape."); }
     }
+
+    private static void ValidateShadowsocksHttpHeader(string protocol, JsonElement settings, JsonElement stream, JsonElement raw)
+    {
+        Need(protocol == "shadowsocks" && Text(stream, "network") == "raw"
+            && (!stream.TryGetProperty("security", out var security) || security.GetString() == "none")
+            && !new[] { "tlsSettings", "realitySettings", "wsSettings", "grpcSettings", "httpupgradeSettings" }.Any(field => stream.TryGetProperty(field, out _)),
+            "http-obfuscation", "Only plain Shadowsocks RAW transport admits the bounded HTTP disguise.");
+        var header = Object(Object(raw, "header").GetProperty("header"), "type", "request");
+        Need(Text(header, "type") == "http", "http-obfuscation", "Unsupported RAW header type.");
+        var request = Object(header.GetProperty("request"), "version", "method", "path", "headers");
+        Need(Text(request, "version") == "1.1" && Text(request, "method") == "GET" && OneString(request.GetProperty("path"), "/"),
+            "http-obfuscation", "HTTP disguise request shape changed.");
+        var headers = Object(request.GetProperty("headers"), "Host", "Upgrade", "Connection", "User-Agent");
+        Need(OneString(headers.GetProperty("Upgrade"), "websocket") && OneString(headers.GetProperty("Connection"), "Upgrade")
+            && OneString(headers.GetProperty("User-Agent"), "curl/7.88.0"), "http-obfuscation", "HTTP disguise headers changed.");
+        var hosts = Array(headers.GetProperty("Host"));
+        Need(hosts.GetArrayLength() == 1, "http-obfuscation-host", "HTTP disguise requires one explicit Host.");
+        string authority = hosts[0].GetString() ?? "";
+        int port = settings.GetProperty("port").GetInt32();
+        string suffix = port == 80 ? "" : ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Need(authority.Length > suffix.Length && authority.EndsWith(suffix, StringComparison.Ordinal), "http-obfuscation-host", "HTTP disguise Host port differs from its node.");
+        string host = suffix.Length == 0 ? authority : authority[..^suffix.Length];
+        Need(host.Length is > 0 and <= 253 && host.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-')
+            && Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.IPv4,
+            "http-obfuscation-host", "HTTP disguise Host must be a DNS name or IPv4 address without paths or injection characters.");
+    }
+    private static bool OneString(JsonElement value, string expected)
+        => Array(value).GetArrayLength() == 1 && value[0].ValueKind == JsonValueKind.String && value[0].GetString() == expected;
 
     private static bool IsInterface(string value) => value.Length is > 0 and <= 16 && value[0] is >= 'a' and <= 'z'
         && value.All(character => char.IsAsciiLetterOrDigit(character)) && value.Any(char.IsAsciiDigit)

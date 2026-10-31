@@ -1,0 +1,9 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" x:Class="EgressController.Desktop.Views.ConnectionAttemptView" x:DataType="vm:ConnectionAttemptViewModel" IsVisible="{Binding IsVisible}">
+ <Border Background="#F5F8FD" BorderBrush="#DEE7F4" BorderThickness="1" CornerRadius="10" Padding="15,12">
+  <StackPanel Spacing="12">
+   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold"/><Button Grid.Column="1" IsVisible="{Binding HasFailed}" Content="重试连接" Command="{Binding RetryCommand}" FontSize="11" MinHeight="25" Padding="10,3"/></Grid>
+   <ItemsControl ItemsSource="{Binding Steps}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="5"/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:ConnectionAttemptStep"><StackPanel Spacing="4" Margin="0,0,5,0"><StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="{Binding Number}" FontWeight="SemiBold" Foreground="{Binding Color}" FontSize="10"/><TextBlock Text="{Binding Title}" FontSize="10" Foreground="{Binding Color}"/></StackPanel><TextBlock Text="{Binding State}" FontSize="9" Foreground="{Binding Color}"/></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+   <TextBlock Text="{Binding Detail}" FontSize="10" Foreground="#7585A0" TextWrapping="Wrap" LineHeight="16"/>
+  </StackPanel>
+ </Border>
+</UserControl>

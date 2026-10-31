@@ -63,11 +63,71 @@ public sealed class HelperConfigurationTests
     [Fact]
     public void DuplicateFieldsAndMalformedFramesAreRejectedBeforePrivilege()
     {
-        string duplicate = Generated().Replace("\"loglevel\": \"warning\"", "\"loglevel\": \"warning\", \"loglevel\": \"none\"", StringComparison.Ordinal);
+        string duplicate = Generated().Replace("\"log\": {", "\"log\": {}, \"log\": {", StringComparison.Ordinal);
         Assert.Equal("duplicate-field", MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(duplicate), "en0", "en5").Code);
         Assert.False(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes("{"), "en0", "en5").IsValid);
         Assert.False(MacHelperConfigurationValidator.Validate(new byte[MacHelperRequestValidator.MaximumFrameBytes + 1], "en0", "en5").IsValid);
         Assert.False(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(Generated()), "en0", "en0").IsValid);
+    }
+
+    [Theory]
+    [InlineData(true, 8443)]
+    [InlineData(false, 80)]
+    public void ActualShadowsocksHttpCompilerShapeCrossesTheBoundary(bool tfo, int port)
+    {
+        var result = MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(GeneratedObfs(tfo, port)), "en0", "en5");
+        Assert.True(result.IsValid, result.Code + ": " + result.Message);
+    }
+
+    [Theory]
+    [InlineData("protocol")]
+    [InlineData("tls")]
+    [InlineData("response")]
+    [InlineData("header-type")]
+    [InlineData("method")]
+    [InlineData("path")]
+    [InlineData("host-injection")]
+    [InlineData("host-port")]
+    [InlineData("extra-header")]
+    [InlineData("fast-open-string")]
+    [InlineData("direct-fast-open")]
+    public void HttpDisguiseCannotExpandTheHelperPlan(string tamper)
+    {
+        var config = JsonNode.Parse(GeneratedObfs(true, 8443))!;
+        var node = config["outbounds"]!.AsArray().Single(item => item!["tag"]!.GetValue<string>() == "node-1")!;
+        var stream = node["streamSettings"]!;
+        var header = stream["rawSettings"]!["header"]!;
+        switch (tamper)
+        {
+            case "protocol": node["protocol"] = "http"; break;
+            case "tls": stream["security"] = "tls"; break;
+            case "response": header["response"] = new JsonObject(); break;
+            case "header-type": header["type"] = "srtp"; break;
+            case "method": header["request"]!["method"] = "CONNECT"; break;
+            case "path": header["request"]!["path"] = new JsonArray("/", "/other"); break;
+            case "host-injection": header["request"]!["headers"]!["Host"] = new JsonArray("example.test\r\nX-Secret: credential:8443"); break;
+            case "host-port": header["request"]!["headers"]!["Host"] = new JsonArray("camouflage.example.test:443"); break;
+            case "extra-header": header["request"]!["headers"]!["Authorization"] = new JsonArray("forbidden"); break;
+            case "fast-open-string": stream["sockopt"]!["tcpFastOpen"] = "true"; break;
+            case "direct-fast-open": config["outbounds"]!.AsArray().Single(item => item!["tag"]!.GetValue<string>() == "home")!["streamSettings"]!["sockopt"]!["tcpFastOpen"] = true; break;
+        }
+        Assert.False(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(config.ToJsonString()), "en0", "en5").IsValid, tamper);
+    }
+
+    private static string GeneratedObfs(bool tfo, int port)
+    {
+        var policy = new MacPolicyDocument
+        {
+            Interfaces = new() { HomeId = "home-service", NonHomeId = "other-service" },
+            Defaults = new() { Global = ExitChoice.Proxy("selected-group") },
+            Groups = [new() { Id = "selected-group", Name = "Synthetic selection", SourceId = "synthetic", Kind = GroupKind.Select, MemberIds = ["node-1"], SelectedMemberId = "node-1" }],
+            Nodes = [new() { Id = "node-1", Name = "Synthetic SS", SourceId = "synthetic", Server = "proxy.example.invalid", Port = port,
+                Protocol = NodeProtocol.Shadowsocks, Cipher = "aes-128-gcm", Password = "synthetic-only", Plugin = "obfs", PluginMode = "http",
+                PluginHost = "camouflage.example.test", TcpFastOpen = tfo }]
+        };
+        var result = XrayConfigCompiler.Compile(policy, new() { Interfaces = [new("home-service", "en0"), new("other-service", "en5")] });
+        Assert.True(result.IsSuccess, string.Join(';', result.Diagnostics.Select(item => item.Message)));
+        return result.Json!;
     }
 
     private static string Generated()
@@ -76,7 +136,8 @@ public sealed class HelperConfigurationTests
         var policy = new MacPolicyDocument
         {
             Interfaces = new() { HomeId = "home-service", NonHomeId = "other-service" },
-            Defaults = new() { Global = ExitChoice.Proxy("node-1") },
+            Defaults = new() { Global = ExitChoice.Proxy("selected-group") },
+            Groups = [new() { Id = "selected-group", Name = "Synthetic selection", SourceId = "example", Kind = GroupKind.Select, MemberIds = ["node-1"], SelectedMemberId = "node-1" }],
             Nodes = [new() { Id = "node-1", Name = "Example", SourceId = "example", Server = "proxy.example.invalid", Port = 443,
                 Protocol = NodeProtocol.Vless, UserId = "11111111-1111-1111-1111-111111111111", Tls = true }],
             Applications = [new() { Id = "app-1", Name = "Example App", BundlePath = "/Applications/Example.app",

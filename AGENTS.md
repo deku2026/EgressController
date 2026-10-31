@@ -5,12 +5,12 @@ The active product is a native Avalonia/.NET macOS client with Xray-core as its 
 ## Product and policy
 
 - Apple Silicon macOS comes first. Keep compiled XAML bindings, NativeAOT and macOS native window controls. No WebView.
-- Applications, domain sets and IP sets share three exits: home, non-home, or a specified proxy node/group.
+- Applications, domain sets and IP sets share three exits: home, non-home, or a specified proxy group. Route entrypoints never choose individual nodes; manual group membership may select nodes or nested groups.
 - User application rules precede user domain/IP sets, then China domain/IP defaults to non-home; all other TCP/UDP requires a global proxy. Proxy server connections use non-home only. Failed binding fails the connection; never silently choose another interface.
 - Clash YAML supplies nodes/groups/providers only. Never import its listeners, DNS, TUN, controller or route policy. Unsupported protocols/plugins/group semantics need explicit diagnostics; never silently drop parameters.
 - Typed policy and versioned YAML DSL are the facts; Xray JSON and GeoSite/GeoIP DAT are generated artifacts. Stable IDs survive renaming and subscription reordering. Retain unresolved selections for explicit repair.
 - Compile raw MetaCubeX YAML, preserving full/suffix/keyword/regex and IP/CIDR semantics. No MRS/SRS decoding or second network core.
-- No local HTTP/SOCKS relay or network control listeners. Resource preparation uses explicit immutable exit snapshots, validated caches, caller-owned cancellation and atomic publication. No silent default-interface fallback.
+- No local HTTP/SOCKS relay or network control listeners. Resource preparation defaults to a captured system-proxy/default-network snapshot, independently of TUN and runtime egress bindings; configured proxy failures never retry direct. Use validated caches, caller-owned cancellation and atomic publication. Explicitly bound runtime connections never fall back to another interface.
 
 ## Application membership and UI
 

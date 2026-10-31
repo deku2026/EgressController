@@ -25,7 +25,7 @@
     <StackPanel Spacing="7"><TextBlock Classes="title" Text="{Binding PageTitle}"/><TextBlock Classes="muted" Text="{Binding PageDescription}"/></StackPanel>
     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center"><TextBlock Classes="caption" Text="{Binding SaveStatus}"/><Button Content="取消操作" Command="{Binding CancelOperationCommand}" IsVisible="{Binding IsBusy}" Classes="quiet" FontSize="10"/><Border IsVisible="{Binding IsPreview}" Background="#FFF8EB" BorderBrush="#F0E3C8" BorderThickness="1" CornerRadius="5" Padding="8,4"><TextBlock Text="PREVIEW" FontSize="9" FontWeight="SemiBold" LetterSpacing=".9" Foreground="#A17E40"/></Border></StackPanel>
    </Grid>
-   <Border Grid.Row="1" IsVisible="{Binding HasIssue}" Background="#FFF0F0" BorderBrush="#F1D6D9" BorderThickness="1" CornerRadius="8" Margin="30,0,30,16" Padding="13,10"><TextBlock Text="{Binding CurrentIssue}" Foreground="#A74958" FontSize="12" TextWrapping="Wrap"/></Border>
+   <StackPanel Grid.Row="1"><Border IsVisible="{Binding HasIssue}" Background="#FFF0F0" BorderBrush="#F1D6D9" BorderThickness="1" CornerRadius="8" Margin="30,0,30,16" Padding="13,10"><TextBlock Text="{Binding CurrentIssue}" Foreground="#A74958" FontSize="12" TextWrapping="Wrap"/></Border><views:ConnectionAttemptView DataContext="{Binding ConnectionAttempt}" Margin="30,0,30,15"/></StackPanel>
    <Grid Grid.Row="2" Margin="30,0,30,22" IsEnabled="{Binding CanEdit}">
     <views:OverviewView IsVisible="{Binding OverviewVisible}"/><views:ApplicationsView IsVisible="{Binding AppsVisible}"/><views:RulesView IsVisible="{Binding RulesVisible}"/><views:NodesView IsVisible="{Binding NodesVisible}"/><views:SettingsView IsVisible="{Binding SettingsVisible}"/>
    </Grid>

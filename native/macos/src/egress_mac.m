@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <SystemConfiguration/SystemConfiguration.h>
+#import <CFNetwork/CFNetwork.h>
 #include "egress_mac.h"
 #include <stdlib.h>
 #include <string.h>
@@ -145,5 +146,73 @@ int32_t egress_mac_copy_dns_json(uint8_t *output, size_t capacity, size_t *requi
         }
         CFRelease(services);
         return copy_json(result, output, capacity, required);
+    } @catch (NSException *exception) { (void)exception; return fail(required, EGRESS_MAC_INTERNAL); } }
+}
+int32_t egress_mac_copy_resource_proxy_settings_plist(uint8_t *output, size_t capacity, size_t *required)
+{
+    @autoreleasepool { @try {
+        const char *mock = getenv("EGRESS_MOCK_ONLY");
+        if (mock != NULL && strcmp(mock, "1") == 0) return fail(required, EGRESS_MAC_INVALID);
+        NSDictionary *settings = CFBridgingRelease(CFNetworkCopySystemProxySettings());
+        if (settings == nil) return fail(required, EGRESS_MAC_UNAVAILABLE);
+        NSData *data = [NSPropertyListSerialization dataWithPropertyList:settings format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
+        if (data == nil || data.length == 0 || data.length > 256 * 1024) return fail(required, EGRESS_MAC_UNAVAILABLE);
+        return copy_bytes(data.bytes, data.length, output, capacity, required);
+    } @catch (NSException *exception) { (void)exception; return fail(required, EGRESS_MAC_INTERNAL); } }
+}
+static int32_t copy_resource_proxy_decision(const char *url_utf8, NSDictionary *settings, uint8_t *output, size_t capacity, size_t *required)
+{
+        if (url_utf8 == NULL || strnlen(url_utf8, 8193) > 8192)
+            return fail(required, EGRESS_MAC_INVALID);
+        NSString *text = [[NSString alloc] initWithUTF8String:url_utf8];
+        NSURL *url = text == nil ? nil : [NSURL URLWithString:text];
+        if (url == nil || ![url.scheme isEqualToString:@"https"] || url.host.length == 0 || url.user != nil || url.password != nil || url.fragment != nil)
+            return fail(required, EGRESS_MAC_INVALID);
+        NSArray *proxies = CFBridgingRelease(CFNetworkCopyProxiesForURL((__bridge CFURLRef)url, (__bridge CFDictionaryRef)settings));
+        if (proxies == nil || proxies.count == 0 || proxies.count > 64) return fail(required, EGRESS_MAC_UNAVAILABLE);
+        NSMutableArray *entries = [NSMutableArray arrayWithCapacity:proxies.count];
+        for (id value in proxies) {
+            if (![value isKindOfClass:[NSDictionary class]]) return fail(required, EGRESS_MAC_UNAVAILABLE);
+            NSDictionary *proxy = value;
+            id type = proxy[(__bridge NSString *)kCFProxyTypeKey];
+            NSString *kind = @"unsupported";
+            if ([type isEqual:(__bridge NSString *)kCFProxyTypeNone]) kind = @"direct";
+            else if ([type isEqual:(__bridge NSString *)kCFProxyTypeHTTP]) kind = @"http";
+            else if ([type isEqual:(__bridge NSString *)kCFProxyTypeHTTPS]) kind = @"https";
+            else if ([type isEqual:(__bridge NSString *)kCFProxyTypeSOCKS]) kind = @"socks";
+            else if ([type isEqual:(__bridge NSString *)kCFProxyTypeAutoConfigurationURL] || [type isEqual:(__bridge NSString *)kCFProxyTypeAutoConfigurationJavaScript]) kind = @"pac";
+            NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithObject:kind forKey:@"type"];
+            // No PAC URL/script is copied. Authentication, when present in the static dictionary,
+            // remains bounded in the caller's memory and is never read from Keychain or logged.
+            for (NSArray *pair in @[@[(__bridge NSString *)kCFProxyHostNameKey, @"host"],
+                                    @[(__bridge NSString *)kCFProxyUsernameKey, @"username"],
+                                    @[(__bridge NSString *)kCFProxyPasswordKey, @"password"]]) {
+                id item = proxy[pair[0]];
+                if (item != nil) {
+                    if (![item isKindOfClass:[NSString class]] || [(NSString *)item length] > 1024) return fail(required, EGRESS_MAC_UNAVAILABLE);
+                    entry[pair[1]] = item;
+                }
+            }
+            id port = proxy[(__bridge NSString *)kCFProxyPortNumberKey];
+            if (port != nil) {
+                if (![port isKindOfClass:[NSNumber class]]) return fail(required, EGRESS_MAC_UNAVAILABLE);
+                entry[@"port"] = port;
+            }
+            [entries addObject:entry];
+        }
+        NSData *data = [NSJSONSerialization dataWithJSONObject:@{ @"proxies":entries } options:NSJSONWritingSortedKeys error:nil];
+        if (data == nil || data.length > 256 * 1024) return fail(required, EGRESS_MAC_UNAVAILABLE);
+        return copy_bytes(data.bytes, data.length, output, capacity, required);
+}
+int32_t egress_mac_resolve_resource_proxy_json(const char *url_utf8, const uint8_t *settings_plist, size_t length,
+    uint8_t *output, size_t capacity, size_t *required)
+{
+    @autoreleasepool { @try {
+        if (settings_plist == NULL || length == 0 || length > 256 * 1024) return fail(required, EGRESS_MAC_INVALID);
+        NSData *data = [NSData dataWithBytes:settings_plist length:length];
+        id settings = CFBridgingRelease(CFPropertyListCreateWithData(kCFAllocatorDefault, (__bridge CFDataRef)data,
+            kCFPropertyListImmutable, NULL, NULL));
+        if (![settings isKindOfClass:[NSDictionary class]]) return fail(required, EGRESS_MAC_INVALID);
+        return copy_resource_proxy_decision(url_utf8, settings, output, capacity, required);
     } @catch (NSException *exception) { (void)exception; return fail(required, EGRESS_MAC_INTERNAL); } }
 }

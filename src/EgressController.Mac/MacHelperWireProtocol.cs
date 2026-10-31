@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 using System.Text.Json.Serialization;
+using EgressController.Runtime;
 
 namespace EgressController.Mac;
 
@@ -26,7 +27,8 @@ public sealed record MacRuntimeManifest(string GenerationId, Dictionary<string, 
 public sealed record MacHelperWireRequest(int Version, Guid SessionId, long Sequence, MacHelperCommand Command, MacHelperApplyPlan? Apply = null);
 public sealed record MacHelperStatus(bool Installed, bool Running, bool TunTakenOver, bool DnsRestored, int CorePid,
     string? GenerationId, string? Failure, DateTimeOffset ObservedAt, string? InstalledCoreSha256 = null);
-public sealed record MacHelperWireReply(Guid SessionId, long Sequence, bool Succeeded, string Code, string Message, MacHelperStatus Status);
+public sealed record MacHelperWireReply(Guid SessionId, long Sequence, bool Succeeded, string Code, string Message, MacHelperStatus Status,
+    [property: JsonConverter(typeof(MacConnectionSnapshotConverter))] CoreConnectionSnapshot? Connections = null);
 
 /// <summary>Root-owned installation pins the only GUI and core identities allowed to request privilege.</summary>
 public sealed record MacHelperInstallation(int Version, uint AuthorizedUserId, uint AuthorizedGroupId,
@@ -38,6 +40,7 @@ public sealed record MacHelperInstallPlan(string SourceHelperPath, string Source
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(MacHelperWireRequest))]
 [JsonSerializable(typeof(MacHelperWireReply))]
+[JsonSerializable(typeof(CoreConnectionSnapshot))]
 [JsonSerializable(typeof(MacHelperInstallation))]
 [JsonSerializable(typeof(MacHelperInstallPlan))]
 [JsonSerializable(typeof(MacRuntimeManifest))]

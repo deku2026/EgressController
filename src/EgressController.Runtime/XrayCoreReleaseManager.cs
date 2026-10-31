@@ -23,13 +23,18 @@ public sealed record XrayCoreReleaseSpecification(string Version, Uri ArchiveUrl
 public sealed class XrayCoreReleaseManager
 {
     private readonly IResourceTransport _transport; private readonly IValidatedResourceCache _cache;
-    private readonly string _root; private readonly Func<CancellationToken, ValueTask<InterfaceBinding>> _binding;
+    private readonly string _root; private readonly Func<CancellationToken, ValueTask<ResourceExitSnapshot>> _binding;
+    private readonly IProgress<PreparationProgress>? _progress;
     private readonly XrayCoreReleaseSpecification _release;
     public XrayCoreReleaseManager(IResourceTransport transport, IValidatedResourceCache cache, string absoluteInstallRoot,
         Func<CancellationToken, ValueTask<InterfaceBinding>> bindingProvider, XrayCoreReleaseSpecification? specification = null)
+        : this(transport, cache, absoluteInstallRoot, async token => ResourceExitSnapshot.Bound(await bindingProvider(token).ConfigureAwait(false)), specification) { }
+    public XrayCoreReleaseManager(IResourceTransport transport, IValidatedResourceCache cache, string absoluteInstallRoot,
+        Func<CancellationToken, ValueTask<ResourceExitSnapshot>> exitProvider, XrayCoreReleaseSpecification? specification = null,
+        IProgress<PreparationProgress>? progress = null)
     {
         if (!Path.IsPathFullyQualified(absoluteInstallRoot)) throw new ArgumentException("Core installation requires an absolute private directory.");
-        _transport = transport; _cache = cache; _root = Path.GetFullPath(absoluteInstallRoot); _binding = bindingProvider;
+        _transport = transport; _cache = cache; _root = Path.GetFullPath(absoluteInstallRoot); _binding = exitProvider; _progress = progress;
         _release = specification ?? XrayCoreReleaseSpecification.PinnedMacArm64;
         if (!ConfigurationCoordinator.SafeArtifactName(_release.Version) || !ValidHash(_release.ArchiveSha256) || !ValidHash(_release.ChecksumSha256)
             || _release.ArchiveUrl.Scheme != "https" || _release.ChecksumUrl.Scheme != "https") throw new ArgumentException("Invalid pinned core release specification.");
@@ -37,7 +42,7 @@ public sealed class XrayCoreReleaseManager
     public async Task<PreparedCoreRelease> PrepareAsync(CancellationToken cancellationToken = default)
     {
         var binding = await _binding(cancellationToken).ConfigureAwait(false);
-        var prepare = new ResourcePreparation(_transport, _cache);
+        var prepare = new ResourcePreparation(_transport, _cache, _progress);
         var checksum = await prepare.PrepareAsync(Descriptor("xray-checksum", _release.ChecksumUrl, 4096, _release.ChecksumSha256),
             bytes => VerifyChecksum(bytes, _release.ArchiveSha256), cancellationToken).ConfigureAwait(false);
         var archive = await prepare.PrepareAsync(Descriptor("xray-archive", _release.ArchiveUrl, 64 * 1024 * 1024, _release.ArchiveSha256),
@@ -61,7 +66,7 @@ public sealed class XrayCoreReleaseManager
         return new(path, digest, _release.Version);
 
         ResourceDescriptor Descriptor(string id, Uri url, int maximum, string hash) => new()
-        { Id = id + "-" + _release.Version, Url = url, Interface = binding, MaximumBytes = maximum, ExpectedSha256 = hash, Timeout = TimeSpan.FromMinutes(3) };
+        { Id = id + "-" + _release.Version, Url = url, Exit = binding, MaximumBytes = maximum, ExpectedSha256 = hash, Timeout = TimeSpan.FromMinutes(3) };
     }
     public static bool VerifyChecksum(byte[] checksum, string expectedArchiveSha256)
     {

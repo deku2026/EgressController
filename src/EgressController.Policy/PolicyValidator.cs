@@ -52,7 +52,9 @@ public static partial class PolicyValidator
     private static IEnumerable<PolicyDiagnostic> ValidateExit(ExitChoice exit, MacPolicyDocument doc, string id)
     {
         if (exit.Kind != ExitKind.Proxy) return [];
-        return ValidateReachable(exit.TargetId ?? "", doc, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal), id);
+        var diagnostics = ValidateReachable(exit.TargetId ?? "", doc, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal), id).ToList();
+        if (!doc.Groups.Any(group => group.Id == exit.TargetId)) diagnostics.Add(new("proxy.group-required", "代理出口必须引用分组；原有节点引用已保留，请明确选择分组后修复。", ObjectId: id));
+        return diagnostics;
     }
     private static IEnumerable<PolicyDiagnostic> ValidateReachable(string target, MacPolicyDocument doc, HashSet<string> ancestors, HashSet<string> validated, string origin)
     {
@@ -103,6 +105,16 @@ public static partial class PolicyValidator
         if (node.Protocol == NodeProtocol.Vmess && node.Security is not ("auto" or "aes-128-gcm" or "chacha20-poly1305")) Add("node.vmess-security", "该 VMess 加密方式无法等价转换。");
         if (node.Protocol == NodeProtocol.Shadowsocks && node.Cipher is not ("aes-128-gcm" or "aes-256-gcm" or "chacha20-poly1305" or "chacha20-ietf-poly1305" or "xchacha20-poly1305" or "xchacha20-ietf-poly1305" or "2022-blake3-aes-128-gcm" or "2022-blake3-aes-256-gcm" or "2022-blake3-chacha20-poly1305")) Add("node.ss-cipher", "该 Shadowsocks 加密方式不受 Xray 支持。");
         if (node.Protocol == NodeProtocol.Shadowsocks && node.Cipher.StartsWith("2022-", StringComparison.Ordinal) && !ValidShadowsocks2022Key(node.Cipher, node.Password)) Add("node.ss2022-key", "Shadowsocks 2022 需要规范 Base64 定长密钥；AES-128 每段 16 字节，其余每段 32 字节，ChaCha 不支持多密钥。");
+        if (node.Plugin.Length > 0 || node.PluginMode.Length > 0 || node.PluginHost.Length > 0)
+        {
+            if (node.Protocol != NodeProtocol.Shadowsocks || node.Plugin != "obfs" || node.PluginMode != "http"
+                || node.Network != "tcp" || node.Tls || node.RealityPublicKey.Length > 0)
+                Add("node.plugin", "当前插件只支持 Shadowsocks 的 obfs/http 原生 RAW HTTP 伪装；其他模式不能等价替换。");
+            if (node.PluginHost.Length is < 1 or > 253 || node.PluginHost.Any(char.IsControl)
+                || !node.PluginHost.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-')
+                || Uri.CheckHostName(node.PluginHost) is not (UriHostNameType.Dns or UriHostNameType.IPv4))
+                Add("node.plugin-host", "HTTP 伪装 Host 必须为明确的 DNS 主机名或 IPv4 地址，不能包含端口、路径或注入字符。");
+        }
         if (node.RealityPublicKey.Length > 0 && node.Protocol != NodeProtocol.Vless) Add("node.reality-protocol", "REALITY 当前只对 VLESS 导入开放。");
         if (node.RealityPublicKey.Length > 0 && node.Network is not ("tcp" or "grpc")) Add("node.reality-transport", "REALITY 与该传输不能等价组合。");
         if (node.RealityPublicKey.Length > 0 && (!RawBase64Length(node.RealityPublicKey, 32) || node.RealityShortId.Length > 16 || node.RealityShortId.Length % 2 != 0 || !node.RealityShortId.All(char.IsAsciiHexDigit) || node.RealitySpiderX.Length > 0 && !node.RealitySpiderX.StartsWith('/'))) Add("node.reality-parameters", "REALITY 认证参数或 spiderX 无效。");

@@ -75,7 +75,7 @@ public static partial class XrayConfigCompiler
         foreach (var node in selectedNodes.Values.OrderBy(x => x.Id, StringComparer.Ordinal)) outbounds.Add(NodeOutbound(node, nonhome!, selections));
         var config = new JsonObject
         {
-            ["log"] = new JsonObject { ["loglevel"] = "warning" },
+            ["log"] = new JsonObject { ["loglevel"] = "info" },
             ["dns"] = new JsonObject { ["tag"] = "dns-query", ["queryStrategy"] = "UseIP", ["disableFallback"] = true, ["servers"] = Strings([doc.Dns.UpstreamIp]) },
             ["inbounds"] = new JsonArray(new JsonObject { ["tag"] = "tun", ["protocol"] = "tun", ["settings"] = new JsonObject { ["name"] = doc.Tun.Name, ["mtu"] = doc.Tun.Mtu, ["gateway"] = Strings([doc.Tun.Ipv4Cidr]), ["autoSystemRoutingTable"] = Strings(["0.0.0.0/0", "::/0"]), ["autoOutboundsInterface"] = "" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = Strings(["http", "tls", "quic"]), ["routeOnly"] = true } }),
             // IPOnDemand is required: an explicit final catch-all defeats IPIfNonMatch's second pass.
@@ -100,6 +100,16 @@ public static partial class XrayConfigCompiler
         }
         var stream = Stream(iface);
         stream["network"] = node.Network == "tcp" ? "raw" : node.Network;
+        if (node.TcpFastOpen is { } tfo) stream["sockopt"]!["tcpFastOpen"] = tfo;
+        if (node.Plugin == "obfs" && node.PluginMode == "http")
+        {
+            // simple-obfs validates HTTP/1.1 + Upgrade + optional Host, strips the first header,
+            // and then relays the unchanged Shadowsocks stream. This is not WebSocket framing.
+            stream["rawSettings"] = new JsonObject { ["header"] = new JsonObject { ["type"] = "http",
+                ["request"] = new JsonObject { ["version"] = "1.1", ["method"] = "GET", ["path"] = Strings(["/"]),
+                    ["headers"] = new JsonObject { ["Host"] = Strings([node.PluginHost + (node.Port == 80 ? "" : ":" + node.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))]),
+                        ["Upgrade"] = Strings(["websocket"]), ["Connection"] = Strings(["Upgrade"]), ["User-Agent"] = Strings(["curl/7.88.0"]) } } } };
+        }
         if (node.DialerProxyId is { } dialer) stream["sockopt"]!["dialerProxy"] = selections[dialer];
         if (node.RealityPublicKey.Length > 0)
         {

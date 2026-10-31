@@ -12,9 +12,19 @@ public sealed record PreparedRuleResources(IReadOnlyList<RuleSourceBinding> Bind
     IReadOnlyDictionary<string, GeoRuleSet> Sources, string ChinaTag = "cn", string ChinaGeoSiteFile = "geosite.dat", string ChinaGeoIpFile = "geoip.dat");
 
 /// <summary>Production resource operations share one immutable non-home snapshot per operation, never caller policy from Clash.</summary>
-public sealed class ProductionResources(IResourceTransport transport, IValidatedResourceCache cache,
-    Func<CancellationToken, ValueTask<InterfaceBinding>> bindingProvider)
+public sealed class ProductionResources
 {
+    private readonly IResourceTransport transport;
+    private readonly IValidatedResourceCache cache;
+    private readonly Func<CancellationToken, ValueTask<ResourceExitSnapshot>> exitProvider;
+    private readonly IProgress<PreparationProgress>? progress;
+    public ProductionResources(IResourceTransport transport, IValidatedResourceCache cache,
+        Func<CancellationToken, ValueTask<InterfaceBinding>> bindingProvider)
+        : this(transport, cache, async token => ResourceExitSnapshot.Bound(await bindingProvider(token).ConfigureAwait(false))) { }
+    public ProductionResources(IResourceTransport transport, IValidatedResourceCache cache,
+        Func<CancellationToken, ValueTask<ResourceExitSnapshot>> exitProvider, IProgress<PreparationProgress>? progress = null)
+    { this.transport = transport; this.cache = cache; this.exitProvider = exitProvider; this.progress = progress; }
+
     public static Uri MetaCommitUrl { get; } = new("https://api.github.com/repos/MetaCubeX/meta-rules-dat/commits/meta");
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
@@ -22,8 +32,8 @@ public sealed class ProductionResources(IResourceTransport transport, IValidated
         PreparationCachePolicy policy = PreparationCachePolicy.CacheFirst, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(source.Id) || !SafeHttps(source.Url, out var url)) throw new ArgumentException("Subscriptions require a stable identity and HTTPS URL.");
-        var binding = await bindingProvider(cancellationToken).ConfigureAwait(false);
-        var prepare = new ResourcePreparation(transport, cache);
+        var binding = await exitProvider(cancellationToken).ConfigureAwait(false);
+        var prepare = new ResourcePreparation(transport, cache, progress);
         var body = await prepare.PrepareAsync(Descriptor("subscription-" + source.Id, url!, binding, policy, 8 * 1024 * 1024),
             bytes => ValidSubscription(bytes, source.Id), cancellationToken).ConfigureAwait(false);
         string yaml = StrictUtf8.GetString(body);
@@ -51,7 +61,7 @@ public sealed class ProductionResources(IResourceTransport transport, IValidated
     public async Task<MetaRuleCatalog> LoadRuleCatalogAsync(PreparationCachePolicy policy = PreparationCachePolicy.CacheFirst,
         CancellationToken cancellationToken = default)
     {
-        var binding = await bindingProvider(cancellationToken).ConfigureAwait(false);
+        var binding = await exitProvider(cancellationToken).ConfigureAwait(false);
         return await CatalogAsync(binding, policy, cancellationToken).ConfigureAwait(false);
     }
 
@@ -60,11 +70,11 @@ public sealed class ProductionResources(IResourceTransport transport, IValidated
     {
         var requested = requestedSources.Distinct(StringComparer.Ordinal).ToArray();
         if (requested.Length > 256) throw new ArgumentException("Too many rule sources.");
-        var binding = await bindingProvider(cancellationToken).ConfigureAwait(false);
+        var binding = await exitProvider(cancellationToken).ConfigureAwait(false);
         var catalog = await CatalogAsync(binding, policy, cancellationToken).ConfigureAwait(false);
         var entries = catalog.Entries.ToDictionary(entry => entry.Id, StringComparer.Ordinal);
         var sources = new Dictionary<string, GeoRuleSet>(StringComparer.Ordinal); var sets = new List<GeoRuleSet>();
-        var bindings = new List<RuleSourceBinding>(); var prepare = new ResourcePreparation(transport, cache);
+        var bindings = new List<RuleSourceBinding>(); var prepare = new ResourcePreparation(transport, cache, progress);
         var china = new GeoRuleSet { Tag = "cn" };
         foreach (string source in requested.Concat(["geosite/cn.yaml", "geoip/cn.yaml"]).Distinct(StringComparer.Ordinal))
         {
@@ -88,9 +98,9 @@ public sealed class ProductionResources(IResourceTransport transport, IValidated
         return new(bindings, assets, sources);
     }
 
-    private async Task<MetaRuleCatalog> CatalogAsync(InterfaceBinding binding, PreparationCachePolicy policy, CancellationToken token)
+    private async Task<MetaRuleCatalog> CatalogAsync(ResourceExitSnapshot binding, PreparationCachePolicy policy, CancellationToken token)
     {
-        var prepare = new ResourcePreparation(transport, cache);
+        var prepare = new ResourcePreparation(transport, cache, progress);
         var commitBytes = await prepare.PrepareAsync(Descriptor("meta-commit", MetaCommitUrl, binding, policy, 1024 * 1024),
             bytes => { try { _ = Commit(bytes); return true; } catch (Exception e) when (e is JsonException or InvalidDataException) { return false; } }, token).ConfigureAwait(false);
         string commit = Commit(commitBytes); var entries = new List<MetaRuleCatalogEntry>();
@@ -155,6 +165,6 @@ public sealed class ProductionResources(IResourceTransport transport, IValidated
         return parts[0] + ":" + name;
     }
     private static bool SafeHttps(string text, out Uri? url) => Uri.TryCreate(text, UriKind.Absolute, out url) && url.Scheme == "https" && url.UserInfo.Length == 0 && url.Fragment.Length == 0;
-    private static ResourceDescriptor Descriptor(string id, Uri url, InterfaceBinding binding, PreparationCachePolicy policy, int maximum) => new()
-    { Id = id, Url = url, Interface = binding, CachePolicy = policy, MaximumBytes = maximum, Timeout = TimeSpan.FromSeconds(60) };
+    private static ResourceDescriptor Descriptor(string id, Uri url, ResourceExitSnapshot binding, PreparationCachePolicy policy, int maximum) => new()
+    { Id = id, Url = url, Exit = binding, CachePolicy = policy, MaximumBytes = maximum, Timeout = TimeSpan.FromSeconds(60) };
 }

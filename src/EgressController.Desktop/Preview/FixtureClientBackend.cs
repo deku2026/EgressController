@@ -53,24 +53,29 @@ public sealed class FixtureClientBackend : IClientBackend
         return Task.FromResult(application with { PrimaryExecutable = fixture.PrimaryExecutable, ExecutablePaths = paths, InventoryComplete = true, InventoryError = null });
     }
     public Task<byte[]?> LoadIconAsync(string bundlePath, CancellationToken cancellationToken = default) => Task.FromResult<byte[]?>(null);
-    public Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(InterfaceBinding binding, MacPolicyDocument document, CancellationToken cancellationToken = default)
+    public Task<ConnectionWorkspaceSnapshot> ReadConnectionsAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(PreviewConnectionFixtures.Create());
+    }
+    public Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
         IReadOnlyList<ClientRuleCatalogEntry> entries = new[] { ("openai", "OpenAI", "AI 服务 · 域名集合"), ("google", "Google", "域名 + IP · 一个条目统一管理"), ("youtube", "YouTube", "流媒体 · 域名 + IP"), ("github", "GitHub", "开发工具 · 域名集合"), ("netflix", "Netflix", "流媒体 · 域名集合"), ("apple", "Apple", "系统服务 · 域名集合") }
             .Select(item => new ClientRuleCatalogEntry(item.Item1, item.Item2, item.Item3, PreviewFixtures.Rule(item.Item1, item.Item2, ExitChoice.NonHome).Sources)).ToArray();
         return Task.FromResult(entries);
     }
-    public async Task<MacPolicyDocument> ImportSubscriptionAsync(Uri url, MacPolicyDocument current, InterfaceBinding binding, CancellationToken cancellationToken = default)
+    public async Task<MacPolicyDocument> ImportSubscriptionAsync(Uri url, MacPolicyDocument current, CancellationToken cancellationToken = default)
     {
         if (url.AbsoluteUri != PreviewFixtures.SubscriptionUrl) throw new IOException("隔离预览仅支持示例订阅 URL；没有发送网络请求。");
         ClashImportResult? parsed = null;
-        var bytes = await _preparation.PrepareAsync(new ResourceDescriptor { Id = "fixture-subscription", Url = url, Interface = binding, CachePolicy = PreparationCachePolicy.Refresh }, payload => { parsed = ClashSubscriptionImporter.Import(Encoding.UTF8.GetString(payload), "fixture-subscription"); return parsed.IsSuccess; }, cancellationToken);
+        var bytes = await _preparation.PrepareAsync(new ResourceDescriptor { Id = "fixture-subscription", Url = url, Exit = ResourceExitSnapshot.SystemDefault, CachePolicy = PreparationCachePolicy.Refresh }, payload => { parsed = ClashSubscriptionImporter.Import(Encoding.UTF8.GetString(payload), "fixture-subscription"); return parsed.IsSuccess; }, cancellationToken);
         parsed = ClashSubscriptionImporter.Import(Encoding.UTF8.GetString(bytes), "fixture-subscription");
         if (!parsed.IsSuccess) throw new IOException("订阅结构无效，原有选择与配置已保留。");
         var result = SubscriptionReconciler.Merge(current, "fixture-subscription", parsed);
         if (!result.Subscriptions.Any(source => source.Id == "fixture-subscription")) result.Subscriptions.Add(new() { Id = "fixture-subscription", Name = "我的示例订阅", Url = url.AbsoluteUri });
         return result;
     }
-    public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document, InterfaceBinding binding, CancellationToken cancellationToken = default)
+    public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         string[] sources = document.RuleSets.Where(rule => rule.Enabled).SelectMany(rule => rule.Sources).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();

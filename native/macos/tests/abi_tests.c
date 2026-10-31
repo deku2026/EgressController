@@ -55,6 +55,37 @@ static void pure_route_tests(void)
     first_header.rtm_flags |= RTF_IFSCOPE; memcpy(routes, &first_header, sizeof(first_header));
     assert(egress_mac_route_dump_covers_tun(routes, total, 42) == 0); // One scoped prefix is not global coverage.
 }
+static void pure_proxy_snapshot_tests(void)
+{
+    /* All settings are synthetic. This calls only the supplied-plist resolver, never system settings capture. */
+    static const uint8_t settings[] = "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>"
+        "<key>HTTPSEnable</key><integer>1</integer><key>HTTPSProxy</key><string>127.0.0.1</string>"
+        "<key>HTTPSPort</key><integer>7890</integer><key>ExceptionsList</key><array><string>bypass.example.test</string></array>"
+        "</dict></plist>";
+    uint8_t output[4096] = {0}; size_t required = 0;
+    assert(egress_mac_resolve_resource_proxy_json("https://resource.example.test/source", settings, sizeof(settings) - 1,
+        NULL, 0, &required) == EGRESS_MAC_BUFFER_SMALL);
+    assert(required > 0 && required < sizeof(output));
+    assert(egress_mac_resolve_resource_proxy_json("https://resource.example.test/source", settings, sizeof(settings) - 1,
+        output, sizeof(output) - 1, &required) == EGRESS_MAC_OK);
+    assert(strstr((const char *)output, "127.0.0.1") != NULL);
+    assert(strstr((const char *)output, "7890") != NULL);
+    memset(output, 0, sizeof(output));
+    assert(egress_mac_resolve_resource_proxy_json("https://bypass.example.test/source", settings, sizeof(settings) - 1,
+        output, sizeof(output) - 1, &required) == EGRESS_MAC_OK);
+    assert(strstr((const char *)output, "\"type\":\"direct\"") != NULL);
+    assert(egress_mac_resolve_resource_proxy_json("https://resource.example.test/source", (const uint8_t *)"invalid", 7,
+        output, sizeof(output), &required) == EGRESS_MAC_INVALID);
+    static const uint8_t pac[] = "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>"
+        "<key>ProxyAutoConfigEnable</key><integer>1</integer>"
+        "<key>ProxyAutoConfigURLString</key><string>https://pac.example.invalid/private?token=not-forwarded</string>"
+        "</dict></plist>";
+    memset(output, 0, sizeof(output));
+    assert(egress_mac_resolve_resource_proxy_json("https://resource.example.test/source", pac, sizeof(pac) - 1,
+        output, sizeof(output) - 1, &required) == EGRESS_MAC_OK);
+    assert(strstr((const char *)output, "\"type\":\"pac\"") != NULL);
+    assert(strstr((const char *)output, "not-forwarded") == NULL);
+}
 int main(void)
 {
     assert(egress_mac_abi_version() == 1);
@@ -76,5 +107,6 @@ int main(void)
     assert(memcmp(bytes, "{\"abiVersion\":1,", 16) == 0);
     free(bytes);
     pure_route_tests();
+    pure_proxy_snapshot_tests();
     return 0;
 }

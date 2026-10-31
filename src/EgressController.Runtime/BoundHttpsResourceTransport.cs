@@ -31,7 +31,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
             UseProxy = false,
             UseCookies = false,
             AutomaticDecompression = DecompressionMethods.None,
-            ConnectCallback = (context, token) => ConnectAsync(context.DnsEndPoint, resource.Interface, token)
+            ConnectCallback = (context, token) => ConnectAsync(context.DnsEndPoint, resource.Exit.Interface!, token)
         };
         using var client = new HttpClient(httpHandlerFactory?.Invoke(handler) ?? handler) { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("EgressController/1.0");
@@ -93,7 +93,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
 
     private static void Validate(ResourceDescriptor resource)
     {
-        if (!SafeHttps(resource.Url) || resource.MaximumBytes < 1 || string.IsNullOrWhiteSpace(resource.Interface.StableId) || string.IsNullOrWhiteSpace(resource.Interface.BsdName))
+        if (!SafeHttps(resource.Url) || resource.MaximumBytes < 1 || resource.Exit.Kind != ResourceExitKind.BoundInterface || !resource.Exit.IsValid)
             throw new ArgumentException("HTTPS and an explicit physical interface are required.", nameof(resource));
     }
     private static bool SafeHttps(Uri url) => url.IsAbsoluteUri && url.Scheme == Uri.UriSchemeHttps && url.UserInfo.Length == 0 && url.Fragment.Length == 0;

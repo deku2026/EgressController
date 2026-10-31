@@ -12,10 +12,11 @@ public static class PreviewChecks
         StartupArguments.EnsureIsolationCompatible(StartupMode.Preview, true); StartupArguments.EnsureIsolationCompatible(StartupMode.Production, false);
         var vm = new ShellViewModel(); Check(vm.ConfigValid, "Initial fixture configuration is invalid: " + vm.CurrentIssue);
         Check(vm.Document.Nodes.Any(x => !x.IsSupported), "Unsupported protocols were silently removed.");
+        Check(vm.GlobalChoices.All(choice => vm.Document.Groups.Any(group => group.Id == choice.Id)), "Route choices exposed raw nodes instead of proxy groups.");
         var app = vm.VisibleApps.First(); string[] inventory = app.Model.ExecutablePaths.ToArray(); app.RouteIndex = 2;
         Check(app.Model.Via.Kind == ExitKind.Proxy && app.Model.ExecutablePaths.SequenceEqual(inventory), "Changing route changed saved application membership.");
         string originalGlobal = vm.Document.Defaults.Global.TargetId!;
-        app.SelectedProxyTarget = vm.GlobalChoices.First(x => x.Detail == "节点");
+        app.SelectedProxyTarget = vm.GlobalChoices.First(x => x.Detail == "分组" && x.Id != originalGlobal);
         Check(app.Model.Via.TargetId == app.SelectedProxyTarget?.Id && vm.Document.Defaults.Global.TargetId == originalGlobal, "An application proxy choice changed the global proxy.");
         vm.SelectedApp = app; app.Model.ExecutablePaths.Add(app.BundlePath + "/Contents/MacOS/PreviouslySavedHelper");
         int beforeRefresh = app.Model.ExecutablePaths.Count; vm.RefreshSelectedInventoryCommand.Execute(null);

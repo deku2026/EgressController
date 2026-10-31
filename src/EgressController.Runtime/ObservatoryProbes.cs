@@ -16,22 +16,38 @@ public interface IObservatoryProcess
 public sealed class ObservatoryProbes(IObservatoryProcess process)
 {
     public async Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, XrayCompileOptions options,
-        string executable, CancellationToken cancellationToken = default)
+        string executable, CancellationToken cancellationToken = default, bool requiredOnly = false)
     {
         var results = new List<GroupProbe>();
+        var observations = options.Probes.ToList();
+        var working = new XrayCompileOptions { Interfaces = options.Interfaces.ToList(), Probes = observations,
+            Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, PreparedRuleSources = options.PreparedRuleSources.ToList(),
+            ChinaGeoSiteFile = options.ChinaGeoSiteFile, ChinaGeoIpFile = options.ChinaGeoIpFile, ChinaTag = options.ChinaTag };
         using var throttle = new SemaphoreSlim(3, 3);
         var urls = document.Groups.Where(group => group.Kind is GroupKind.UrlTest or GroupKind.Fallback)
             .Select(group => group.TestUrl).Distinct(StringComparer.Ordinal).ToArray();
         if (urls.Length == 0) urls = ["https://www.gstatic.com/generate_204"];
-        var tasks = document.Nodes.Where(node => node.IsSupported).SelectMany(node => urls.Select(url => (node, url)))
-            .Select(async item =>
+        var attempted = new HashSet<(string NodeId, string Url)>();
+        do
+        {
+            var requests = requiredOnly ? RequiredGroupProbes.Missing(document, working)
+                : document.Nodes.Where(node => node.IsSupported).SelectMany(node => urls.Select(url => new RequiredGroupProbe(node.Id, url))).ToArray();
+            requests = requests.Where(request => attempted.Add((request.NodeId, request.TestUrl))).ToArray();
+            if (requests.Count == 0) break;
+            var tasks = requests.Select(async item =>
             {
                 await throttle.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
                     var draft = PolicyYaml.Read(PolicyYaml.Write(document)).Document!;
-                    draft.Applications.Clear(); draft.RuleSets.Clear(); draft.Defaults.Global = ExitChoice.Proxy(item.node.Id);
-                    var compiled = XrayConfigCompiler.Compile(draft, options);
+                    draft.Applications.Clear(); draft.RuleSets.Clear();
+                    // Internal health requests still pass the public group-only route contract.
+                    string probeGroupId = "probe-selector";
+                    while (draft.Nodes.Any(node => node.Id == probeGroupId) || draft.Groups.Any(group => group.Id == probeGroupId) || draft.Providers.Any(provider => provider.Id == probeGroupId)) probeGroupId += "-x";
+                    draft.Groups.Add(new() { Id = probeGroupId, Name = "Internal probe selector", Kind = GroupKind.Select,
+                        MemberIds = [item.NodeId], SelectedMemberId = item.NodeId });
+                    draft.Defaults.Global = ExitChoice.Proxy(probeGroupId);
+                    var compiled = XrayConfigCompiler.Compile(draft, working);
                     ObservatoryResult measured = new(false, 0);
                     if (compiled.IsSuccess)
                     {
@@ -39,23 +55,27 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                         root["inbounds"] = new JsonArray();
                         root["routing"]!["rules"] = new JsonArray(
                             new JsonObject { ["inboundTag"] = new JsonArray("dns-query"), ["outboundTag"] = "nonhome" },
-                            new JsonObject { ["network"] = "tcp,udp", ["outboundTag"] = item.node.Id });
+                            new JsonObject { ["network"] = "tcp,udp", ["outboundTag"] = item.NodeId });
                         root["log"] = new JsonObject { ["loglevel"] = "info" };
                         root["observatory"] = new JsonObject
                         {
-                            ["subjectSelector"] = new JsonArray(item.node.Id),
-                            ["probeURL"] = item.url,
+                            ["subjectSelector"] = new JsonArray(item.NodeId),
+                            ["probeURL"] = item.TestUrl,
                             ["probeInterval"] = "1h",
                             ["enableConcurrency"] = false
                         };
-                        measured = await process.RunAsync(executable, root.ToJsonString(), item.node.Id, cancellationToken).ConfigureAwait(false);
+                        measured = await process.RunAsync(executable, root.ToJsonString(), item.NodeId, cancellationToken).ConfigureAwait(false);
                     }
-                    lock (results) results.Add(new(item.node.Id, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.url));
+                    lock (results) results.Add(new(item.NodeId, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.TestUrl));
                 }
                 finally { throttle.Release(); }
             });
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        return results;
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            observations.Clear(); observations.AddRange(options.Probes); observations.AddRange(results);
+            if (results.Count > 0 && results.Max(result => result.ObservedAt) > working.Now) working.Now = results.Max(result => result.ObservedAt);
+        } while (requiredOnly);
+        // Required-only callers can atomically replace their probe snapshot without dropping fresh cached observations.
+        return requiredOnly ? observations : results;
     }
 
     // Exact message emitted by Xray v26.10.29 app/observatory/observer.go. Unknown output never means success.

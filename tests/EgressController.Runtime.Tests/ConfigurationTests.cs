@@ -8,7 +8,8 @@ public sealed class ConfigurationTests
     internal static MacPolicyDocument Policy() => new()
     {
         Interfaces = new() { HomeId = "home-service", NonHomeId = "other-service" },
-        Defaults = new() { Global = ExitChoice.Proxy("node-1") },
+        Defaults = new() { Global = ExitChoice.Proxy("group-1") },
+        Groups = [new() { Id = "group-1", Name = "Fixture group", Kind = GroupKind.Select, MemberIds = ["node-1"], SelectedMemberId = "node-1" }],
         Nodes = [new() { Id = "node-1", Name = "Example", SourceId = "example", Server = "proxy.example.invalid", Port = 443,
             Protocol = NodeProtocol.Vless, UserId = "11111111-1111-1111-1111-111111111111", Tls = true }],
         Applications = [new() { Id = "app-1", Name = "Example App", BundlePath = "/Applications/Example.app",

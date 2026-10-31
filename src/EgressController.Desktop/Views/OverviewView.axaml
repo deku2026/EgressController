@@ -1,5 +1,8 @@
-<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.OverviewView" x:DataType="vm:ShellViewModel">
- <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" xmlns:views="using:EgressController.Desktop.Views" x:Class="EgressController.Desktop.Views.OverviewView" x:DataType="vm:ShellViewModel">
+ <Grid RowDefinitions="Auto,*" RowSpacing="17">
+  <Border Background="#EDF1F7" CornerRadius="7" Padding="3" HorizontalAlignment="Left"><StackPanel Orientation="Horizontal" Spacing="2"><Button Name="OverviewSummaryTab" Classes="route" Classes.active="{Binding Connections.SummaryVisible}" Content="网络概览" Command="{Binding Connections.ShowSummaryCommand}" Padding="14,5"/><Button Name="OverviewConnectionsTab" Classes="route" Classes.active="{Binding Connections.IsOpen}" Content="连接活动" Command="{Binding Connections.ShowConnectionsCommand}" Padding="14,5"/></StackPanel></Border>
+ <Grid Grid.Row="1" IsVisible="{Binding Connections.IsOpen}"><views:ConnectionWorkspaceView DataContext="{Binding Connections}"/></Grid>
+ <ScrollViewer Grid.Row="1" IsVisible="{Binding Connections.SummaryVisible}" HorizontalScrollBarVisibility="Disabled">
   <StackPanel Spacing="18">
    <Border Classes="card" Padding="19,17"><Grid ColumnDefinitions="42,*,Auto" ColumnSpacing="14"><Border Background="{Binding StatusSurfaceBrush}" CornerRadius="11" Width="42" Height="42"><ui:Glyph Kind="shield" Foreground="{Binding StatusIconBrush}" Width="25" Height="25"/></Border><StackPanel Grid.Column="1" Spacing="5"><StackPanel Orientation="Horizontal" Spacing="9"><TextBlock Text="{Binding StatusTitle}" FontSize="17" FontWeight="SemiBold"/><Border Background="{Binding StatusSurfaceBrush}" CornerRadius="4" Padding="6,3"><TextBlock Text="{Binding RuntimeBadge}" Foreground="{Binding StatusIconBrush}" FontSize="8" FontWeight="SemiBold" LetterSpacing=".8"/></Border></StackPanel><TextBlock Text="{Binding StatusDescription}" Classes="muted"/></StackPanel><Button Grid.Column="2" Content="{Binding TogglePreviewLabel}" Command="{Binding TogglePreviewCommand}" VerticalAlignment="Center"/></Grid></Border>
    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="14">
@@ -15,4 +18,5 @@
    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,2"><StackPanel Orientation="Horizontal" Spacing="7"><ui:Glyph Kind="shield" Width="14" Height="14" Foreground="#A0ACBE"/><TextBlock Text="{Binding WorkspaceSafetyText}" FontSize="10" Foreground="#99A3B4"/></StackPanel><Button Grid.Column="1" Content="重新体验首次设置" Command="{Binding BeginSetupCommand}" Classes="link" FontSize="10"/></Grid>
   </StackPanel>
  </ScrollViewer>
+ </Grid>
 </UserControl>

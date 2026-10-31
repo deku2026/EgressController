@@ -72,7 +72,7 @@ public sealed class Shadowsocks2022Tests
         => Assert.Single(ClashSubscriptionImporter.Import("proxies: [{name: synthetic, type: ss, server: proxy.example.test, port: 443, cipher: " + method + ", password: '" + password + "'}]", "synthetic-ss2022").Nodes);
     private static MacPolicyDocument Policy(ProxyNode node)
     {
-        var policy = PolicyTests.Document(); policy.Nodes = [node]; policy.Groups.Clear(); policy.RuleSets.Clear(); policy.Defaults.Global = ExitChoice.Proxy(node.Id); return policy;
+        var policy = PolicyTests.Document(); policy.Nodes = [node]; policy.Groups.Clear(); policy.RuleSets.Clear(); PolicyTests.SelectGlobalNode(policy, node.Id); return policy;
     }
     private static string Key(int length, int offset = 0) => Convert.ToBase64String(Enumerable.Range(offset, length).Select(value => (byte)value).ToArray());
 }
