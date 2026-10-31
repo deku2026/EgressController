@@ -1,0 +1,27 @@
+<Project>
+  <!-- A normal IDE/CLI build owns its native dependency, including transitive consumers.
+       Keep build trees separate from the standalone ABI/package validation directory. -->
+  <PropertyGroup>
+    <_EgressBuildMacNative Condition="$([MSBuild]::IsOSPlatform('OSX')) and ('$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'osx-arm64' or '$(RuntimeIdentifier)' == 'osx-x64')">true</_EgressBuildMacNative>
+    <_EgressMacNativeArchitecture Condition="'$(RuntimeIdentifier)' == 'osx-arm64' or ('$(RuntimeIdentifier)' == '' and '$(NETCoreSdkRuntimeIdentifier)' == 'osx-arm64')">arm64</_EgressMacNativeArchitecture>
+    <_EgressMacNativeArchitecture Condition="'$(RuntimeIdentifier)' == 'osx-x64' or ('$(RuntimeIdentifier)' == '' and '$(NETCoreSdkRuntimeIdentifier)' == 'osx-x64')">x86_64</_EgressMacNativeArchitecture>
+    <_EgressMacNativeBuildDirectory>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'mac-native', '$(Configuration)', '$(_EgressMacNativeArchitecture)'))</_EgressMacNativeBuildDirectory>
+    <_EgressMacNativeLibrary>$(_EgressMacNativeBuildDirectory)/libEgressMacNative.dylib</_EgressMacNativeLibrary>
+    <_EgressMacNativeRoot>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..'))</_EgressMacNativeRoot>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_EgressBuildMacNative)' == 'true'">
+    <_EgressMacNativeInput Include="$(_EgressMacNativeRoot)/native/macos/CMakeLists.txt;$(_EgressMacNativeRoot)/native/macos/src/*.m;$(_EgressMacNativeRoot)/native/macos/include/*.h;$(_EgressMacNativeRoot)/build/Build-MacNative.py;$(MSBuildThisFileFullPath)" />
+    <Content Include="$(_EgressMacNativeLibrary)" Link="libEgressMacNative.dylib"
+             TargetPath="libEgressMacNative.dylib" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+  <Target Name="BuildEgressMacNative" BeforeTargets="PrepareForBuild;AssignTargetPaths"
+          Condition="'$(_EgressBuildMacNative)' == 'true' and '$(DesignTimeBuild)' != 'true'"
+          Inputs="@(_EgressMacNativeInput)" Outputs="$(_EgressMacNativeLibrary)">
+    <Error Condition="'$(_EgressMacNativeArchitecture)' == ''" Text="The macOS bridge requires an arm64 or x64 .NET SDK/runtime identifier." />
+    <Exec Command="/usr/bin/python3 &quot;$(_EgressMacNativeRoot)/build/Build-MacNative.py&quot; --configuration &quot;$(Configuration)&quot; --architecture &quot;$(_EgressMacNativeArchitecture)&quot; --output &quot;$(_EgressMacNativeBuildDirectory)&quot; --without-tests" />
+    <!-- CMake may keep identical bytes after a build-script-only change. Record that
+         successful validation so MSBuild does not invoke it on every later build. -->
+    <Touch Files="$(_EgressMacNativeLibrary)" AlwaysCreate="false" />
+  </Target>
+</Project>

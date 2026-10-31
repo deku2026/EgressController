@@ -84,11 +84,14 @@ public sealed class ProductionBoundaryTests
         var plan = new MacHelperApplyPlan("generation", "/mock/generation", new string('f', 64), "/mock/xray", new string('a', 64), "home", "other");
         Assert.True((await client.ApplyAsync(plan, TestContext.Current.CancellationToken)).Succeeded);
         await connection.Failed.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
-        await Task.Delay(25, TestContext.Current.CancellationToken);
+        // Requests are serialized: entering the retry proves the timeout was handled and its
+        // unhealthy status published. Hold that retry so it cannot recover before this assertion.
+        await connection.RecoveryAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         Assert.False(client.Status.TunTakenOver);
         connection.AllowRecovery.TrySetResult();
-        await connection.Recovered.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
-        await Task.Delay(10, TestContext.Current.CancellationToken);
+        // A following heartbeat can enter only after the successful retry has published its
+        // status and released the request lock; transport completion alone is too early.
+        await connection.FollowingHeartbeat.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         Assert.True(client.Status.TunTakenOver);
     }
 
@@ -133,15 +136,22 @@ public sealed class ProductionBoundaryTests
     private sealed class RecoveringHeartbeat : IMacHelperConnection
     {
         public TaskCompletionSource Failed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource RecoveryAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource AllowRecovery { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Recovered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FollowingHeartbeat { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _heartbeats;
         public async Task<MacHelperWireReply> ExchangeAsync(MacHelperWireRequest request, CancellationToken cancellationToken)
         {
             if (request.Command == MacHelperCommand.Heartbeat)
             {
-                if (Interlocked.Increment(ref _heartbeats) == 1) { Failed.TrySetResult(); throw new OperationCanceledException("Injected transport timeout."); }
-                await AllowRecovery.Task.WaitAsync(cancellationToken); Recovered.TrySetResult();
+                int heartbeat = Interlocked.Increment(ref _heartbeats);
+                if (heartbeat == 1) { Failed.TrySetResult(); throw new OperationCanceledException("Injected transport timeout."); }
+                if (heartbeat == 2)
+                {
+                    RecoveryAttempted.TrySetResult();
+                    await AllowRecovery.Task.WaitAsync(cancellationToken);
+                }
+                else FollowingHeartbeat.TrySetResult();
             }
             return new(request.SessionId, request.Sequence, true, "ok", "", Status());
         }

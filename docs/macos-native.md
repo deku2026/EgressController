@@ -136,12 +136,36 @@ These tests do not invoke the application, artwork or SystemConfiguration export
 enabled in Release. This proves compilation and the tested boundary contracts; it does not prove
 that a privileged helper or real TUN is operational.
 
-The affected managed suite passed **87 mock tests** after the production boundary additions. Its
+The affected managed suite covers **88 tests**, including the pure native deployment probe. Its
 synthetic stream matrix covers thin 32/64-bit and FAT32/FAT64 byte orders, non-executable file types,
 universal dylibs, mixed slices, Java magic, truncation, overlap, integer bounds, malformed commands
 and execute-mode exclusion. Additional tests cover injected IPC/runtime flows, malformed and stale
 replies, heartbeat timeout/recovery, installation-plan quoting and default mock gate denial. No
 installed application, real socket peer, real route or DNS state was read for this verification.
 
-`artifacts/macos-native/libEgressMacNative.dylib` must be staged beside the managed/AOT executable
-when packaging live platform access. No runtime library is installed globally by the build script.
+## IDE and publish deployment
+
+`EgressController.Mac.csproj` imports `build/MacNative.targets`. On macOS, an ordinary build first
+compiles the native bridge through CMake, then exposes the generated library as transitive content
+with `CopyToOutputDirectory` and `CopyToPublishDirectory`. Desktop, helper, tests and other
+`ProjectReference` consumers receive `libEgressMacNative.dylib` beside their assemblies without a
+loader-path environment variable. The native loader retains its assembly/safe-directory search
+policy; it does not search arbitrary repository/cache paths.
+
+Build trees live beneath the Mac project's `obj/mac-native/<configuration>/<architecture>`.
+Native source/header/build-script changes invalidate the incremental target; a missing library is
+rebuilt. Design-time IDE evaluation does not run CMake. The script uses the PATH CMake or standard
+Homebrew install paths so Finder-launched Rider does not require a shell profile. These ordinary
+builds only compile the library. Standalone `Build-MacNative.py` still builds and runs the pure ABI
+CTest suite in `artifacts/macos-native`; no library is installed globally.
+
+Packaging consumes the exact native payloads produced by Desktop/helper publish and checks they
+match before signing; it never overwrites them with the standalone verification artifact.
+`NativeDeploymentTests` loads the transitive output through the production assembly's normal
+native search rules and calls only the constant ABI-version export, even in mock-only mode.
+
+The Desktop `Properties/launchSettings.json` provides a first, parameterless production profile
+and an explicit `--preview` profile with `EGRESS_MOCK_ONLY=1`. Rider's **Generate Configurations**
+imports these when an older run configuration already exists. Production GUI debugging does not
+ship/install the helper. Use the packaged NativeAOT `.app` for explicit live takeover; the
+authenticated helper boundary is unchanged.

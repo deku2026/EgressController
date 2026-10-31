@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "Egress · Production": {
+      "commandName": "Project"
+    },
+    "Egress · Preview": {
+      "commandName": "Project",
+      "commandLineArgs": "--preview",
+      "environmentVariables": {
+        "EGRESS_MOCK_ONLY": "1"
+      }
+    }
+  }
+}

@@ -34,9 +34,7 @@ def main():
         print("Running:", " ".join(map(str, command)), flush=True)
         subprocess.run(list(map(str, command)), cwd=ROOT, env=environment, check=True)
 
-    native = ROOT / "artifacts" / "macos-native" / "libEgressMacNative.dylib"
-    if not native.is_file():
-        raise RuntimeError("Run build/Build-MacNative.py before packaging; the verified native bridge is missing.")
+    native_name = "libEgressMacNative.dylib"
     with tempfile.TemporaryDirectory(prefix=".mac-package-", dir=output) as temporary:
         staging = Path(temporary)
         published = staging / "published"
@@ -48,15 +46,19 @@ def main():
         binary_name = "EgressController.Desktop"
         if not (published / binary_name).is_file():
             raise RuntimeError("The NativeAOT desktop entrypoint is missing.")
+        # Use the native dependency built for these exact publish configuration/RID inputs.
+        # A stale standalone artifacts/macos-native build must never overwrite it.
+        if not (published / native_name).is_file() or not (helper_published / native_name).is_file():
+            raise RuntimeError("The published desktop/helper native bridge is missing.")
+        if hashlib.sha256((published / native_name).read_bytes()).digest() != hashlib.sha256((helper_published / native_name).read_bytes()).digest():
+            raise RuntimeError("The desktop and helper native ABI payloads differ.")
         app = staging / "Egress.app"
         executable_directory = app / "Contents" / "MacOS"
         resources = app / "Contents" / "Resources"
         shutil.copytree(published, executable_directory, ignore=shutil.ignore_patterns("*.pdb", "*.dSYM"))
         resources.mkdir(parents=True)
-        shutil.copy2(native, executable_directory / native.name)
         helper_directory = executable_directory / "helper"
         shutil.copytree(helper_published, helper_directory, ignore=shutil.ignore_patterns("*.pdb", "*.dSYM"))
-        shutil.copy2(native, helper_directory / native.name)
         notices = resources / "Notices"
         notices.mkdir()
         shutil.copy2(ROOT / "LICENSE", notices / "Egress-LICENSE.txt")
@@ -123,7 +125,7 @@ def main():
             "Use --preview for an isolated UI workspace. Only an explicit Connect action requests privileged installation/takeover.\n"
             "Development verification uses --mock-smoke/--preview only; no live network acceptance is claimed.\n")
         # Independently installed code needs its own valid signature; this is a non-standard nested-code directory.
-        run("codesign", "--force", "--sign", "-", helper_directory / native.name)
+        run("codesign", "--force", "--sign", "-", helper_directory / native_name)
         run("codesign", "--force", "--sign", "-", helper_directory / "EgressController.MacHelper")
         run("codesign", "--verify", "--strict", helper_directory / "EgressController.MacHelper")
         run("codesign", "--force", "--deep", "--sign", "-", app)

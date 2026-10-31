@@ -6,4 +6,5 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../EgressController.Runtime/EgressController.Runtime.csproj" /></ItemGroup>
+  <Import Project="../../build/MacNative.targets" />
 </Project>

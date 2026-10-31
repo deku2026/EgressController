@@ -48,3 +48,18 @@ dotnet run --project tools/EgressController.MacPreview -- --screenshots artifact
 - [实施和验收边界](docs/mac-implementation-plan.md)
 
 旧 Windows 代码隔离在 `EgressController.Windows.slnx`，不参与默认产品构建。
+
+## Rider 运行与调试
+
+打开 `EgressController.slnx`。普通 Build 会通过 CMake 自动编译当前架构的原生桥接库，并将 `libEgressMacNative.dylib` 复制到 Desktop、助手及引用项目的输出目录；无需设置 `DYLD_LIBRARY_PATH` 或手工复制。首次构建需要上面的 CMake 与 Xcode Command Line Tools；从 Finder 打开的 Rider 也能发现 Homebrew 标准目录里的 CMake。
+
+右键 `src/EgressController.Desktop/Properties/launchSettings.json` → **Generate Configurations**，选择生成的运行配置（[Rider 官方说明](https://www.jetbrains.com/help/rider/Running_LaunchSettings.html)）：
+
+| 配置 | 程序参数 | 环境变量 | 用途 |
+| --- | --- | --- | --- |
+| `Egress · Production` | 空 | 不设置 `EGRESS_MOCK_ONLY` | 默认生产界面，读取实际应用、网卡和保存的配置 |
+| `Egress · Preview` | `--preview` | `EGRESS_MOCK_ONLY=1` | 隔离 UI 开发与截图 |
+
+已有的 `.NET Project` 配置也可继续使用：Project 选 `EgressController.Desktop`，framework 选 `net10.0`，Runtime 选 Automatic，保留自动计算的 Exe path / Working directory，并保留启动前 **Build**。修改原生 C/Objective-C 文件后若 Rider 没有触发构建，使用 **Rebuild**。
+
+Rider 普通构建适合调试界面及非特权生产流程，不附带可安装的 NativeAOT 助手。实际“应用并连接”请运行 `python3 build/Package-Mac.py` 生成的 `artifacts/package/Egress.app`；仅打开界面不会启动 TUN。自动开发验证仍只用显式预览、mock 或纯 ABI 探针。
