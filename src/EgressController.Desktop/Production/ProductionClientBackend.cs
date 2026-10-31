@@ -150,6 +150,10 @@ public sealed class ProductionClientBackend : IClientBackend
         }
         _launch = new(core.ExecutablePath, core.Sha256, document.Interfaces.HomeId, document.Interfaces.NonHomeId);
         await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
+        var current = await _helper.InspectAsync(cancellationToken).ConfigureAwait(false);
+        if (MacRuntimeReadiness.RequiresRecovery(current, _coordinator.Applied is not null)
+            && !await _coordinator.StopAsync("用户重试连接：助手已确认核心或 TUN 不可用", cancellationToken).ConfigureAwait(false))
+            throw new RuntimeFailureException("recovery.failed");
         Report(ConnectionAttemptStage.Bootstrap, $"建立 TUN 与 Xray SOCKS5 127.0.0.1:{document.Defaults.ResourceProxyPort}；规则未就绪前暂停普通流量。");
         await _coordinator.BeginResourceBootstrapAsync(document, options, cancellationToken).ConfigureAwait(false);
     }
