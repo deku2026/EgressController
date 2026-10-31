@@ -24,6 +24,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
     }
     private async Task<byte[]> DownloadCoreAsync(ResourceDescriptor resource, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Validate(resource);
         using var handler = new SocketsHttpHandler
         {
@@ -93,7 +94,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
 
     private static void Validate(ResourceDescriptor resource)
     {
-        if (!SafeHttps(resource.Url) || resource.MaximumBytes < 1 || resource.Exit.Kind != ResourceExitKind.BoundInterface || !resource.Exit.IsValid)
+        if (!SafeHttps(resource.Url) || resource.MaximumBytes < 1 || resource.Exit.Kind is not (ResourceExitKind.BoundInterface or ResourceExitKind.DirectSubscription) || !resource.Exit.IsValid)
             throw new ArgumentException("HTTPS and an explicit physical interface are required.", nameof(resource));
     }
     private static bool SafeHttps(Uri url) => url.IsAbsoluteUri && url.Scheme == Uri.UriSchemeHttps && url.UserInfo.Length == 0 && url.Fragment.Length == 0;

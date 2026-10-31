@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <EgressPrepareRiderPayload Condition="'$(EgressPrepareRiderPayload)' == ''">true</EgressPrepareRiderPayload>
+  </PropertyGroup>
+  <Target Name="PrepareEgressRiderProduction" AfterTargets="Build"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$(DesignTimeBuild)' != 'true' and '$(PublishAot)' != 'true' and '$(EgressPrepareRiderPayload)' == 'true'">
+    <Exec Command="/usr/bin/python3 &quot;$(MSBuildThisFileDirectory)Build-MacProduction.py&quot; --configuration &quot;$(Configuration)&quot; --output &quot;$(TargetDir)production&quot;" />
+  </Target>
+</Project>

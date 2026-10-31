@@ -107,7 +107,16 @@ public sealed class ProductionClientBackend : IClientBackend
         string sourceId = current.Subscriptions.FirstOrDefault(item => item.Url == url.AbsoluteUri)?.Id
             ?? (current.Subscriptions.Count == 1 ? current.Subscriptions[0].Id : "subscription-" + Digest(url.AbsoluteUri)[..24]);
         var source = new SubscriptionSource { Id = sourceId, Name = "节点订阅", Url = url.AbsoluteUri };
-        var imported = await Resources(_savedResourcePort).FetchSubscriptionAsync(source, PreparationCachePolicy.Refresh, cancellationToken).ConfigureAwait(false);
+        // Capture subscription-only direct egress before awaiting. No helper/core/port readiness is consulted.
+        string interfaceId = current.Interfaces.NonHomeId, dnsIp = current.Dns.UpstreamIp;
+        var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
+        var selected = interfaces.SingleOrDefault(item => item.ServiceId == interfaceId && item.IsActive && Physical(item))
+            ?? throw new RuntimeFailureException("subscription.interface");
+        if (!IPAddress.TryParse(dnsIp, out var upstream) || IPAddress.IsLoopback(upstream) || upstream.Equals(IPAddress.Any) || upstream.Equals(IPAddress.IPv6Any))
+            throw new RuntimeFailureException("subscription.dns");
+        var binder = new MacPhysicalSocketBinder(_native);
+        var imported = await new DirectSubscriptionResources(binder, new BoundDnsResolver(binder, upstream), _cache,
+            new(interfaceId, selected.BsdName), ResourceProgress()).FetchAsync(source, cancellationToken).ConfigureAwait(false);
         if (!imported.IsSuccess) throw new InvalidDataException("订阅结构无效，保留原有节点与选择。");
         var merged = SubscriptionReconciler.Merge(current, sourceId, imported);
         merged.Subscriptions.RemoveAll(item => item.Id == sourceId); merged.Subscriptions.Add(source); return merged;

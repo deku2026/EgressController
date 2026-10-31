@@ -20,9 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
-    parser.add_argument("--version", default="0.1.1")
+    parser.add_argument("--version", default="0.1.2")
     parser.add_argument("--xray-archive", type=Path, default=ROOT / "artifacts/core/Xray-macos-arm64-v8a.zip",
                         help="Offline official pinned Xray archive, carried inside the app; never executed during packaging.")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "artifacts/package")
+    parser.add_argument("--no-archive", action="store_true", help="Prepare the same complete app for Rider without making a distribution ZIP.")
     args = parser.parse_args()
     xray_archive = args.xray_archive.resolve()
     if not xray_archive.is_file():
@@ -42,7 +44,9 @@ def main():
         parser.error("Version must contain three non-negative numeric components.")
     environment = {key: value for key, value in os.environ.items() if not key.startswith("EGRESS_LIVE_")}
     environment["EGRESS_MOCK_ONLY"] = "1"
-    output = ROOT / "artifacts" / "package"
+    output = args.output_root.resolve()
+    if not output.is_relative_to(ROOT):
+        parser.error("Generated package output must stay inside this checkout.")
     output.mkdir(parents=True, exist_ok=True)
 
     def run(*command):
@@ -54,10 +58,10 @@ def main():
         staging = Path(temporary)
         published = staging / "published"
         run("dotnet", "publish", "src/EgressController.Desktop", "-m:1", "--disable-build-servers", "-c", args.configuration, "-r", "osx-arm64",
-            "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-p:EgressXrayArchive=" + str(xray_archive), "-o", published)
+            "-p:PublishAot=true", "-p:EgressPrepareRiderPayload=false", "-p:StripSymbols=true", "-p:Version=" + args.version, "-p:EgressXrayArchive=" + str(xray_archive), "-o", published)
         helper_published = staging / "helper-published"
         run("dotnet", "publish", "tools/EgressController.MacHelper", "-m:1", "--disable-build-servers", "-c", args.configuration, "-r", "osx-arm64",
-            "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-o", helper_published)
+            "-p:PublishAot=true", "-p:EgressPrepareRiderPayload=false", "-p:StripSymbols=true", "-p:Version=" + args.version, "-o", helper_published)
         binary_name = "EgressController.Desktop"
         if not (published / binary_name).is_file():
             raise RuntimeError("The NativeAOT desktop entrypoint is missing.")
@@ -164,6 +168,9 @@ def main():
                 shutil.rmtree(backup)
             destination.rename(backup)
         app.rename(destination)
+        if args.no_archive:
+            print("Rider NativeAOT app/helper/core ready:", destination)
+            return
         archive = output / "EgressController-osx-arm64.zip"
         run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", destination, archive)
         checksum = hashlib.sha256(archive.read_bytes()).hexdigest()

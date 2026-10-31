@@ -59,7 +59,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public string WorkspaceSafetyText => IsPreview ? "预览安全模式 · 不接管系统流量" : "Xray 唯一内核 · 出口严格绑定";
     public string SetupPermissionText => IsPreview ? "完全隔离 · 不使用管理员权限" : "启动时请求必要的网络授权";
     public string SetupApplyDescription => IsPreview ? "当前仅应用到内存模拟环境，真实 TUN 与系统 DNS 保持未启用。" : "先启动内置 Xray TUN，再经非家宽分组节点准备规则并应用分流；失败会恢复连接前状态。";
-    public string SubscriptionDescription => IsPreview ? "隔离预览使用 example.invalid 示例 URL，读取内存响应；不会访问真实订阅。" : "在线更新使用 Egress 自带 Xray 的非家宽分组节点。首次使用请先粘贴本地 Clash YAML，连接后再更新订阅。";
+    public string SubscriptionDescription => IsPreview ? "隔离预览使用 example.invalid 示例 URL，读取内存响应；不会访问真实订阅。" : "订阅和节点提供器通过非家宽物理网卡直连，无需启动 Xray 或 TUN。直连失败时请检查订阅地址与网络后重试。";
     public string SubscriptionName => Document.Subscriptions.FirstOrDefault()?.Name ?? "节点订阅";
     public string CatalogDescription => IsPreview ? "先搜索，再明确选择。AI、开发、浏览器与日常应用均可添加。" : "从已安装的应用中搜索并选择，添加时读取完整的固定可执行清单。";
     public string TunStatusText => PreviewRunning ? "TUN 已接管" : _state.HelperInstalled ? "后台服务已就绪" : "尚未安装后台服务";
@@ -212,7 +212,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public bool OnboardingVisible { get => _onboarding; set => Set(ref _onboarding, value); }
     public int SetupStep { get => _step; set { if (Set(ref _step, value)) { foreach (string name in new[] { nameof(SetupTitle), nameof(SetupDescription), nameof(SetupProgress), nameof(SetupInterfaces), nameof(SetupSubscription), nameof(SetupGlobal), nameof(SetupApplications), nameof(SetupReview), nameof(NextSetupLabel) }) Raise(name); BackSetupCommand?.Refresh(); NextSetupCommand?.Refresh(); } } }
     public string SetupTitle => SetupStep switch { 0 => "先认识你的两条网络", 1 => "接入你的节点订阅", 2 => "为全球流量指定出口", 3 => "让常用应用先行", _ => "检查并启动连接" };
-    public string SetupDescription => SetupStep switch { 0 => "家宽与非家宽需要绑定两张不同的物理网卡。", 1 => "仅导入节点与分组，DNS 与分流由 Egress 统一管理。", 2 => "中国大陆默认非家宽直连，其他流量始终使用此代理。", 3 => "选择需要单独分流的应用；以后也可以随时添加。", _ => IsPreview ? "先校验配置，再应用到隔离的模拟运行环境。" : "检查策略与资源，通过授权助手启动连接；失败时可以重试。" };
+    public string SetupDescription => SetupStep switch { 0 => "家宽与非家宽需要绑定两张不同的物理网卡。", 1 => "仅导入节点与分组，DNS 与分流由 Egress 统一管理。", 2 => "中国大陆默认非家宽直连，其他流量始终使用此代理。", 3 => "选择需要单独分流的应用；以后也可以随时添加。", _ => IsPreview ? "先校验配置，再应用到隔离的模拟运行环境。" : "先请求管理员授权并启动内置 Xray TUN，再通过所选非家宽分组节点下载规则；失败时可以重试。" };
     private ProxyGroup? SetupGlobalGroup => Document.Groups.FirstOrDefault(group => group.Id == SelectedGlobalTarget?.Id);
     public bool SetupGlobalManual => SetupGlobalGroup?.Kind == GroupKind.Select;
     public IReadOnlyList<Choice> SetupGlobalMemberChoices => SetupGlobalGroup?.MemberIds.Select(id => new Choice(id, Document.Nodes.FirstOrDefault(node => node.Id == id)?.Name ?? Document.Groups.FirstOrDefault(group => group.Id == id)?.Name ?? id)).ToArray() ?? [];
@@ -447,7 +447,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public async Task ImportSubscriptionAsync()
     {
         if (!Uri.TryCreate(SubscriptionUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)) { CurrentIssue = "请输入有效的 HTTPS 订阅 URL。"; return; }
-        CurrentIssue = ""; Notice = "正在获取并校验订阅…";
+        CurrentIssue = ""; Notice = "正在直连获取并校验订阅…";
         try
         {
             var imported = await _backend.ImportSubscriptionAsync(uri, Document, ActionToken);
@@ -455,7 +455,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             if (IsPreview) await RunProbesAsync();
             Raise(nameof(SetupSubscriptionStatus)); Notice = $"订阅已更新：{NodeCountLabel}；原有选择已保留。"; AddEvent("订阅已更新", "已校验节点与分组；原有配置选择继续保留。", "subscription");
         }
-        catch (Exception exception) when (IsExpectedFailure(exception)) { CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
+        catch (Exception exception) when (IsExpectedFailure(exception)) { Notice = exception is OperationCanceledException ? "订阅导入已取消；原有节点与缓存已保留。" : "订阅直连未完成；原有节点与缓存已保留，可以重试。"; CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
     }
     public void RunProbes() { if (!IsPreview) throw new InvalidOperationException("Use asynchronous real probing."); RunProbesAsync().GetAwaiter().GetResult(); }
     public async Task RunProbesAsync()

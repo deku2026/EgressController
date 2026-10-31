@@ -24,6 +24,20 @@ internal static class ProductionCompositionChecks
         Check(empty.IsProduction&&!empty.IsPreview&&empty.Document.Applications.Count==0&&empty.Document.Nodes.Count==0&&empty.Observations.Count==0&&empty.OnboardingVisible,"Production initial composition leaked fixture configuration or chart observations.");
         var first=new MainWindow{DataContext=empty,Width=1260,Height=860};first.Show();Save(first,Path.Combine(directory,"production-first-run-normal.png"));
         first.Width=980;first.Height=700;Save(first,Path.Combine(directory,"production-first-run-compact.png"));
+        AssertNoPreviewText(first);
+        empty.SelectedHomeInterface = empty.InterfaceChoices[0]; empty.SelectedNonHomeInterface = empty.InterfaceChoices[1];
+        empty.SetupStep = 1; empty.SubscriptionUrl = "https://subscription.example.invalid/first-use";
+        emptyBackend.SubscriptionFailure = new ResourcePreparationException("subscription-first", "subscription-direct:test-other", 443, PreparationStage.Downloading, false);
+        Complete(empty.ImportSubscriptionCommand.ExecuteAsync());
+        Check(empty.HasIssue && empty.CurrentIssue.Contains("直连", StringComparison.Ordinal) && !empty.ConnectionAttempt.IsVisible,
+            "A failed direct subscription must report its own network error, without starting connection preparation.");
+        Save(first, Path.Combine(directory, "subscription-direct-failed-compact.png"));
+        emptyBackend.SubscriptionFailure = null; Complete(empty.ImportSubscriptionCommand.ExecuteAsync());
+        Check(!empty.HasIssue && empty.Document.Nodes.Count == 1 && emptyBackend.SubscriptionCalls == 2 && emptyBackend.RuntimeMutationCalls == 0
+            && !emptyBackend.Runtime.HelperInstalled && !empty.PreviewRunning, "First subscription import depended on a helper, TUN, or local YAML, or retry retained its old failure.");
+        Check(empty.SubscriptionDescription.Contains("直连", StringComparison.Ordinal), "Subscription instructions did not explain direct access.");
+        Save(first, Path.Combine(directory, "subscription-direct-ready-compact.png"));
+        first.Width = 1260; first.Height = 860; Save(first, Path.Combine(directory, "subscription-direct-ready-normal.png"));
         AssertNoPreviewText(first);first.Close();Complete(empty.DisposeAsync().AsTask());
 
         var loadedBackend=new InjectedBackend(true);var vm=new ShellViewModel(loadedBackend);Complete(vm.InitializeAsync());vm.PageIndex=1;
@@ -72,6 +86,9 @@ internal static class ProductionCompositionChecks
         public Exception? PreparationFailure{get;set;}
         public Exception? StatusFailure{get;set;}
         public int IconRequests{get;private set;}
+        public Exception? SubscriptionFailure { get; set; }
+        public int SubscriptionCalls { get; private set; }
+        public int RuntimeMutationCalls { get; private set; }
         public Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken=default)=>Task.FromResult(new ClientBootstrap(_document,[new("test-home","en5","Studio Ethernet","有线接口",true),new("test-other","en0","Travel Wi-Fi","无线接口",true)],Applications(),populated,Runtime));
         private static MacPolicyDocument Document(bool populated)
         {
@@ -88,11 +105,17 @@ internal static class ProductionCompositionChecks
             IconRequests++;using var stream=AssetLoader.Open(new Uri("avares://EgressController.Desktop.Presentation/Assets/vscode.png"));using var memory=new MemoryStream();stream.CopyTo(memory);return Task.FromResult<byte[]?>(memory.ToArray());
         }
         public Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=>_fixtures.LoadRuleCatalogAsync(document,cancellationToken);
-        public Task<MacPolicyDocument> ImportSubscriptionAsync(Uri uri,MacPolicyDocument current,CancellationToken cancellationToken=default)=>throw new InvalidOperationException("No subscription is configured in this composition test.");
+        public Task<MacPolicyDocument> ImportSubscriptionAsync(Uri uri,MacPolicyDocument current,CancellationToken cancellationToken=default)
+        {
+            SubscriptionCalls++; if (SubscriptionFailure is { } failure) return Task.FromException<MacPolicyDocument>(failure);
+            const string yaml = "proxies: [{name: Direct node, type: socks5, server: node.example.invalid, port: 1080}]\nproxy-groups: [{name: Global, type: select, proxies: [Direct node]}]";
+            return Task.FromResult(SubscriptionReconciler.Merge(current, "direct-first", ClashSubscriptionImporter.Import(yaml, "direct-first")));
+        }
         public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=>PreparationFailure is {} failure?Task.FromException<ClientPreparedResources>(failure):_fixtures.PrepareResourcesAsync(document,cancellationToken);
         public Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document,InterfaceBinding binding,CancellationToken cancellationToken=default)=>Task.FromResult<IReadOnlyList<GroupProbe>>([]);
+        public Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) { RuntimeMutationCalls++; return Task.CompletedTask; }
         public Task<ApplyResult> ApplyAsync(MacPolicyDocument document,XrayCompileOptions options,IReadOnlyDictionary<string,byte[]> assets,CancellationToken cancellationToken=default)=>Task.FromResult(new ApplyResult(ApplyDisposition.Rejected,null,[new("test.only","This injected composition never starts a network core.")]));
-        public Task<bool> StopAsync(CancellationToken cancellationToken=default){Runtime=Runtime with{Running=false};return Task.FromResult(true);}
+        public Task<bool> StopAsync(CancellationToken cancellationToken=default){RuntimeMutationCalls++;Runtime=Runtime with{Running=false};return Task.FromResult(true);}
         public Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken=default)=>StatusFailure is {} failure?Task.FromException<ClientRuntimeState>(failure):Task.FromResult(Runtime);
         public Task SaveDraftAsync(MacPolicyDocument document,CancellationToken cancellationToken=default){_document=document;return Task.CompletedTask;}
         public Task OpenLogDirectoryAsync(CancellationToken cancellationToken=default)=>Task.CompletedTask;

@@ -18,6 +18,11 @@ public static class Program
         Mode = startup.Mode; Scenario = startup.Scenario;
         if (Mode is StartupMode.Preview or StartupMode.MockSmoke) PreviewEnvironment.Enter();
         if (Mode == StartupMode.MockSmoke) { PreviewChecks.RunAsync().GetAwaiter().GetResult(); Console.WriteLine("Mac desktop mock smoke passed; production initialization was not entered."); return 0; }
+        if (ProductionHostLauncher.NeedsHandoff(Mode, System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported, OperatingSystem.IsMacOS()))
+        {
+            try { return ProductionHostLauncher.ReplaceWithNativeProduct(AppContext.BaseDirectory); }
+            catch (IOException error) { Console.Error.WriteLine(error.Message); return 3; }
+        }
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
     public static AppBuilder BuildAvaloniaApp()

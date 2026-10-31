@@ -11,6 +11,8 @@ public static class RuntimeFailures
     private static readonly IReadOnlyDictionary<string, string> Messages = new Dictionary<string, string>
     {
         ["core.bundle"] = "安装包缺少或损坏了内置 Xray。请使用完整的最新 Egress.app；不会联网下载内核来启动自身。",
+        ["subscription.interface"] = "订阅需要直连。请先选择当前已连接的非家宽物理网卡，再重试导入；无需启动 Xray 或 TUN。",
+        ["subscription.dns"] = "订阅直连所用 DNS 地址无效。请在设置中填写明确的非回环 DNS IP 地址后重试。",
         ["proxy.not-ready"] = "尚未确认 Egress 自带的 Xray TUN 与本地代理。请先导入本地节点、选择非家宽网卡和全局分组，然后连接。",
         ["proxy.port-in-use"] = "Xray 本地 SOCKS5 端口已被占用。请在「设置 → 网络与 TUN」更改端口，或退出占用程序后重试。",
         ["tun.in-use"] = "所选 TUN 接口已被占用。请退出冲突的 VPN，或在配置中修改 tun.name 后重试。",

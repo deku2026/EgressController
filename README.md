@@ -10,7 +10,7 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 **双击打包后的 `Egress.app`，默认进入生产模式。** 打开界面会读取实际 App、网卡和保存的配置；不会仅因打开窗口而启动 TUN。
 
-首次使用：选择两张不同网卡 → 粘贴包含实际节点的本地 Clash YAML → 明确选择全局分组及成员 → 搜索并勾选应用 → 点击“应用并连接”。安装包自带固定版本 Xray；需要时出现 macOS 管理员授权框。连接默认启用 TUN，确认本地代理后再下载缺失规则，最后应用完整分流。停止、退出或准备失败时恢复连接前的网络状态。真实接管请使用完整 NativeAOT `.app`。
+首次使用：选择两张不同网卡 → 直接导入 Clash HTTPS 订阅 → 明确选择全局分组及成员 → 搜索并勾选应用 → 点击“应用并连接”。安装包自带固定版本 Xray；需要时出现 macOS 管理员授权框。连接默认启用 TUN，确认本地代理后再下载缺失规则，最后应用完整分流。停止、退出或准备失败时恢复连接前的网络状态。Rider 的生产运行和打包 `.app` 都进入完整 NativeAOT 客户端。
 
 `--preview` 才进入隔离 UI；示例 URL 和示例测速只出现在预览中：
 
@@ -18,7 +18,11 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 dotnet run --project src/EgressController.Desktop -- --preview
 ```
 
-在线订阅、provider 和规则下载统一经 **Egress 自带 Xray → 所选非家宽网卡 → 全局代理分组节点**，不使用系统代理或直连回退。优先使用已验证缓存；默认本地 SOCKS5 端口为 `17890`，可在“设置 → 网络与 TUN”修改。首次没有节点时使用本地 YAML 导入，连接后再在线更新。SS 的 `obfs/http` 与 TFO 保留为 Xray 原生传输。
+**订阅及其 provider 必须直连**：通过所选非家宽物理网卡获取，不使用系统代理，不要求 Xray、TUN、助手或本地 YAML。直连失败会明确报错并允许重试，已有节点和缓存保留。本地 YAML 导入只是可选入口。
+
+![首次订阅直连（隔离验证）](docs/images/mac-direct-subscription.png)
+
+规则资源则先启动内置 Xray TUN，再经所选非家宽网卡和全局代理分组节点下载；优先使用已验证缓存。本地资源 SOCKS5 端口默认 `17890`，可在“设置 → 网络与 TUN”修改。SS 的 `obfs/http` 与 TFO 保留为 Xray 原生传输。
 
 ## 分组与连接活动
 
@@ -41,7 +45,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 ```sh
 # 构建机获取固定发布归档；不会启动 Xray/TUN。
 gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
-python3 build/Verify-Mac.py --version 0.1.1
+python3 build/Verify-Mac.py --version 0.1.2
 ```
 
 **开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
@@ -67,7 +71,7 @@ dotnet run --project tools/EgressController.MacPreview -- --screenshots artifact
 
 ## Rider 运行与调试
 
-打开 `EgressController.slnx`。普通 Build 会通过 CMake 自动编译当前架构的原生桥接库，并将 `libEgressMacNative.dylib` 复制到 Desktop、助手及引用项目的输出目录；无需设置 `DYLD_LIBRARY_PATH` 或手工复制。首次构建需要上面的 CMake 与 Xcode Command Line Tools；从 Finder 打开的 Rider 也能发现 Homebrew 标准目录里的 CMake。
+继续打开当前 `mac-xray-client` 工作树里的 `EgressController.slnx`。普通 Build 会通过 CMake 自动编译当前架构的原生桥接库，并将 `libEgressMacNative.dylib` 复制到 Desktop、助手及引用项目的输出目录；无需设置 `DYLD_LIBRARY_PATH` 或手工复制。首次构建需要上面的 CMake 与 Xcode Command Line Tools；从 Finder 打开的 Rider 也能发现 Homebrew 标准目录里的 CMake。
 
 右键 `src/EgressController.Desktop/Properties/launchSettings.json` → **Generate Configurations**，选择生成的运行配置（[Rider 官方说明](https://www.jetbrains.com/help/rider/Running_LaunchSettings.html)）：
 
@@ -78,4 +82,4 @@ dotnet run --project tools/EgressController.MacPreview -- --screenshots artifact
 
 已有的 `.NET Project` 配置也可继续使用：Project 选 `EgressController.Desktop`，framework 选 `net10.0`，Runtime 选 Automatic，保留自动计算的 Exe path / Working directory，并保留启动前 **Build**。修改原生 C/Objective-C 文件后若 Rider 没有触发构建，使用 **Rebuild**。
 
-Rider 普通构建适合调试界面及非特权生产流程，不附带可安装的 NativeAOT 助手。实际“应用并连接”请运行 `python3 build/Package-Mac.py` 生成的 `artifacts/package/Egress.app`；仅打开界面不会启动 TUN。自动开发验证仍只用显式预览、mock 或纯 ABI 探针。
+Rider 普通 Build 现在会自动准备 `bin/<配置>/net10.0/production/Egress.app`，包含原生客户端、助手和固定版本 Xray；第一次需要 NativeAOT 编译，后续按源文件指纹复用。生产 Run 在读取配置前进入这份完整原生产物，管理员授权仍在用户点击连接后请求。需要 C# 界面调试时使用 Preview 配置。测试构建可用 `-p:EgressPrepareRiderPayload=false` 跳过生产包准备；该选项不适用于实际生产 Run。自动验证只运行显式预览和 mock，不启动真实 TUN。

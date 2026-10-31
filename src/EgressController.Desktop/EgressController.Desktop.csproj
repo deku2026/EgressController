@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><PlatformTarget>AnyCPU</PlatformTarget>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport><AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup>
     <EgressXrayArchive Condition="'$(EgressXrayArchive)' == ''">$(MSBuildProjectDirectory)/../../artifacts/core/Xray-macos-arm64-v8a.zip</EgressXrayArchive>
@@ -20,4 +20,5 @@
     <ProjectReference Include="../EgressController.Runtime/EgressController.Runtime.csproj"/>
     <ProjectReference Include="../EgressController.Mac/EgressController.Mac.csproj"/>
   </ItemGroup>
+  <Import Project="../../build/RiderProduction.targets" />
 </Project>

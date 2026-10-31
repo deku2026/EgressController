@@ -10,7 +10,7 @@ The active product is a native Avalonia/.NET macOS client with Xray-core as its 
 - Clash YAML supplies nodes/groups/providers only. Never import its listeners, DNS, TUN, controller or route policy. Unsupported protocols/plugins/group semantics need explicit diagnostics; never silently drop parameters.
 - Typed policy and versioned YAML DSL are the facts; Xray JSON and GeoSite/GeoIP DAT are generated artifacts. Stable IDs survive renaming and subscription reordering. Retain unresolved selections for explicit repair.
 - Compile raw MetaCubeX YAML, preserving full/suffix/keyword/regex and IP/CIDR semantics. No MRS/SRS decoding or second network core.
-- No local HTTP/SOCKS relay or network control listeners. Resource preparation defaults to a captured system-proxy/default-network snapshot, independently of TUN and runtime egress bindings; configured proxy failures never retry direct. Use validated caches, caller-owned cancellation and atomic publication. Explicitly bound runtime connections never fall back to another interface.
+- Subscription URLs and their providers must use direct HTTPS over the selected non-home physical interface, including DNS and redirects. No system proxy, Xray, TUN, helper or local-YAML prerequisite; a failed direct fetch reports an error and never retries via a proxy. Bundle Xray locally. Other missing rule resources are prepared only after authorized Xray TUN startup, through Xray’s loopback resource SOCKS listener and the selected non-home proxy group. No extra relay process or network control listener. Use validated caches, operation-owned cancellation, fixed port snapshots and atomic publication; interface binding failures never switch exits.
 
 ## Application membership and UI
 
@@ -34,7 +34,7 @@ The active product is a native Avalonia/.NET macOS client with Xray-core as its 
 
 ## Workflow and verification
 
-- Implement in a new Git worktree/branch, never the user's original checkout.
+- Continue in the existing `mac-xray-client/EgressController` worktree and `codex/mac-xray-client` branch, using PR #26. Do not create another worktree, branch or PR for this task. Keep the original main checkout untouched.
 - Only mocks, injected resources, synthetic bundles and isolated previews for tests. Never start real TUN, terminate real targets, install/change services, modify system DNS/routes/startup or access the user's real configuration for testing.
 - Default desktop startup is production. Only explicit --preview or --mock-smoke enables isolated preview before any production initialization. Tests and development screenshots must always use explicit preview/mock entrypoints; never launch the default production app during development validation. Native compilation/pure ABI probes are allowed; previews cannot query live platform state. Real TUN takeover requires the user to explicitly start it in the production UI.
 - Inspect normal/compact rendered windows and hover/pressed/focus/disabled states, not just compilation. Never put private subscriptions/credentials in logs, screenshots, fixtures or commits.

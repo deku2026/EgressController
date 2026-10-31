@@ -72,6 +72,15 @@ internal static class Program
         var catalogSearch = Find<TextBox>(window, "CatalogSearch"); catalogSearch.Focus(); window.KeyTextInput("Safari"); Flush();
         Check(vm.VisibleCatalog.Count == 1 && vm.VisibleCatalog[0].Name == "Safari", "Safari search did not retain the application row.");
         Save(window, Path.Combine(directory, "safari-search-compact.png")); window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "safari-search-normal.png"));
+        vm.AddingApps = false; vm.OnboardingVisible = true; vm.SetupStep = 3; vm.CatalogQuery = ""; Flush();
+        var originalRows = vm.VisibleCatalog.ToArray(); var selected = originalRows.First(row => row.CanSelect && row.Name != "Safari"); selected.IsSelected = true;
+        var setupSearch = Find<TextBox>(window, "SetupApplicationSearch"); setupSearch.Focus(); window.KeyTextInput("Safari"); Flush();
+        Check(vm.VisibleCatalog.Count == 1 && vm.VisibleCatalog[0].Name == "Safari" && selected.IsSelected,
+            "First-run application search is missing or changed existing checkbox selections.");
+        Save(window, Path.Combine(directory, "setup-safari-search-normal.png")); window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, "setup-safari-search-compact.png"));
+        setupSearch.Text = "no-matching-app"; Flush(); Check(vm.NoCatalogMatch, "First-run application search needs an empty state.");
+        setupSearch.Text = ""; Flush(); Check(vm.VisibleCatalog.SequenceEqual(originalRows) && selected.IsSelected && vm.Core.ApplyCount == 0,
+            "Clearing first-run search must preserve rows/order/selection without changing runtime.");
         window.Close();
     }
 

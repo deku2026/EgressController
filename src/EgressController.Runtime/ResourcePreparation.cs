@@ -7,15 +7,16 @@ namespace EgressController.Runtime;
 
 public enum PreparationStage { Idle, CheckingCache, Downloading, Validating, Publishing, Ready, Canceled, Failed }
 public enum PreparationCachePolicy { CacheFirst, Refresh }
-public enum ResourceExitKind { BoundInterface, SystemProxy, XrayProxy }
+public enum ResourceExitKind { BoundInterface, SystemProxy, XrayProxy, DirectSubscription }
 public sealed record ResourceExitSnapshot(ResourceExitKind Kind, InterfaceBinding? Interface = null, int ProxyPort = 0)
 {
     public static ResourceExitSnapshot SystemDefault { get; } = new(ResourceExitKind.SystemProxy);
     public static ResourceExitSnapshot Bound(InterfaceBinding binding) => new(ResourceExitKind.BoundInterface, binding);
+    public static ResourceExitSnapshot DirectSubscription(InterfaceBinding binding) => new(ResourceExitKind.DirectSubscription, binding);
     public static ResourceExitSnapshot Xray(int port) => new(ResourceExitKind.XrayProxy, ProxyPort: port);
-    public string Identity => Kind == ResourceExitKind.XrayProxy ? $"xray-socks5:127.0.0.1:{ProxyPort}" : Kind == ResourceExitKind.SystemProxy ? "system-proxy" : Interface?.StableId ?? "";
+    public string Identity => Kind == ResourceExitKind.DirectSubscription ? "subscription-direct:" + Interface?.StableId : Kind == ResourceExitKind.XrayProxy ? $"xray-socks5:127.0.0.1:{ProxyPort}" : Kind == ResourceExitKind.SystemProxy ? "system-proxy" : Interface?.StableId ?? "";
     public bool IsValid => Kind == ResourceExitKind.XrayProxy ? Interface is null && ProxyPort is >= 1024 and <= 65535 : Kind == ResourceExitKind.SystemProxy ? Interface is null
-        : Kind == ResourceExitKind.BoundInterface && !string.IsNullOrWhiteSpace(Interface?.StableId) && !string.IsNullOrWhiteSpace(Interface?.BsdName);
+        : Kind is ResourceExitKind.BoundInterface or ResourceExitKind.DirectSubscription && !string.IsNullOrWhiteSpace(Interface?.StableId) && !string.IsNullOrWhiteSpace(Interface?.BsdName);
 }
 public sealed record PreparationProgress(long Revision, string ResourceId, PreparationStage Stage, string Message);
 public sealed class ResourceDescriptor
@@ -47,7 +48,7 @@ public sealed class ResourcePreparationException(string resourceId, string inter
     private static string MessageFor(string id, string exit, PreparationStage stage, bool timeout, ResourceProxyFailureKind? failure)
     {
         string label = stage switch { PreparationStage.CheckingCache => "检查缓存", PreparationStage.Downloading => "下载", PreparationStage.Validating => "验证", PreparationStage.Publishing => "保存", _ => "准备" };
-        string help = failure is { } reason ? new ResourceProxyConfigurationException(reason).Message
+        string help = exit.StartsWith("subscription-direct:", StringComparison.Ordinal) ? "订阅使用非家宽物理网卡直连。请检查订阅地址、网络与 DNS 后重试；不会改用系统代理或 Xray。" : failure is { } reason ? new ResourceProxyConfigurationException(reason).Message
             : exit.StartsWith("xray-socks5:", StringComparison.Ordinal) ? $"请检查 Xray TUN、非家宽分组节点和本地代理 {exit}；不会改走系统代理或直连。" : exit == "system-proxy" ? "请检查当前系统代理或默认网络后重试；可用缓存已保留。" : "请检查所选物理接口后重试；不会切换出口。";
         return $"资源 {id} {label}{(timeout ? "超时" : "失败")}。{help}";
     }
@@ -66,6 +67,7 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
     public async Task<byte[]> PrepareAsync(ResourceDescriptor resource, Func<byte[], bool> validate,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (resource.Url.Scheme != Uri.UriSchemeHttps || !resource.Exit.IsValid || resource.MaximumBytes < 1 || resource.Timeout <= TimeSpan.Zero)
             throw new ArgumentException("资源必须使用 HTTPS 和明确的资源出口。", nameof(resource));
         using var ownedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -87,10 +89,11 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
             if (cached is not null && Valid(cached))
             { token.ThrowIfCancellationRequested(); Publish(PreparationStage.Ready, "本地缓存可用"); return cached; }
             stage = PreparationStage.Downloading;
-            Publish(stage, resource.Exit.Kind == ResourceExitKind.XrayProxy ? $"通过内置 Xray · 非家宽分组节点 · SOCKS5 127.0.0.1:{resource.Exit.ProxyPort} 下载" : resource.Exit.Kind == ResourceExitKind.SystemProxy ? "通过系统当前代理下载；未配置代理时使用系统默认网络" : "通过选定物理接口下载");
+            Publish(stage, resource.Exit.Kind == ResourceExitKind.DirectSubscription ? "直连下载订阅 · 非家宽物理网卡 · 无需 Xray 或 TUN" : resource.Exit.Kind == ResourceExitKind.XrayProxy ? $"通过内置 Xray · 非家宽分组节点 · SOCKS5 127.0.0.1:{resource.Exit.ProxyPort} 下载" : resource.Exit.Kind == ResourceExitKind.SystemProxy ? "通过系统当前代理下载；未配置代理时使用系统默认网络" : "通过选定物理接口下载");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(resource.Timeout);
             byte[] downloaded;
+            token.ThrowIfCancellationRequested();
             try { downloaded = await transport.DownloadAsync(resource, timeout.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
             { throw new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: true); }
