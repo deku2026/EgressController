@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,8 +20,22 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
-    parser.add_argument("--version", default="0.1.0")
+    parser.add_argument("--version", default="0.1.1")
+    parser.add_argument("--xray-archive", type=Path, default=ROOT / "artifacts/core/Xray-macos-arm64-v8a.zip",
+                        help="Offline official pinned Xray archive, carried inside the app; never executed during packaging.")
     args = parser.parse_args()
+    xray_archive = args.xray_archive.resolve()
+    if not xray_archive.is_file():
+        parser.error("Missing pinned Xray payload. Supply --xray-archive; packaging cannot emit an app without its core.")
+    core_source = (ROOT / "src/EgressController.Runtime/XrayCoreReleaseManager.cs").read_text()
+    archive_pin = re.search(r'\n\s*"([0-9a-f]{64})",', core_source).group(1)
+    executable_pin = re.search(r'PinnedMacArm64ExecutableSha256 = "([0-9a-f]{64})"', core_source).group(1)
+    if hashlib.sha256(xray_archive.read_bytes()).hexdigest() != archive_pin:
+        parser.error("Xray archive does not match the independently pinned official release.")
+    with zipfile.ZipFile(xray_archive) as core_zip:
+        if hashlib.sha256(core_zip.read("xray")).hexdigest() != executable_pin:
+            parser.error("Xray executable does not match its independent pin.")
+        core_license = core_zip.read("LICENSE")
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("Build the Apple Silicon package on an arm64 macOS host.")
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
@@ -39,7 +54,7 @@ def main():
         staging = Path(temporary)
         published = staging / "published"
         run("dotnet", "publish", "src/EgressController.Desktop", "-m:1", "--disable-build-servers", "-c", args.configuration, "-r", "osx-arm64",
-            "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-o", published)
+            "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-p:EgressXrayArchive=" + str(xray_archive), "-o", published)
         helper_published = staging / "helper-published"
         run("dotnet", "publish", "tools/EgressController.MacHelper", "-m:1", "--disable-build-servers", "-c", args.configuration, "-r", "osx-arm64",
             "-p:PublishAot=true", "-p:StripSymbols=true", "-p:Version=" + args.version, "-o", helper_published)
@@ -61,6 +76,12 @@ def main():
         shutil.copytree(helper_published, helper_directory, ignore=shutil.ignore_patterns("*.pdb", "*.dSYM"))
         notices = resources / "Notices"
         notices.mkdir()
+        (notices / "Xray-LICENSE.txt").write_bytes(core_license)
+        bundled = executable_directory / "core" / "Xray-macos-arm64-v8a.zip"
+        if not bundled.is_file() or hashlib.sha256(bundled.read_bytes()).hexdigest() != archive_pin:
+            raise RuntimeError("Published app does not contain the exact pinned Xray archive.")
+        (resources / "CORE.json").write_text(json.dumps({"version": "26.10.29", "archive_sha256": archive_pin,
+            "executable_sha256": executable_pin, "source": "https://github.com/XTLS/Xray-core/releases/tag/v26.10.29"}, indent=2) + "\n")
         shutil.copy2(ROOT / "LICENSE", notices / "Egress-LICENSE.txt")
         artwork = ROOT / "src" / "EgressController.Desktop.Presentation" / "Assets"
         for source in list(artwork.glob("LICENSE-*.txt")) + [artwork / "SOURCES.md"]:
@@ -122,6 +143,7 @@ def main():
             plistlib.dump(metadata, handle)
         (resources / "STARTUP.txt").write_text(
             "Egress macOS. Default startup is production; opening the app does not start TUN.\n"
+            "Connect first verifies bundled Xray, starts TUN and its non-home SOCKS proxy, then downloads missing rules.\n"
             "Use --preview for an isolated UI workspace. Only an explicit Connect action requests privileged installation/takeover.\n"
             "Development verification uses --mock-smoke/--preview only; no live network acceptance is claimed.\n")
         # Independently installed code needs its own valid signature; this is a non-standard nested-code directory.

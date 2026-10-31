@@ -132,6 +132,24 @@ public sealed class CatalogTests
     public void MagicRecognitionIsOnlyAFormatHintNotAnExecutableMembershipVerdict(uint magic, bool expected)
         => Assert.Equal(expected, PhysicalMacCatalogFileSystem.IsMachOMagic(magic));
 
+    [Fact]
+    public async Task SafariApplicationAliasResolvesToOneCanonicalCryptexRowWithoutScanningHelpers()
+    {
+        var files = new MemoryFiles(); var metadata = new MemoryMetadata();
+        const string root = "/System/Cryptexes/App/System/Applications/Safari.app";
+        files.AddFile(root + "/Contents/MacOS/Safari", true);
+        files.AddLink("/Applications/Safari.app", root, true);
+        files.AddLink("/Applications/SharedDirectory", "/opt/shared", true);
+        var info = new MacBundleMetadata("com.apple.Safari", "Safari", root, root + "/Contents/MacOS/Safari");
+        metadata.Applications.Add(root, info); metadata.Applications.Add("/Applications/Safari.app", info);
+        var catalog = new MacApplicationCatalog(files, metadata, MacApplicationCatalog.StandardRoots("/Users/fixture"));
+        var discovery = await catalog.DiscoverAsync(TestContext.Current.CancellationToken);
+        var app = Assert.Single(discovery.Applications);
+        Assert.True(discovery.IsComplete); Assert.Equal(root, app.BundlePath); Assert.Equal(0, files.MachOReads);
+        var inventory = await catalog.BuildInventoryAsync(app, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(inventory.IsComplete); Assert.Equal(info.PrimaryExecutablePath, Assert.Single(inventory.ExecutablePaths));
+    }
+
     private static (MemoryFiles Files, MemoryMetadata Metadata, MacApplicationCatalog Catalog) Fixture()
     {
         var files = new MemoryFiles();

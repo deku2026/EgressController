@@ -50,6 +50,7 @@ internal static class Program
             }
             window.Close();
         }
+        BootstrapSearchInteractions(directory);
         Interactions(directory);
         ProductionCompositionChecks.Run(directory);
         Icon(directory);
@@ -57,6 +58,23 @@ internal static class Program
         Console.WriteLine("Mac preview: connection-attempt phases/cancel/retry/production wording, connection filtering/sorting, truthful sparse observations, virtualization and viewport preservation; 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, binding checks, injected production first-run/native-PNG/empty-telemetry/error-redaction checks passed. Live operations blocked.");
         return 0;
     }
+    private static void BootstrapSearchInteractions(string directory)
+    {
+        var vm = new ShellViewModel("nodes"); var window = new MainWindow { DataContext = vm, Width = 1260, Height = 860 }; window.Show(); Flush();
+        var search = Find<TextBox>(window, "NodeSearch"); search.Focus(); window.KeyTextInput("东京"); Flush();
+        Check(vm.VisibleNodes.Count == 1, "Node search did not receive compiled keyboard input.");
+        Save(window, Path.Combine(directory, "nodes-search-normal.png")); window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, "nodes-search-compact.png"));
+        search.Text = "no-match"; Flush(); Check(vm.NoNodesMatch, "Node search must show an explicit empty state."); Save(window, Path.Combine(directory, "nodes-search-empty.png"));
+        search.Text = "";
+        var expander = window.GetVisualDescendants().OfType<Expander>().Single(control => control.IsEffectivelyVisible);
+        expander.IsExpanded = true; Flush(); Save(window, Path.Combine(directory, "nodes-local-import-compact.png"));
+        expander.IsExpanded = false; vm.PageIndex = 1; vm.AddAppsCommand.Execute(null); Flush();
+        var catalogSearch = Find<TextBox>(window, "CatalogSearch"); catalogSearch.Focus(); window.KeyTextInput("Safari"); Flush();
+        Check(vm.VisibleCatalog.Count == 1 && vm.VisibleCatalog[0].Name == "Safari", "Safari search did not retain the application row.");
+        Save(window, Path.Combine(directory, "safari-search-compact.png")); window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "safari-search-normal.png"));
+        window.Close();
+    }
+
     private static void PassiveReconciliation(string directory)
     {
         var vm=new ShellViewModel();string saved=PolicyYaml.Write(vm.Document);

@@ -16,7 +16,7 @@ public static class PolicyYaml
             var interfaces = root.Map("interfaces");
             doc.Interfaces = new() { HomeId = interfaces.Text("home"), NonHomeId = interfaces.Text("nonhome") };
             var defaults = root.Map("defaults");
-            doc.Defaults = new() { China = ReadExit(defaults.Get("china")), Global = ReadExit(defaults.Get("global")), ProxyInterface = defaults.Text("proxy_interface", "nonhome") };
+            doc.Defaults = new() { China = ReadExit(defaults.Get("china")), Global = ReadExit(defaults.Get("global")), ProxyInterface = defaults.Text("proxy_interface", "nonhome"), ResourceProxyPort = defaults.Integer("resource_proxy_port", 17890) };
             var dns = root.Map("dns"); doc.Dns = new() { UpstreamIp = dns.Text("upstream_ip", "1.1.1.1") };
             var tun = root.Map("tun"); doc.Tun = new() { Name = tun.Text("name", "utun10"), Ipv4Cidr = tun.Text("ipv4_cidr", "198.18.0.1/30"), Mtu = tun.Integer("mtu", 1500) };
             foreach (var app in root.Items("applications").OfType<YamlMappingNode>())
@@ -48,7 +48,7 @@ public static class PolicyYaml
         {
             { "version", doc.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) },
             { "interfaces", new YamlMappingNode { { "home", doc.Interfaces.HomeId }, { "nonhome", doc.Interfaces.NonHomeId } } },
-            { "defaults", new YamlMappingNode { { "china", WriteExit(doc.Defaults.China) }, { "global", WriteExit(doc.Defaults.Global) }, { "proxy_interface", doc.Defaults.ProxyInterface } } },
+            { "defaults", new YamlMappingNode { { "china", WriteExit(doc.Defaults.China) }, { "global", WriteExit(doc.Defaults.Global) }, { "proxy_interface", doc.Defaults.ProxyInterface }, { "resource_proxy_port", doc.Defaults.ResourceProxyPort.ToString(System.Globalization.CultureInfo.InvariantCulture) } } },
             { "dns", new YamlMappingNode { { "upstream_ip", doc.Dns.UpstreamIp } } },
             { "tun", new YamlMappingNode { { "name", doc.Tun.Name }, { "ipv4_cidr", doc.Tun.Ipv4Cidr }, { "mtu", doc.Tun.Mtu.ToString(System.Globalization.CultureInfo.InvariantCulture) } } },
             { "applications", new YamlSequenceNode(doc.Applications.Select(app => new YamlMappingNode { { "id", app.Id }, { "name", app.Name }, { "path", app.BundlePath }, { "bundle_id", app.BundleIdentifier ?? "" }, { "primary_executable", app.PrimaryExecutable ?? "" }, { "executables", YamlNodes.Sequence(app.ExecutablePaths) }, { "via", WriteExit(app.Via) }, { "enabled", app.Enabled ? "true" : "false" } })) },

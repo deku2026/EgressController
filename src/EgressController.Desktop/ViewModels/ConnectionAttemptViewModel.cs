@@ -18,7 +18,7 @@ public sealed class ConnectionAttemptViewModel(Action retry) : Bindable
     private bool _visible, _running, _failed;
     private int _stage;
     private string _detail = "", _title = "准备连接";
-    public IReadOnlyList<ConnectionAttemptStep> Steps { get; } = new[] { "检查策略", "准备资源", "验证内核", "授权助手", "确认连接" }
+    public IReadOnlyList<ConnectionAttemptStep> Steps { get; } = new[] { "检查策略", "内置 Xray", "授权助手", "建立 TUN", "准备规则", "应用分流" }
         .Select((title, index) => new ConnectionAttemptStep(title, index + 1)).ToArray();
     public UiCommand RetryCommand { get; } = new(retry);
     public bool IsVisible { get => _visible; private set => Set(ref _visible, value); }

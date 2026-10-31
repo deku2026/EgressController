@@ -1,0 +1,9 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" x:Class="EgressController.Desktop.Views.LocalSubscriptionView" x:DataType="vm:ShellViewModel">
+  <Expander Classes="local-import" Header="首次连接：导入本地 Clash YAML" HorizontalAlignment="Stretch">
+    <StackPanel Spacing="10">
+      <TextBlock Text="粘贴已有节点配置，选择非家宽网卡和全局分组后连接。在线更新将在 Xray 就绪后使用其本地代理。" Classes="caption" TextWrapping="Wrap"/>
+      <TextBox Name="LocalSubscriptionBox" Text="{Binding LocalSubscriptionYaml,Mode=TwoWay}" AcceptsReturn="True" Height="130" TextWrapping="NoWrap" PlaceholderText="proxies: …" AutomationProperties.Name="本地 Clash YAML"/>
+      <Button Content="导入本地节点" Command="{Binding ImportLocalSubscriptionCommand}" HorizontalAlignment="Right"/>
+    </StackPanel>
+  </Expander>
+</UserControl>

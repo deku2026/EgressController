@@ -61,9 +61,9 @@ public sealed class ConnectionPresentationTests
     {
         int retries = 0; var attempt = new ConnectionAttemptViewModel(() => retries++);
         attempt.Begin(); attempt.Observe(new(ConnectionAttemptStage.Resources, "读取缓存"));
-        Assert.True(attempt.IsRunning); Assert.Equal("完成", attempt.Steps[0].State); Assert.Equal("进行中", attempt.Steps[1].State);
-        attempt.Fail("系统代理不可用"); Assert.True(attempt.HasFailed); Assert.False(attempt.IsRunning);
-        attempt.Observe(new(ConnectionAttemptStage.Core, "过期进度")); Assert.Equal("系统代理不可用", attempt.Detail);
+        Assert.True(attempt.IsRunning); Assert.Equal("完成", attempt.Steps[0].State); Assert.Equal("进行中", attempt.Steps[(int)ConnectionAttemptStage.Resources].State);
+        attempt.Fail("Xray 本地代理未就绪"); Assert.True(attempt.HasFailed); Assert.False(attempt.IsRunning);
+        attempt.Observe(new(ConnectionAttemptStage.Core, "过期进度")); Assert.Equal("Xray 本地代理未就绪", attempt.Detail);
         attempt.RetryCommand.Execute(null); Assert.Equal(1, retries);
         attempt.Begin(); attempt.Observe(new(ConnectionAttemptStage.Core, "验证缓存核心"));
         attempt.Observe(new(ConnectionAttemptStage.Validating, "较早阶段")); Assert.Equal("验证缓存核心", attempt.Detail);

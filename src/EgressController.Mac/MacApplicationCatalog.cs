@@ -23,7 +23,7 @@ public sealed class MacApplicationCatalog(IMacCatalogFileSystem files, IMacBundl
     IReadOnlyList<string> discoveryRoots, int maximumEntries = 100_000)
 {
     public static IReadOnlyList<string> StandardRoots(string userHome) =>
-        ["/Applications", Path.Combine(userHome, "Applications"), "/System/Applications"];
+        ["/Applications", Path.Combine(userHome, "Applications"), "/System/Applications", "/System/Cryptexes/App/System/Applications"];
 
     public Task<MacApplicationDiscovery> DiscoverAsync(CancellationToken cancellationToken = default)
         => Task.Run(() => Discover(cancellationToken), cancellationToken);
@@ -70,7 +70,10 @@ public sealed class MacApplicationCatalog(IMacCatalogFileSystem files, IMacBundl
                     continue; // Never infer another application from a nested helper bundle.
                 }
                 foreach (var entry in files.Enumerate(item.Path).Reverse())
-                    if (entry.IsDirectory && !entry.IsSymbolicLink) pending.Push((entry.Path, item.Depth + 1));
+                    // Application aliases (not shared-directory links) are resolved by bundle metadata.
+                    // Safari is shipped as an /Applications symlink into the signed system Cryptex.
+                    if (entry.IsDirectory && (!entry.IsSymbolicLink || entry.Path.EndsWith(".app", StringComparison.OrdinalIgnoreCase)))
+                        pending.Push((entry.Path, item.Depth + 1));
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
             {

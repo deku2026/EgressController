@@ -27,6 +27,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     private readonly Queue<string> _iconOrder = new();
     private Task? _initialization;
     private int _page, _settingsTab, _step, _busy;
+    private string _nodeQuery = "", _localSubscription = "";
     private string _appQuery = "", _catalogQuery = "", _ruleQuery = "", _notice = "正在载入工作空间…", _currentIssue = "", _dsl = "", _generated = "", _url = "", _customName = "", _customEntries = "";
     private bool _addingApps, _addingRules, _customRule, _onboarding, _hasChanges, _previewRunning, _applying, _customIp, _runtimeUnavailable, _needsValidation, _subscriptionReady, _initialized, _disposed;
     private long _revision, _attemptRevision;
@@ -57,8 +58,8 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public string RefreshInventoryLabel => IsPreview ? "显式刷新示例清单" : "刷新固定清单";
     public string WorkspaceSafetyText => IsPreview ? "预览安全模式 · 不接管系统流量" : "Xray 唯一内核 · 出口严格绑定";
     public string SetupPermissionText => IsPreview ? "完全隔离 · 不使用管理员权限" : "启动时请求必要的网络授权";
-    public string SetupApplyDescription => IsPreview ? "当前仅应用到内存模拟环境，真实 TUN 与系统 DNS 保持未启用。" : "校验后启动 Xray TUN；后台服务负责网络设置的备份与恢复。";
-    public string SubscriptionDescription => IsPreview ? "隔离预览使用 example.invalid 示例 URL，读取内存响应；不会访问真实订阅。" : "通过系统当前代理下载；未配置代理时使用默认网络。仅导入节点、分组与提供器。";
+    public string SetupApplyDescription => IsPreview ? "当前仅应用到内存模拟环境，真实 TUN 与系统 DNS 保持未启用。" : "先启动内置 Xray TUN，再经非家宽分组节点准备规则并应用分流；失败会恢复连接前状态。";
+    public string SubscriptionDescription => IsPreview ? "隔离预览使用 example.invalid 示例 URL，读取内存响应；不会访问真实订阅。" : "在线更新使用 Egress 自带 Xray 的非家宽分组节点。首次使用请先粘贴本地 Clash YAML，连接后再更新订阅。";
     public string SubscriptionName => Document.Subscriptions.FirstOrDefault()?.Name ?? "节点订阅";
     public string CatalogDescription => IsPreview ? "先搜索，再明确选择。AI、开发、浏览器与日常应用均可添加。" : "从已安装的应用中搜索并选择，添加时读取完整的固定可执行清单。";
     public string TunStatusText => PreviewRunning ? "TUN 已接管" : _state.HelperInstalled ? "后台服务已就绪" : "尚未安装后台服务";
@@ -88,6 +89,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         ConfirmAppsCommand = new(() => RunOperationAsync(AddSelectedApplicationsAsync), () => SelectedCatalogCount > 0 && !IsBusy);
         AddRulesCommand = new(() => RunOperationAsync(ShowRuleCatalogAsync)); CloseRulesCommand = new(() => AddingRules = false);
         ShowCustomRuleCommand = new(() => { CreatingCustomRule = true; AddingRules = false; }); CancelCustomRuleCommand = new(() => CreatingCustomRule = false); CreateCustomRuleCommand = new(CreateCustomRule);
+        ImportLocalSubscriptionCommand = new(ImportLocalSubscription);
         ImportSubscriptionCommand = new(() => RunOperationAsync(ImportSubscriptionAsync)); RunProbesCommand = new(() => RunOperationAsync(RunProbesAsync)); CompileCommand = new(() => RunOperationAsync(CompileDraftAsync));
         ApplyCommand = new(() => RunOperationAsync(ApplyPreviewAsync)); SaveCommand = new(() => RunOperationAsync(SaveDraftAsync)); ApplyDslCommand = new(() => RunOperationAsync(ApplyDslAsync));
         ConnectionAttempt = new(() => ApplyCommand.Execute(null));
@@ -117,6 +119,13 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public string PageTitle => PageIndex switch { 0 => "总览", 1 => "应用分流", 2 => "规则集合", 3 => "节点与分组", _ => "设置" };
     public string PageDescription => PageIndex switch { 0 => "每一次连接，都有清晰的去向。", 1 => "为你的应用选择出口，未运行时策略依然保留。", 2 => "把域名与 IP 作为集合管理，让分流更简单。", 3 => "一个订阅，统一管理节点、分组与全局出口。", _ => "网络偏好、配置与诊断，尽在一处。" };
     public int SettingsTab { get => _settingsTab; set => Set(ref _settingsTab, value); }
+    public string NodeQuery { get => _nodeQuery; set { if (Set(ref _nodeQuery, value)) { Raise(nameof(VisibleNodes)); Raise(nameof(NoNodesMatch)); } } }
+    public IReadOnlyList<NodeRow> VisibleNodes => _nodes.Where(row => Matches(row.Name + " " + row.Protocol + " " + row.Model.Server + " "
+        + string.Join(" ", Document.Groups.Where(group => group.MemberIds.Contains(row.Model.Id)).Select(group => group.Name)), NodeQuery)).ToArray();
+    public bool NoNodesMatch => VisibleNodes.Count == 0;
+    public string LocalSubscriptionYaml { get => _localSubscription; set => Set(ref _localSubscription, value); }
+    public UiCommand ImportLocalSubscriptionCommand { get; }
+    public int ResourceProxyPort { get => Document.Defaults.ResourceProxyPort; set { if (value == Document.Defaults.ResourceProxyPort) return; Document.Defaults.ResourceProxyPort = value; Raise(); StateChanged(); } }
     public string AppQuery { get => _appQuery; set { if (Set(ref _appQuery, value)) { PublishApplicationFilter(); Raise(nameof(NoAppsMatch)); _ = LoadVisibleIconsAsync(); } } }
     public string CatalogQuery { get => _catalogQuery; set { if (Set(ref _catalogQuery, value)) { PublishCatalogFilter(); Raise(nameof(NoCatalogMatch)); _ = LoadVisibleIconsAsync(); } } }
     public string RuleQuery { get => _ruleQuery; set { if (Set(ref _ruleQuery, value)) { PublishRuleFilter(); Raise(nameof(RuleSuggestions)); Raise(nameof(NoRulesMatch)); } } }
@@ -275,7 +284,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         }
     }
     private static bool IsExpectedFailure(Exception exception) => exception is IOException or InvalidDataException or System.Text.Json.JsonException or System.ComponentModel.Win32Exception or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or OperationCanceledException;
-    private static string SafeFailure(Exception exception, string fallback) => exception is OperationCanceledException ? "操作已取消；原有配置已保留。" : exception is ResourcePreparationException ? exception.Message : fallback;
+    private static string SafeFailure(Exception exception, string fallback) => exception is OperationCanceledException ? "操作已取消；原有配置已保留。" : exception is ResourcePreparationException or RuntimeFailureException ? exception.Message : fallback;
     private async Task RunOperationAsync(Func<Task> operation)
     {
         if (_disposed || IsBusy) return;
@@ -327,18 +336,18 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         _global = GlobalChoices.FirstOrDefault(choice => choice.Id == GlobalId()); _group = GroupChoices.FirstOrDefault(choice => choice.Id == _group?.Id) ?? GroupChoices.FirstOrDefault();
         SelectedApp = _apps.FirstOrDefault(row => row.Model.Id == appId); SelectedRule = _rules.FirstOrDefault(row => row.Model.Id == ruleId);
         foreach (string property in new[] { nameof(Nodes), nameof(GlobalChoices), nameof(GroupChoices), nameof(SelectedHomeInterface), nameof(SelectedNonHomeInterface), nameof(SelectedGlobalTarget), nameof(SelectedGroup), nameof(ApplicationCount), nameof(RuleCount), nameof(ApplicationCountLabel), nameof(RuleCountLabel), nameof(NodeCountLabel), nameof(AppsEmpty), nameof(RulesEmpty), nameof(NoAppsMatch), nameof(NoCatalogMatch), nameof(NoRulesMatch), nameof(RuleSuggestions), nameof(HomeInterfaceName), nameof(NonHomeInterfaceName), nameof(GlobalTargetName), nameof(SelectedAppName), nameof(SelectedRuleName), nameof(SelectedRuleSummary), nameof(DnsServer), nameof(SubscriptionName), nameof(SetupGlobalManual), nameof(SetupGlobalMemberChoices), nameof(SelectedSetupGlobalMember) }) Raise(property);
-        RaiseGroup(); CatalogSelectionChanged(); DslText = PolicyYaml.Write(Document);
+        Raise(nameof(VisibleNodes)); Raise(nameof(NoNodesMatch)); Raise(nameof(ResourceProxyPort)); RaiseGroup(); CatalogSelectionChanged(); DslText = PolicyYaml.Write(Document);
         }
         finally{_reconciling=false;}
     }
     private void PublishApplicationFilter()
     {
-        var visible = _apps.Where(row => Matches(row.Name + " " + row.Category, AppQuery)).ToArray(); if (!_visibleApps.SequenceEqual(visible)) { _visibleApps = visible; Raise(nameof(VisibleApps)); }
+        var visible = _apps.Where(row => Matches(row.Name + " " + row.Category + " " + row.Model.BundleIdentifier + " " + row.BundlePath + " " + string.Join(" ", row.ExecutablePaths), AppQuery)).ToArray(); if (!_visibleApps.SequenceEqual(visible)) { _visibleApps = visible; Raise(nameof(VisibleApps)); }
         var overview = _apps.Take(4).ToArray(); if (!_overviewApps.SequenceEqual(overview)) { _overviewApps = overview; Raise(nameof(OverviewApps)); }
     }
     private void PublishCatalogFilter()
     {
-        var visible = _catalog.Where(row => Matches(row.Name + " " + row.Model.Category, CatalogQuery)).ToArray(); if (!_visibleCatalog.SequenceEqual(visible)) { _visibleCatalog = visible; Raise(nameof(VisibleCatalog)); }
+        var visible = _catalog.Where(row => Matches(row.Name + " " + row.Model.Category + " " + row.Model.BundleIdentifier + " " + row.Model.BundlePath + " " + row.Model.PrimaryExecutable, CatalogQuery)).ToArray(); if (!_visibleCatalog.SequenceEqual(visible)) { _visibleCatalog = visible; Raise(nameof(VisibleCatalog)); }
     }
     private void PublishRuleFilter()
     {
@@ -421,6 +430,20 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     }
     public int FixtureSubscriptionRequestCount => (_backend as FixtureClientBackend)?.RequestCount ?? throw new InvalidOperationException("Fixture hook is unavailable in production.");
     public void SetFixtureSubscriptionPayload(string yaml) { if (_backend is not FixtureClientBackend fixture) throw new InvalidOperationException("Fixture hook is unavailable in production."); fixture.SetSubscriptionPayload(yaml); }
+    public void ImportLocalSubscription()
+    {
+        const string sourceId = "local-bootstrap";
+        if (Encoding.UTF8.GetByteCount(LocalSubscriptionYaml) > 8 * 1024 * 1024) { CurrentIssue = "本地订阅超出 8 MB 限制。"; return; }
+        var imported = ClashSubscriptionImporter.Import(LocalSubscriptionYaml, sourceId);
+        if (!imported.IsSuccess || imported.Nodes.Count == 0) { CurrentIssue = "请粘贴包含实际节点的 Clash YAML；仅有在线提供器时无法建立首次连接。"; return; }
+        if (imported.Groups.Count == 0)
+            imported = imported with { Groups = [new ProxyGroup { Id = "local-bootstrap-group", Name = "本地导入", SourceId = sourceId,
+                Kind = GroupKind.Select, MemberIds = imported.Nodes.Where(node => node.IsSupported).Select(node => node.Id).ToList() }] };
+        Document = SubscriptionReconciler.Merge(Document, sourceId, imported);
+        _probes.Clear(); _subscriptionReady = true; CurrentIssue = ""; LocalSubscriptionYaml = "";
+        RebuildProjection(); StateChanged(); Raise(nameof(SetupSubscriptionStatus));
+        Notice = "本地节点已导入。请选择非家宽网卡、全局分组和成员，然后连接。";
+    }
     public async Task ImportSubscriptionAsync()
     {
         if (!Uri.TryCreate(SubscriptionUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)) { CurrentIssue = "请输入有效的 HTTPS 订阅 URL。"; return; }
@@ -483,6 +506,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public async Task ApplyPreviewAsync()
     {
         if (_applying) return; _applying = true;
+        bool applied = false;
         long attemptRevision = ++_attemptRevision; ConnectionAttempt.Begin();
         _backend.SetProgressSink(new UiProgress(progress => { if (_attemptRevision == attemptRevision) ConnectionAttempt.Observe(progress); }));
         try
@@ -491,16 +515,19 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             var candidate = CopyDocument(Document); long revision = _revision;
             var policyErrors = PolicyValidator.Validate(candidate).Where(item => item.Severity == DiagnosticSeverity.Error && item.Code != "group.no-observation").ToArray();
             if (policyErrors.Length > 0) { CurrentIssue = string.Join(" ", policyErrors.Select(item => item.Message).Distinct()); ConnectionAttempt.Fail(CurrentIssue); return; }
-            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "检查资源缓存，通过系统当前代理补齐缺失文件；不依赖其他软件的 TUN。"));
-            SetPreparedResources(await _backend.PrepareResourcesAsync(candidate, ActionToken));
+            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Core, "验证内置 Xray 与所选节点，随后建立 TUN 和本地代理。"));
             if (RequiredGroupProbes.NeedsProbes(candidate, CompileOptions(candidate)))
             {
                 var probes = await _backend.PrepareRequiredProbesAsync(candidate, CompileOptions(candidate), ActionToken); _probes.Clear(); _probes.AddRange(probes); RefreshNodeLatencies();
             }
+            await _backend.BeginConnectionAsync(candidate, CompileOptions(candidate), ActionToken);
+            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "TUN 与本地代理已确认，检查缓存并通过非家宽分组节点下载缺失规则。"));
+            SetPreparedResources(await _backend.PrepareResourcesAsync(candidate, ActionToken));
             if (!CompilePrepared(candidate).IsSuccess) { ConnectionAttempt.Fail(CurrentIssue); return; }
             var result = await _backend.ApplyAsync(candidate, CompileOptions(candidate), _prepared.Assets, ActionToken);
             if (result.Succeeded)
             {
+                applied = true;
                 if (revision == _revision) HasChanges = false; CurrentIssue = ""; await RefreshStatusAsync();
                 Notice = result.Disposition == ApplyDisposition.Unchanged ? "配置已保存，运行内容未改变。" : IsPreview ? "配置已应用到模拟内核；未启动真实 TUN。" : "配置已应用，网络状态以后台服务实际报告为准。";
                 AddEvent("配置已应用", Notice, "configuration");
@@ -510,8 +537,13 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             else { CurrentIssue = string.Join(" ", result.Diagnostics.Select(diagnostic => diagnostic.Message)); ConnectionAttempt.Fail(CurrentIssue); await RefreshStatusAsync(); }
         }
         catch (OperationCanceledException) { ConnectionAttempt.Fail("已取消本次准备；已验证缓存与保存的配置保留。", canceled: true); throw; }
-        catch (Exception error) when (IsExpectedFailure(error)) { ConnectionAttempt.Fail(SafeFailure(error, "连接准备失败，请检查系统代理、资源和授权状态后重试。")); throw; }
-        finally { _applying = false; }
+        catch (Exception error) when (IsExpectedFailure(error)) { ConnectionAttempt.Fail(SafeFailure(error, "连接准备失败，请检查 Xray 非家宽节点、端口、TUN 与授权状态后重试。")); throw; }
+        finally
+        {
+            try { await _backend.EndConnectionAsync(applied); if (!applied) await RefreshStatusAsync(); }
+            catch (RuntimeFailureException failure) { ConnectionAttempt.Fail(failure.Message); CurrentIssue = failure.Message; SetRuntimeUnavailable(true); throw; }
+            finally { _applying = false; }
+        }
     }
     private async Task<bool> SynchronizePendingDslAsync()
     {
@@ -521,6 +553,11 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     {
         var parsed = PolicyYaml.Read(DslText); if (!parsed.IsSuccess || parsed.Document is null) { CurrentIssue = string.Join(" ", parsed.Diagnostics.Select(diagnostic => diagnostic.Message)); return; }
         var candidate = parsed.Document;
+        if (IsProduction)
+        {
+            Document = candidate; RebuildProjection(); StateChanged(); CurrentIssue = "";
+            Notice = "DSL 结构已校验并保存为草稿；连接时通过内置 Xray 准备并验证规则。"; return;
+        }
         var prepared = await _backend.PrepareResourcesAsync(candidate, ActionToken);
         if (RequiredGroupProbes.NeedsProbes(candidate, CompileOptions(candidate)))
         {

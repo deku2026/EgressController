@@ -40,6 +40,8 @@ public sealed class RuntimeController(IPrivilegedRuntimeEnvironment environment)
         catch (Exception error) when (error is IOException or InvalidDataException or System.Text.Json.JsonException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
         {
             if (mutationStarted) await RecoverAsync().ConfigureAwait(false);
+            if (error is RuntimeFailureException known)
+                return new(request.SessionId, request.Sequence, false, known.Code, known.Message, SafeInspect());
             // Exceptions can contain server credentials or private paths. Only fixed error codes cross IPC.
             return new(request.SessionId, request.Sequence, false, "operation-failed", "特权操作未完成；系统恢复状态见当前状态。", SafeInspect());
         }

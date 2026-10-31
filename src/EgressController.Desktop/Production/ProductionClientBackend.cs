@@ -25,6 +25,7 @@ public sealed class ProductionClientBackend : IClientBackend
     private readonly string _root, _staging;
     private MacRuntimeLaunch? _launch;
     private bool _disposed;
+    private int _savedResourcePort = 17890;
     private readonly ConnectionObservationMapper _observations = new();
     private IProgress<ClientOperationProgress>? _progress;
     private ConnectionAttemptStage _preparationStage = ConnectionAttemptStage.Resources;
@@ -62,6 +63,7 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         _gate.Require("load production workspace");
         var document = await _drafts.LoadAsync(cancellationToken).ConfigureAwait(false);
+        _savedResourcePort = document?.Defaults.ResourceProxyPort ?? 17890;
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         var applications = await DiscoverApplicationsAsync(cancellationToken).ConfigureAwait(false);
         return new(document ?? new(), interfaces.Where(Physical).Select(item => new ClientInterface(item.ServiceId, item.BsdName,
@@ -94,7 +96,7 @@ public sealed class ProductionClientBackend : IClientBackend
     }
     public async Task<IReadOnlyList<ClientRuleCatalogEntry>> LoadRuleCatalogAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
-        var catalog = await Resources().LoadRuleCatalogAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var catalog = await Resources(_savedResourcePort).LoadRuleCatalogAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         return catalog.Entries.GroupBy(item => item.Name, StringComparer.Ordinal).Select(group =>
             new ClientRuleCatalogEntry(SafeId(group.Key), group.Key, group.Any(item => item.Kind == RuleDataKind.Ip) && group.Any(item => item.Kind != RuleDataKind.Ip)
                 ? "域名 + IP 集合" : group.First().Kind == RuleDataKind.Ip ? "IP/CIDR 集合" : "域名集合",
@@ -105,7 +107,7 @@ public sealed class ProductionClientBackend : IClientBackend
         string sourceId = current.Subscriptions.FirstOrDefault(item => item.Url == url.AbsoluteUri)?.Id
             ?? (current.Subscriptions.Count == 1 ? current.Subscriptions[0].Id : "subscription-" + Digest(url.AbsoluteUri)[..24]);
         var source = new SubscriptionSource { Id = sourceId, Name = "节点订阅", Url = url.AbsoluteUri };
-        var imported = await Resources().FetchSubscriptionAsync(source, PreparationCachePolicy.Refresh, cancellationToken).ConfigureAwait(false);
+        var imported = await Resources(_savedResourcePort).FetchSubscriptionAsync(source, PreparationCachePolicy.Refresh, cancellationToken).ConfigureAwait(false);
         if (!imported.IsSuccess) throw new InvalidDataException("订阅结构无效，保留原有节点与选择。");
         var merged = SubscriptionReconciler.Merge(current, sourceId, imported);
         merged.Subscriptions.RemoveAll(item => item.Id == sourceId); merged.Subscriptions.Add(source); return merged;
@@ -113,14 +115,14 @@ public sealed class ProductionClientBackend : IClientBackend
     public async Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
         _preparationStage = ConnectionAttemptStage.Resources;
-        Report(ConnectionAttemptStage.Resources, "检查已验证缓存，通过系统当前代理准备缺失资源。");
-        var result = await Resources().PrepareRulesAsync(document.RuleSets.Where(item => item.Enabled).SelectMany(item => item.Sources), cancellationToken: cancellationToken).ConfigureAwait(false);
+        Report(ConnectionAttemptStage.Resources, "检查已验证缓存，通过已启动的 Xray 非家宽分组节点准备缺失资源。");
+        var result = await Resources(document.Defaults.ResourceProxyPort).PrepareRulesAsync(document.RuleSets.Where(item => item.Enabled).SelectMany(item => item.Sources), cancellationToken: cancellationToken).ConfigureAwait(false);
         return new(result.Bindings, result.Assets, result.Sources);
     }
     public async Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, InterfaceBinding binding, CancellationToken cancellationToken = default)
     {
         await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
-        var core = await CoreManager().PrepareAsync(cancellationToken).ConfigureAwait(false);
+        var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         var options = new XrayCompileOptions { Interfaces = interfaces.Where(Physical).Select(item => new InterfaceBinding(item.ServiceId, item.BsdName)).ToList() };
         return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("run isolated outbound probe without TUN"), Path.Combine(_root, "probes")))
@@ -133,10 +135,25 @@ public sealed class ProductionClientBackend : IClientBackend
         await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
         _preparationStage = ConnectionAttemptStage.Core;
         Report(ConnectionAttemptStage.Core, "只检查当前策略使用的自动分组；复用有效结果，不测速无关节点。");
-        var core = await CoreManager().PrepareAsync(cancellationToken).ConfigureAwait(false);
+        var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
         return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe required outbound groups without TUN"), Path.Combine(_root, "probes")))
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requiredOnly: true).ConfigureAwait(false);
     }
+    public async Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
+    {
+        Report(ConnectionAttemptStage.Core, "验证内置 Xray；不需要下载内核。");
+        var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
+        foreach (string id in new[] { document.Interfaces.HomeId, document.Interfaces.NonHomeId })
+        {
+            var binding = options.Interfaces.SingleOrDefault(item => item.StableId == id) ?? throw new RuntimeFailureException("interface.unavailable");
+            await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
+        }
+        _launch = new(core.ExecutablePath, core.Sha256, document.Interfaces.HomeId, document.Interfaces.NonHomeId);
+        await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
+        Report(ConnectionAttemptStage.Bootstrap, $"建立 TUN 与 Xray SOCKS5 127.0.0.1:{document.Defaults.ResourceProxyPort}；规则未就绪前暂停普通流量。");
+        await _coordinator.BeginResourceBootstrapAsync(document, options, cancellationToken).ConfigureAwait(false);
+    }
+    public Task EndConnectionAsync(bool applied) => _coordinator.EndResourceBootstrapAsync(applied);
     public async Task<ApplyResult> ApplyAsync(MacPolicyDocument document, XrayCompileOptions options, IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default)
     {
         await _apply.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -151,13 +168,14 @@ public sealed class ProductionClientBackend : IClientBackend
             var binding = options.Interfaces.Single(item => item.StableId == snapshot.Interfaces.NonHomeId);
             await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
             _preparationStage = ConnectionAttemptStage.Core;
-            Report(ConnectionAttemptStage.Core, "验证本地核心或通过系统代理下载固定版本；此阶段不需要 TUN。");
-            var core = await CoreManager().PrepareAsync(cancellationToken).ConfigureAwait(false);
+            Report(ConnectionAttemptStage.Core, "验证安装包内置 Xray 与本地核心缓存。");
+            var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
             _launch = new(core.ExecutablePath, core.Sha256, snapshot.Interfaces.HomeId, snapshot.Interfaces.NonHomeId);
             await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
             await _drafts.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
             Report(ConnectionAttemptStage.Connecting, "校验助手配置，等待 Xray、实际 TUN 路由和 DNS 接管确认。");
             var result = await _coordinator.ApplyAsync(snapshot, options, assets, "用户应用生产策略", cancellationToken).ConfigureAwait(false);
+            if (result.Succeeded) _savedResourcePort = snapshot.Defaults.ResourceProxyPort;
             if (result.Succeeded && result.GenerationId is { } appliedGeneration)
             { try { _observations.RememberApplied(appliedGeneration, snapshot); } catch (Exception) { /* Observation labels cannot change a successful core apply. */ } }
             if (result.Disposition is ApplyDisposition.Applied or ApplyDisposition.Unchanged)
@@ -209,10 +227,10 @@ public sealed class ProductionClientBackend : IClientBackend
         var status = await _helper.InspectAsync(cancellationToken).ConfigureAwait(false);
         if (status.Installed && status.InstalledCoreSha256 == core.Sha256) return;
         string gui = Environment.ProcessPath ?? throw new IOException("无法定位当前客户端。");
-        if (Path.GetFileName(gui) != "EgressController.Desktop") throw new IOException("网络接管需要使用已打包的 Egress.app；不要以 root 身份运行 GUI。");
+        if (Path.GetFileName(gui) != "EgressController.Desktop") throw new RuntimeFailureException("helper.missing");
         string helper = Path.Combine(AppContext.BaseDirectory, "helper", "EgressController.MacHelper");
         string library = Path.Combine(AppContext.BaseDirectory, "helper", "libEgressMacNative.dylib");
-        if (!File.Exists(helper) || !File.Exists(library)) throw new IOException("当前运行目录缺少特权助手，请使用完整的 Egress.app 后再连接。");
+        if (!File.Exists(helper) || !File.Exists(library)) throw new RuntimeFailureException("helper.missing");
         var installation = new MacHelperInstallation(2, _native.GetUserId(), _native.GetGroupId(), gui, await FileHashAsync(gui, cancellationToken).ConfigureAwait(false),
             _staging, core.Sha256, await FileHashAsync(helper, cancellationToken).ConfigureAwait(false), await FileHashAsync(library, cancellationToken).ConfigureAwait(false));
         await new MacHelperInstaller(_gate).InstallAsync(new(helper, library, core.ExecutablePath, installation), cancellationToken).ConfigureAwait(false);
@@ -228,17 +246,28 @@ public sealed class ProductionClientBackend : IClientBackend
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { throw new IOException("助手安装完成后尚未建立受信连接；未启动 TUN，请查看诊断后重试。"); }
+        { throw new RuntimeFailureException("helper.timeout"); }
     }
-    private ProductionResources Resources() => new(new SystemProxyResourceTransport(new NativeMacResourceProxyResolver(_gate)), _cache,
-        _ => ValueTask.FromResult(ResourceExitSnapshot.SystemDefault), ResourceProgress());
-    private XrayCoreReleaseManager CoreManager() => new(new SystemProxyResourceTransport(new NativeMacResourceProxyResolver(_gate)), _cache, Path.Combine(_root, "cores"),
-        _ => ValueTask.FromResult(ResourceExitSnapshot.SystemDefault), progress: ResourceProgress());
+    private XrayResourceTransport ResourceTransport() => new(async (port, token) =>
+    {
+        var state = await _helper.InspectAsync(token).ConfigureAwait(false);
+        var applied = _coordinator.Applied;
+        if (!state.Running || !state.TunTakenOver || state.Failure is not null || applied is null)
+            throw new RuntimeFailureException("proxy.not-ready");
+        using var config = System.Text.Json.JsonDocument.Parse(applied.XrayJson);
+        if (!config.RootElement.GetProperty("inbounds").EnumerateArray().Any(item => item.GetProperty("tag").GetString() == "resources"
+            && item.GetProperty("port").GetInt32() == port)) throw new RuntimeFailureException("proxy.not-ready");
+    });
+    private ProductionResources Resources(int port) => new(ResourceTransport(), _cache,
+        _ => ValueTask.FromResult(ResourceExitSnapshot.Xray(port)), ResourceProgress());
+    private Task<PreparedCoreRelease> PrepareCoreAsync(CancellationToken token) => new XrayCoreReleaseManager(ResourceTransport(), _cache,
+        Path.Combine(_root, "cores"), _ => ValueTask.FromResult(ResourceExitSnapshot.Xray(17890)))
+        .PrepareBundledAsync(Path.Combine(AppContext.BaseDirectory, "core", "Xray-macos-arm64-v8a.zip"), token);
     private async Task CheckBindingAsync(InterfaceBinding binding, CancellationToken cancellationToken)
     {
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         if (!interfaces.Any(item => Physical(item) && item.ServiceId == binding.StableId && item.BsdName == binding.BsdName && item.IsActive))
-            throw new IOException("所选非家宽接口已失效或身份变化；不会改走其他网卡。");
+            throw new RuntimeFailureException("interface.unavailable");
     }
     private static bool Physical(MacNetworkInterface item) => !item.BsdName.StartsWith("utun", StringComparison.Ordinal) && item.BsdName != "lo0";
     private static ClientApplication MapApplication(MacApplication item)

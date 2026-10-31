@@ -32,9 +32,20 @@ public static class MacHelperConfigurationValidator
                 "dns-upstream", "Bootstrap DNS servers must be explicit IP addresses.");
 
             JsonElement inbounds = Array(root.GetProperty("inbounds"));
-            Need(inbounds.GetArrayLength() == 1, "inbound-count", "Exactly one native TUN inbound is admitted.");
+            Need(inbounds.GetArrayLength() is 1 or 2, "inbound-count", "One TUN and at most one owned loopback resource listener are admitted.");
+            bool resourceProxy = inbounds.GetArrayLength() == 2;
+            if (resourceProxy)
+            {
+                var proxy = Object(inbounds[1], "tag", "listen", "port", "protocol", "settings");
+                Need(Text(proxy, "tag") == "resources" && Text(proxy, "listen") == "127.0.0.1" && Text(proxy, "protocol") == "socks"
+                    && proxy.GetProperty("port").TryGetInt32(out int proxyPort) && proxyPort is >= 1024 and <= 65535,
+                    "resource-listener", "Only the explicit loopback SOCKS resource port is admitted.");
+                var proxySettings = Object(proxy.GetProperty("settings"), "auth", "udp");
+                Need(Text(proxySettings, "auth") == "noauth" && proxySettings.GetProperty("udp").ValueKind == JsonValueKind.False,
+                    "resource-listener", "Resource downloads admit TCP SOCKS only.");
+            }
             JsonElement inbound = Object(inbounds[0], "tag", "protocol", "settings", "sniffing");
-            Need(Text(inbound, "protocol") == "tun" && Text(inbound, "tag") == "tun", "inbound-protocol", "Local HTTP/SOCKS/control listeners are forbidden.");
+            Need(Text(inbound, "protocol") == "tun" && Text(inbound, "tag") == "tun", "inbound-protocol", "The first inbound must be native TUN; HTTP/control listeners are forbidden.");
             JsonElement tun = Object(inbound.GetProperty("settings"), "name", "mtu", "gateway", "autoSystemRoutingTable", "autoOutboundsInterface");
             string tunName = Text(tun, "name");
             Need(tunName.StartsWith("utun", StringComparison.Ordinal) && tunName.Length is > 4 and < 16 && tunName.AsSpan(4).ToArray().All(char.IsAsciiDigit),
@@ -125,8 +136,9 @@ public static class MacHelperConfigurationValidator
             JsonElement routing = Object(root.GetProperty("routing"), "domainStrategy", "rules");
             Need(Text(routing, "domainStrategy") == "IPOnDemand", "routing-strategy", "The explicit catch-all requires IPOnDemand routing.");
             JsonElement rules = Array(routing.GetProperty("rules"));
-            Need(rules.GetArrayLength() is >= 5 and <= 100_000, "routing-rules", "Required routing stages are missing.");
-            bool dnsRouted = false;
+            Need(rules.GetArrayLength() is >= 3 and <= 100_000, "routing-rules", "Required routing stages are missing.");
+            bool bootstrap = Text(rules[rules.GetArrayLength() - 1], "ruleTag") == "bootstrap-block";
+            bool dnsRouted = false, resourcesRouted = false;
             int ruleIndex = 0, dnsIndex = -1, hijackIndex = -1, chinaStages = 0;
             var ruleTags = new HashSet<string>(StringComparer.Ordinal);
             foreach (JsonElement item in rules.EnumerateArray())
@@ -147,6 +159,12 @@ public static class MacHelperConfigurationValidator
                     if (rule.TryGetProperty(key, out var references))
                         foreach (var reference in Array(references).EnumerateArray())
                             Need(SafeDatReference(reference.GetString()), "rule-file-reference", "Rule data references must remain single owned DAT filenames.");
+                if (ruleTag == "resources")
+                {
+                    resourcesRouted = resourceProxy && ruleIndex == 0 && rule.EnumerateObject().Count() == 3
+                        && OneString(rule.GetProperty("inboundTag"), "resources") && ProxyProtocols.Contains(protocols[target]);
+                    Need(resourcesRouted, "resource-route", "Resource SOCKS must route first and exclusively to the selected proxy.");
+                }
                 if (ruleTag == "dns-upstream")
                 {
                     dnsRouted = target == "nonhome" && Array(rule.GetProperty("inboundTag")).EnumerateArray().Any(tag => tag.GetString() == "dns-query");
@@ -162,7 +180,15 @@ public static class MacHelperConfigurationValidator
                 ruleIndex++;
             }
             JsonElement final = rules[rules.GetArrayLength() - 1];
-            Need(Text(final, "ruleTag") == "global" && Text(final, "network") == "tcp,udp"
+            Need(!resourceProxy || resourcesRouted, "resource-route", "The resource listener must have its explicit proxy route.");
+            if (bootstrap)
+            {
+                Need(resourceProxy && resourcesRouted && rules.GetArrayLength() == 3 && dnsRouted && dnsIndex == 1
+                    && OneString(rules[1].GetProperty("inboundTag"), "dns-query") && rules[1].EnumerateObject().Count() == 3
+                    && Text(final, "outboundTag") == "blocked" && Text(final, "network") == "tcp,udp" && final.EnumerateObject().Count() == 3,
+                    "bootstrap-boundary", "Bootstrap admits resource proxy and upstream DNS only; all TUN traffic must be blocked.");
+            }
+            else Need(Text(final, "ruleTag") == "global" && Text(final, "network") == "tcp,udp"
                 && protocols.TryGetValue(Text(final, "outboundTag"), out var finalProtocol) && ProxyProtocols.Contains(finalProtocol)
                 && final.EnumerateObject().Count() == 3 && dnsRouted && dnsIndex >= 0 && hijackIndex > dnsIndex && chinaStages == 2,
                 "global-fallback", "The final TCP/UDP route must be an explicit proxy and DNS must be bound to non-home direct.");

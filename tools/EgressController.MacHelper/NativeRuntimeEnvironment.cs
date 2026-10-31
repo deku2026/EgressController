@@ -45,8 +45,10 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             content.Add(name, bytes);
         }
         var interfaces = new NativeMacPlatform(LiveOperationGate.ForExplicitLiveUse()).ReadInterfaces();
-        string home = interfaces.Single(item => item.ServiceId == plan.HomeServiceId).BsdName;
-        string nonHome = interfaces.Single(item => item.ServiceId == plan.NonHomeServiceId).BsdName;
+        string home = interfaces.SingleOrDefault(item => item.ServiceId == plan.HomeServiceId && item.IsActive)?.BsdName
+            ?? throw new RuntimeFailureException("interface.unavailable");
+        string nonHome = interfaces.SingleOrDefault(item => item.ServiceId == plan.NonHomeServiceId && item.IsActive)?.BsdName
+            ?? throw new RuntimeFailureException("interface.unavailable");
         var validation = MacHelperConfigurationValidator.Validate(content["xray.json"], home, nonHome);
         if (!validation.IsValid || RuntimeAssetValidator.Validate(System.Text.Encoding.UTF8.GetString(content["xray.json"]), content)
             .Any(diagnostic => diagnostic.Severity == EgressController.Policy.DiagnosticSeverity.Error)) throw new InvalidDataException("Runtime configuration failed the privilege allow-list.");
@@ -70,8 +72,9 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         using var test = StartCore(target, testOnly: true);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(30));
         try { await test.WaitForExitAsync(deadline.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new RuntimeFailureException("core.validation-timeout"); }
         finally { if (!test.HasExited) { test.Kill(true); await test.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } }
-        if (test.ExitCode != 0) throw new InvalidDataException("Xray configuration validation failed.");
+        if (test.ExitCode != 0) throw new RuntimeFailureException("core.configuration");
     }
 
     public async Task ApplyAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken)
@@ -82,8 +85,20 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         using var config = JsonDocument.Parse(configBytes);
         var tun = config.RootElement.GetProperty("inbounds")[0].GetProperty("settings");
         _tunName = tun.GetProperty("name").GetString()!; _tunCidr = tun.GetProperty("gateway")[0].GetString()!;
+        if (native.IsTunInterfacePresent(_tunName)) throw new RuntimeFailureException("tun.in-use");
+        foreach (var inbound in config.RootElement.GetProperty("inbounds").EnumerateArray())
+        {
+            if (inbound.GetProperty("tag").GetString() != "resources") continue;
+            using var portCheck = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+            try { portCheck.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, inbound.GetProperty("port").GetInt32())); }
+            catch (System.Net.Sockets.SocketException error) when (error.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
+            { throw new RuntimeFailureException("proxy.port-in-use"); }
+            catch (System.Net.Sockets.SocketException error) when (error.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied)
+            { throw new RuntimeFailureException("core.permission"); }
+        }
         var snapshots = native.ReadDnsSnapshots().Where(snapshot => snapshot.ServiceId == plan.HomeServiceId || snapshot.ServiceId == plan.NonHomeServiceId).ToArray();
-        if (snapshots.Length != 2) throw new InvalidDataException("Selected DNS services are not available.");
+        if (snapshots.Length != 2) throw new RuntimeFailureException("interface.unavailable");
         var dns = new MacDnsRecoverySnapshot(1, Guid.NewGuid(), DateTimeOffset.UtcNow, snapshots); dns.Validate();
         HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns), HelperHostJson.Default.RecoveryJournal));
         _dnsRestored = false; _failure = null;
@@ -97,8 +112,10 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(20));
             while (!native.IsTunTakeoverActive(_tunName, _tunCidr))
             {
-                if (_core.HasExited) throw new IOException("Xray exited before TUN takeover.");
-                await Task.Delay(100, deadline.Token).ConfigureAwait(false);
+                if (_core.HasExited) throw new RuntimeFailureException("core.exited");
+                try { await Task.Delay(100, deadline.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                { throw new RuntimeFailureException("tun.timeout"); }
             }
             // DNS only changes once the actual interface/address/IPv4+IPv6 route takeover exists.
             native.SetDns(snapshots, _tunCidr.Split('/')[0]);

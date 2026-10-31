@@ -36,16 +36,20 @@ public static partial class XrayConfigCompiler
         }
         string? Outbound(ExitChoice via) => via.Kind switch { ExitKind.Home => "home", ExitKind.NonHome => "nonhome", _ => Resolve(via.TargetId ?? "") };
         var global = Outbound(doc.Defaults.Global);
-        foreach (var app in doc.Applications.Where(x => x.Enabled)) _ = Outbound(app.Via);
-        foreach (var rule in doc.RuleSets.Where(x => x.Enabled)) _ = Outbound(rule.Via);
+        foreach (var app in doc.Applications.Where(x => x.Enabled && !options.ResourceBootstrap)) _ = Outbound(app.Via);
+        foreach (var rule in doc.RuleSets.Where(x => x.Enabled && !options.ResourceBootstrap)) _ = Outbound(rule.Via);
         var rules = new JsonArray
         {
-            Rule("dns-upstream", "nonhome", ("inboundTag", Strings(["dns-query"]))),
-            Rule("system-dns", "dns", ("port", JsonValue.Create(53))),
-            Rule("local-network", "nonhome", ("ip", Strings(LocalNetworkCidrs)))
+            Rule("resources", global, ("inboundTag", Strings(["resources"]))),
+            Rule("dns-upstream", "nonhome", ("inboundTag", Strings(["dns-query"])))
         };
-        foreach (var app in doc.Applications.Where(x => x.Enabled)) rules.Add(Rule("app-" + app.Id, Outbound(app.Via), ("process", Strings(app.ExecutablePaths.Distinct(StringComparer.Ordinal)))));
-        foreach (var rule in doc.RuleSets.Where(x => x.Enabled))
+        if (!options.ResourceBootstrap)
+        {
+            rules.Add(Rule("system-dns", "dns", ("port", JsonValue.Create(53))));
+            rules.Add(Rule("local-network", "nonhome", ("ip", Strings(LocalNetworkCidrs))));
+        }
+        foreach (var app in doc.Applications.Where(x => x.Enabled && !options.ResourceBootstrap)) rules.Add(Rule("app-" + app.Id, Outbound(app.Via), ("process", Strings(app.ExecutablePaths.Distinct(StringComparer.Ordinal)))));
+        foreach (var rule in doc.RuleSets.Where(x => x.Enabled && !options.ResourceBootstrap))
         {
             var domains = rule.Domains.Select(x => x.Kind switch { DomainMatchKind.Full => "full:" + DomainRuleValidation.CompiledValue(x), DomainMatchKind.Suffix => "domain:" + DomainRuleValidation.CompiledValue(x), DomainMatchKind.Keyword => "keyword:" + x.Value, _ => "regexp:" + x.Value }).ToList();
             var ips = rule.IpCidrs.ToList();
@@ -62,9 +66,12 @@ public static partial class XrayConfigCompiler
             if (ips.Count > 0) rules.Add(Rule("ips-" + rule.Id, Outbound(rule.Via), ("ip", Strings(ips))));
             if (domains.Count == 0 && ips.Count == 0) diagnostics.Add(new("rules.empty", "启用的规则集合没有可执行规则。", ObjectId: rule.Id));
         }
-        rules.Add(Rule("china-domains", "nonhome", ("domain", Strings(["ext:" + options.ChinaGeoSiteFile + ":" + options.ChinaTag]))));
-        rules.Add(Rule("china-ips", "nonhome", ("ip", Strings(["ext:" + options.ChinaGeoIpFile + ":" + options.ChinaTag]))));
-        rules.Add(Rule("global", global, ("network", JsonValue.Create("tcp,udp"))));
+        if (!options.ResourceBootstrap)
+        {
+            rules.Add(Rule("china-domains", "nonhome", ("domain", Strings(["ext:" + options.ChinaGeoSiteFile + ":" + options.ChinaTag]))));
+            rules.Add(Rule("china-ips", "nonhome", ("ip", Strings(["ext:" + options.ChinaGeoIpFile + ":" + options.ChinaTag]))));
+        }
+        rules.Add(Rule(options.ResourceBootstrap ? "bootstrap-block" : "global", options.ResourceBootstrap ? "blocked" : global, ("network", JsonValue.Create("tcp,udp"))));
         if (diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error)) return new(null, diagnostics.Distinct().ToList());
         var outbounds = new JsonArray
         {
@@ -82,6 +89,11 @@ public static partial class XrayConfigCompiler
             ["routing"] = new JsonObject { ["domainStrategy"] = "IPOnDemand", ["rules"] = rules },
             ["outbounds"] = outbounds
         };
+        config["inbounds"]!.AsArray().Add((JsonNode)new JsonObject
+        {
+            ["tag"] = "resources", ["listen"] = "127.0.0.1", ["port"] = doc.Defaults.ResourceProxyPort,
+            ["protocol"] = "socks", ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = false }
+        });
         return new(config.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), diagnostics.Distinct().ToList());
     }
 

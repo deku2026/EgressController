@@ -5,6 +5,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../EgressController.Transport/Upstream/DownloadTransport.cs" Link="Transport/DownloadTransport.cs" />
+    <Compile Include="../EgressController.Transport/Upstream/HttpTransfer.cs" Link="Transport/HttpTransfer.cs" />
+    <Compile Include="../EgressController.Transport/Upstream/Socks5HttpClientFactory.cs" Link="Transport/Socks5HttpClientFactory.cs" />
     <ProjectReference Include="../EgressController.Policy/EgressController.Policy.csproj" />
   </ItemGroup>
 </Project>

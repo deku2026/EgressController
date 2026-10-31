@@ -34,7 +34,7 @@ public sealed class MacXrayCoreRuntime : ICoreRuntime
         launch = launch with { HomeServiceId = parsed.Document!.Interfaces.HomeId, NonHomeServiceId = parsed.Document.Interfaces.NonHomeId };
         var plan = await _stager.StageAsync(generation, launch, cancellationToken).ConfigureAwait(false);
         var reply = await _client.ValidateAsync(plan, cancellationToken).ConfigureAwait(false);
-        if (!reply.Succeeded) throw new IOException("Xray validation failed: " + reply.Code);
+        if (!reply.Succeeded) throw new RuntimeFailureException(reply.Code);
         _prepared = (generation.Id, plan);
     }
     public async Task ApplyAsync(RuntimeGeneration generation, CancellationToken cancellationToken)
@@ -43,7 +43,7 @@ public sealed class MacXrayCoreRuntime : ICoreRuntime
             await ValidateAsync(generation, cancellationToken).ConfigureAwait(false);
         var reply = await _client.ApplyAsync(_prepared!.Value.Plan, cancellationToken).ConfigureAwait(false);
         if (!reply.Succeeded || !reply.Status.Running || !reply.Status.TunTakenOver)
-            throw new IOException("Xray takeover was not confirmed: " + reply.Code);
+            throw new RuntimeFailureException(reply.Code);
     }
     public async Task RestoreAsync(RuntimeGeneration? generation, CancellationToken cancellationToken)
     {

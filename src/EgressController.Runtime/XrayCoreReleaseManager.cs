@@ -52,6 +52,36 @@ public sealed class XrayCoreReleaseManager
         string digest = Convert.ToHexStringLower(SHA256.HashData(executable));
         if (_release == XrayCoreReleaseSpecification.PinnedMacArm64 && digest != XrayCoreReleaseSpecification.PinnedMacArm64ExecutableSha256)
             throw new InvalidDataException("The extracted official core does not match the independent executable pin.");
+        return await PublishExecutableAsync(executable, cancellationToken).ConfigureAwait(false);
+
+        ResourceDescriptor Descriptor(string id, Uri url, int maximum, string hash) => new()
+        { Id = id + "-" + _release.Version, Url = url, Exit = binding, MaximumBytes = maximum, ExpectedSha256 = hash, Timeout = TimeSpan.FromMinutes(3) };
+    }
+
+    public async Task<PreparedCoreRelease> PrepareBundledAsync(string archivePath, CancellationToken cancellationToken = default)
+    {
+        // A startup never needs a download to obtain the very proxy that performs downloads.
+        string installed = Path.Combine(_root, _release.Version + "-" + XrayCoreReleaseSpecification.PinnedMacArm64ExecutableSha256, "xray");
+        if (File.Exists(installed) && new FileInfo(installed).LinkTarget is null)
+        {
+            await using var stream = File.OpenRead(installed);
+            if (stream.Length <= 128 * 1024 * 1024 && Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false))
+                == XrayCoreReleaseSpecification.PinnedMacArm64ExecutableSha256)
+                return new(installed, XrayCoreReleaseSpecification.PinnedMacArm64ExecutableSha256, _release.Version);
+        }
+        if (!File.Exists(archivePath) || new FileInfo(archivePath).Length > 64 * 1024 * 1024) throw new RuntimeFailureException("core.bundle");
+        byte[] archive = await File.ReadAllBytesAsync(archivePath, cancellationToken).ConfigureAwait(false);
+        if (Convert.ToHexStringLower(SHA256.HashData(archive)) != XrayCoreReleaseSpecification.PinnedMacArm64.ArchiveSha256)
+            throw new RuntimeFailureException("core.bundle");
+        byte[] executable = ExtractExecutable(archive);
+        if (Convert.ToHexStringLower(SHA256.HashData(executable)) != XrayCoreReleaseSpecification.PinnedMacArm64ExecutableSha256)
+            throw new RuntimeFailureException("core.bundle");
+        return await PublishExecutableAsync(executable, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<PreparedCoreRelease> PublishExecutableAsync(byte[] executable, CancellationToken cancellationToken)
+    {
+        string digest = Convert.ToHexStringLower(SHA256.HashData(executable));
         PrivateResourceFiles.EnsureDirectory(_root);
         string directory = Path.Combine(_root, _release.Version + "-" + digest); PrivateResourceFiles.EnsureDirectory(directory);
         string path = Path.Combine(directory, "xray");
@@ -64,9 +94,6 @@ public sealed class XrayCoreReleaseManager
         DurableFiles.SyncDirectory(directory);
         cancellationToken.ThrowIfCancellationRequested();
         return new(path, digest, _release.Version);
-
-        ResourceDescriptor Descriptor(string id, Uri url, int maximum, string hash) => new()
-        { Id = id + "-" + _release.Version, Url = url, Exit = binding, MaximumBytes = maximum, ExpectedSha256 = hash, Timeout = TimeSpan.FromMinutes(3) };
     }
     public static bool VerifyChecksum(byte[] checksum, string expectedArchiveSha256)
     {

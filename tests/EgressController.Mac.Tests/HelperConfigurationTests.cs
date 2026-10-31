@@ -17,6 +17,33 @@ public sealed class HelperConfigurationTests
     }
 
     [Theory]
+    [InlineData("normal")]
+    [InlineData("external-listener")]
+    [InlineData("udp")]
+    [InlineData("resource-direct")]
+    [InlineData("tun-proxy-leak")]
+    [InlineData("missing-resource-route")]
+    [InlineData("dns-tun-leak")]
+    [InlineData("empty-rules")]
+    public void BootstrapListenerAndRoutesAreStrictlyBounded(string mutation)
+    {
+        var root = JsonNode.Parse(Generated(bootstrap: true))!;
+        var rules = root["routing"]!["rules"]!.AsArray();
+        switch (mutation)
+        {
+            case "external-listener": root["inbounds"]![1]!["listen"] = "0.0.0.0"; break;
+            case "udp": root["inbounds"]![1]!["settings"]!["udp"] = true; break;
+            case "resource-direct": rules[0]!["outboundTag"] = "nonhome"; break;
+            case "tun-proxy-leak": rules.Last()!["outboundTag"] = "node-1"; break;
+            case "missing-resource-route": rules.RemoveAt(0); break;
+            case "dns-tun-leak": rules[1]!["inboundTag"] = new JsonArray("dns-query", "tun"); break;
+            case "empty-rules": rules.Clear(); break;
+        }
+        var result = MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(root.ToJsonString()), "en0", "en5");
+        Assert.Equal(mutation == "normal", result.IsValid);
+    }
+
+    [Theory]
     [InlineData("api")]
     [InlineData("local-listener")]
     [InlineData("proxy-on-home")]
@@ -130,7 +157,7 @@ public sealed class HelperConfigurationTests
         return result.Json!;
     }
 
-    private static string Generated()
+    private static string Generated(bool bootstrap = false)
     {
         // Same shape as Runtime.ConfigurationTests, compiled rather than duplicating expected JSON.
         var policy = new MacPolicyDocument
@@ -144,7 +171,7 @@ public sealed class HelperConfigurationTests
                 PrimaryExecutable = "/Applications/Example.app/Contents/MacOS/Example",
                 ExecutablePaths = ["/Applications/Example.app/Contents/MacOS/Example", "/Applications/Example.app/Contents/Helpers/OldHelper"], Via = ExitChoice.Home }]
         };
-        var result = XrayConfigCompiler.Compile(policy, new() { Interfaces = [new("home-service", "en0"), new("other-service", "en5")] });
+        var result = XrayConfigCompiler.Compile(policy, new() { ResourceBootstrap = bootstrap, Interfaces = [new("home-service", "en0"), new("other-service", "en5")] });
         Assert.True(result.IsSuccess, string.Join(';', result.Diagnostics.Select(item => item.Message)));
         return result.Json!;
     }

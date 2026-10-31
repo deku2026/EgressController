@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using EgressController.Runtime;
 
 namespace EgressController.Mac;
 
@@ -21,7 +22,8 @@ public sealed class MacAdminAuthorization(LiveOperationGate gate) : IMacAdminAut
         Task<string> output = process.StandardOutput.ReadToEndAsync(), error = process.StandardError.ReadToEndAsync();
         // Once authorization starts, finish the atomic installer; caller cancellation cannot abandon half an installation.
         await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); await Task.WhenAll(output, error).ConfigureAwait(false);
-        if (process.ExitCode != 0) throw new IOException("Administrator authorization was canceled or helper installation failed.");
+        if (process.ExitCode != 0) throw new RuntimeFailureException(error.Result.Contains("-128", StringComparison.Ordinal)
+            || error.Result.Contains("-60007", StringComparison.Ordinal) ? "authorization.denied" : "helper.install");
     }
     private static string AppleScriptLiteral(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)
         .Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal) + "\"";

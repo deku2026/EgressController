@@ -40,7 +40,7 @@ public sealed class ShadowsocksObfsTests
         Assert.False(stream.TryGetProperty("wsSettings", out _)); Assert.False(stream.TryGetProperty("security", out _));
         var header = stream.GetProperty("rawSettings").GetProperty("header"); Assert.Equal("http", header.GetProperty("type").GetString());
         Assert.Equal("camouflage.example.test:8443", header.GetProperty("request").GetProperty("headers").GetProperty("Host")[0].GetString());
-        Assert.Single(json.RootElement.GetProperty("inbounds").EnumerateArray()); Assert.False(json.RootElement.TryGetProperty("api", out _));
+        Assert.Equal(2, json.RootElement.GetProperty("inbounds").GetArrayLength()); Assert.False(json.RootElement.TryGetProperty("api", out _));
         Assert.Equal("tcp,udp", json.RootElement.GetProperty("routing").GetProperty("rules").EnumerateArray().Last().GetProperty("network").GetString());
     }
     [Fact]

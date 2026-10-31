@@ -114,16 +114,18 @@ public sealed class PolicyTests
         Assert.Contains(parsed.Diagnostics, x => x.Code.StartsWith("dns.", StringComparison.Ordinal) || x.Code.StartsWith("tun.", StringComparison.Ordinal) || x.Code.StartsWith("dsl.", StringComparison.Ordinal));
     }
     [Fact]
-    public void CompilerEnforcesThreeExitsAndHasNoProxyOrControlListeners()
+    public void CompilerEnforcesThreeExitsAndOnlyTheOwnedResourceProxyListener()
     {
         var result = XrayConfigCompiler.Compile(Document(), Options()); Assert.True(result.IsSuccess, string.Join(',', result.Diagnostics.Select(x => x.Code)));
         using var json = JsonDocument.Parse(result.Json!); var root = json.RootElement;
         Assert.False(root.TryGetProperty("api", out _)); Assert.False(root.TryGetProperty("fakedns", out _));
-        var inbound = Assert.Single(root.GetProperty("inbounds").EnumerateArray()); Assert.Equal("tun", inbound.GetProperty("protocol").GetString()); Assert.Equal("", inbound.GetProperty("settings").GetProperty("autoOutboundsInterface").GetString()); Assert.False(inbound.TryGetProperty("listen", out _)); Assert.False(inbound.TryGetProperty("port", out _));
+        var inbounds = root.GetProperty("inbounds"); Assert.Equal(2, inbounds.GetArrayLength());
+        var resource = inbounds[1]; Assert.Equal("socks", resource.GetProperty("protocol").GetString()); Assert.Equal("127.0.0.1", resource.GetProperty("listen").GetString()); Assert.Equal(Document().Defaults.ResourceProxyPort, resource.GetProperty("port").GetInt32());
+        var inbound = inbounds[0]; Assert.Equal("tun", inbound.GetProperty("protocol").GetString()); Assert.Equal("", inbound.GetProperty("settings").GetProperty("autoOutboundsInterface").GetString()); Assert.False(inbound.TryGetProperty("listen", out _)); Assert.False(inbound.TryGetProperty("port", out _));
         Assert.Equal("IPOnDemand", root.GetProperty("routing").GetProperty("domainStrategy").GetString());
         var rules = root.GetProperty("routing").GetProperty("rules").EnumerateArray().ToArray();
-        Assert.Equal("dns-upstream", rules[0].GetProperty("ruleTag").GetString());
-        Assert.Equal("system-dns", rules[1].GetProperty("ruleTag").GetString());
+        Assert.Equal("dns-upstream", rules[1].GetProperty("ruleTag").GetString());
+        Assert.Equal("system-dns", rules[2].GetProperty("ruleTag").GetString());
         var app = rules.First(x => x.GetProperty("ruleTag").GetString() == "app-editor"); Assert.Equal("home", app.GetProperty("outboundTag").GetString()); Assert.Equal(2, app.GetProperty("process").GetArrayLength());
         Assert.All(app.GetProperty("process").EnumerateArray(), x => Assert.False(x.GetString()!.EndsWith('/')));
         Assert.Equal("global", rules[^1].GetProperty("ruleTag").GetString()); Assert.StartsWith("node-", rules[^1].GetProperty("outboundTag").GetString());

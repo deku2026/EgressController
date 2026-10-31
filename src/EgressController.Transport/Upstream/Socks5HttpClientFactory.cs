@@ -12,7 +12,7 @@ namespace EgressController.Transport.Upstream;
 /// </summary>
 public static class Socks5HttpClientFactory
 {
-    public static HttpClient Create(int port, string host = "127.0.0.1")
+    public static HttpClient Create(int port, string host = "127.0.0.1", bool allowAutoRedirect = true)
     {
         ValidatePort(port);
         if (string.IsNullOrWhiteSpace(host))
@@ -21,6 +21,8 @@ public static class Socks5HttpClientFactory
         var handler = new SocketsHttpHandler
         {
             UseProxy = false,
+            AllowAutoRedirect = allowAutoRedirect,
+            UseCookies = false,
             ConnectTimeout = TimeSpan.FromSeconds(8),
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
             ConnectCallback = (context, cancellationToken)

@@ -10,7 +10,7 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 **双击打包后的 `Egress.app`，默认进入生产模式。** 打开界面会读取实际 App、网卡和保存的配置；不会仅因打开窗口而启动 TUN。
 
-首次使用：选择两张不同网卡 → 输入 Clash HTTPS 订阅 → 明确选择全局分组及其成员 → 搜索并勾选应用 → 点击“应用并连接”。需要时出现 macOS 管理员授权框，安装受限助手并启动 Xray。停止或退出客户端会恢复网络设置。真实接管请使用 NativeAOT `.app`，不要以 root 身份运行 GUI。
+首次使用：选择两张不同网卡 → 粘贴包含实际节点的本地 Clash YAML → 明确选择全局分组及成员 → 搜索并勾选应用 → 点击“应用并连接”。安装包自带固定版本 Xray；需要时出现 macOS 管理员授权框。连接默认启用 TUN，确认本地代理后再下载缺失规则，最后应用完整分流。停止、退出或准备失败时恢复连接前的网络状态。真实接管请使用完整 NativeAOT `.app`。
 
 `--preview` 才进入隔离 UI；示例 URL 和示例测速只出现在预览中：
 
@@ -18,7 +18,7 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 dotnet run --project src/EgressController.Desktop -- --preview
 ```
 
-订阅/provider、规则和固定版本核心默认通过 macOS 当前静态系统代理下载，未配置代理或明确绕过时使用系统默认网络；优先复用已验证缓存。代理设置和环境覆盖在每次准备操作首次需要下载时冻结，代理故障不会转为直连。资源准备不依赖另一个客户端的 TUN；Xray 实际流量和节点测速仍严格绑定指定物理出口。PAC 暂不执行，会提示配置明确的 HTTP/HTTPS 或 SOCKS 代理。SS 的 `obfs/http` 与 TFO 会保留并转换为 Xray 原生传输，不启动额外插件进程。
+在线订阅、provider 和规则下载统一经 **Egress 自带 Xray → 所选非家宽网卡 → 全局代理分组节点**，不使用系统代理或直连回退。优先使用已验证缓存；默认本地 SOCKS5 端口为 `17890`，可在“设置 → 网络与 TUN”修改。首次没有节点时使用本地 YAML 导入，连接后再在线更新。SS 的 `obfs/http` 与 TFO 保留为 Xray 原生传输。
 
 ## 分组与连接活动
 
@@ -28,17 +28,23 @@ dotnet run --project src/EgressController.Desktop -- --preview
 
 ![连接活动（隔离合成样本）](docs/images/mac-connections.png)
 
-连接流程显示检查策略、准备资源、验证内核、授权助手、确认连接五个阶段，可取消或在失败后重试。关闭其他客户端的 TUN 后，仍可使用其已开启的静态系统代理或本地缓存；若代理服务也停止且直连无法获取缺失资源，则会明确失败，保留已有缓存。
+连接流程显示检查策略、内置 Xray、授权助手、建立 TUN、准备规则、应用分流六个阶段。规则准备期间普通流量暂缓；端口占用、TUN 占用、网卡不可用、授权失败和接管超时都有明确提示与重试入口。
+
+应用搜索支持名称、Bundle ID 和路径；Safari 的系统 Cryptex 应用链接会正确识别并去重。节点搜索支持名称、协议、服务器和所属分组。
+
+![Safari 搜索（隔离样本）](docs/images/mac-safari-search.png)
 
 ## 开发验证与打包
 
 需要 Apple Silicon macOS、.NET 10 SDK、Xcode Command Line Tools 和 CMake：
 
 ```sh
-python3 build/Verify-Mac.py
+# 构建机获取固定发布归档；不会启动 Xray/TUN。
+gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
+python3 build/Verify-Mac.py --version 0.1.1
 ```
 
-**开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、普通/紧凑 UI 截图与交互检查，再打包 GUI 和助手。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
+**开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
 
 产物：`artifacts/package/Egress.app`、`EgressController-osx-arm64.zip` 和 `SHA256SUMS.txt`。使用本地 ad-hoc 签名，未做 Developer ID 签名或公证。本轮自动验收不代表已实测双网卡 TCP/UDP/IPv4/IPv6 出口。
 

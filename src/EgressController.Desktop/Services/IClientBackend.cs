@@ -13,7 +13,7 @@ public sealed record ClientRuntimeState(bool Running, bool Available, bool Helpe
 public sealed record ClientRuleCatalogEntry(string Id, string Name, string Detail, IReadOnlyList<string> Sources);
 public sealed record ClientPreparedResources(IReadOnlyList<RuleSourceBinding> Bindings,
     IReadOnlyDictionary<string, byte[]> Assets, IReadOnlyDictionary<string, GeoRuleSet> Sources);
-public enum ConnectionAttemptStage { Validating, Resources, Core, Authorization, Connecting, Ready }
+public enum ConnectionAttemptStage { Validating, Core, Authorization, Bootstrap, Resources, Connecting, Ready }
 public sealed record ClientOperationProgress(ConnectionAttemptStage Stage, string Detail);
 
 /// <summary>Application services are composed at the entrypoint; views never construct production adapters.</summary>
@@ -41,6 +41,8 @@ public interface IClientBackend : IAsyncDisposable
     Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options,
         CancellationToken cancellationToken = default) => ProbeAsync(document,
             options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);
+    Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task EndConnectionAsync(bool applied) => Task.CompletedTask;
     Task<ApplyResult> ApplyAsync(MacPolicyDocument document, XrayCompileOptions options,
         IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default);
     Task<bool> StopAsync(CancellationToken cancellationToken = default);

@@ -30,7 +30,7 @@ public interface ICoreRuntime
 }
 
 /// <summary>Configuration changes are the only input that can apply a new runtime generation.</summary>
-public sealed class ConfigurationCoordinator(ICoreRuntime core, IRuntimeGenerationStore store, ILifecycleLog log)
+public sealed partial class ConfigurationCoordinator(ICoreRuntime core, IRuntimeGenerationStore store, ILifecycleLog log)
 {
     private readonly SemaphoreSlim _applyLock = new(1, 1);
     public RuntimeGeneration? Applied { get; private set; }
@@ -43,6 +43,7 @@ public sealed class ConfigurationCoordinator(ICoreRuntime core, IRuntimeGenerati
         await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _bootstrapActive = false; _beforeBootstrap = null; // A later preparation cleanup cannot undo an explicit stop.
             Event("runtime.stopping", reason, Applied?.Id);
             // A user stop restores network state without deleting the saved configuration.
             await core.RestoreAsync(null, CancellationToken.None).ConfigureAwait(false);
@@ -122,13 +123,13 @@ public sealed class ConfigurationCoordinator(ICoreRuntime core, IRuntimeGenerati
             }
             return new(ApplyDisposition.Canceled, previousRuntime?.Id, []);
         }
-        catch (Exception)
+        catch (Exception error)
         {
             bool restored = !(runtimeAttempted || publicationAttempted)
                 || await RollbackAsync(previousRuntime, previous, reason, runtimeAttempted).ConfigureAwait(false);
-            Event(restored ? "configuration.failed" : "protection.unavailable", reason, previous?.Id);
+            Event(restored ? "configuration.failed" : "protection.unavailable", reason + (error is RuntimeFailureException diagnosis ? " · " + diagnosis.Code : ""), previous?.Id);
             return new(ApplyDisposition.Failed, Applied?.Id,
-                [new(restored ? "apply.failed" : "apply.rollback-failed", restored
+                [new(restored && error is RuntimeFailureException known ? known.Code : restored ? "apply.failed" : "apply.rollback-failed", restored && error is RuntimeFailureException failure ? failure.Message : restored
                     ? "配置未应用，已保留上一份可用配置。请查看诊断后重试。"
                     : "配置恢复失败，保护不可用。请停止连接并查看诊断。")]);
         }

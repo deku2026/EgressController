@@ -50,6 +50,7 @@ public sealed class DefaultPolicy
     public ExitChoice China { get; set; } = ExitChoice.NonHome;
     public ExitChoice Global { get; set; } = ExitChoice.Proxy("");
     public string ProxyInterface { get; set; } = "nonhome";
+    public int ResourceProxyPort { get; set; } = 17890;
 }
 public sealed class ManagedApplication
 {
@@ -159,6 +160,8 @@ public sealed record GroupSelectionResult(string? NodeId, IReadOnlyList<PolicyDi
 }
 public sealed class XrayCompileOptions
 {
+    // Transient resource preparation: TUN traffic is blocked until complete rules are available.
+    public bool ResourceBootstrap { get; set; }
     public List<InterfaceBinding> Interfaces { get; set; } = [];
     public List<GroupProbe> Probes { get; set; } = [];
     public List<RuleSourceBinding> PreparedRuleSources { get; set; } = [];

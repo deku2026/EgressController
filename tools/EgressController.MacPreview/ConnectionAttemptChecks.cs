@@ -32,6 +32,10 @@ internal static class ConnectionAttemptChecks
         shell.ConnectionAttempt.Begin();
         shell.ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "正在校验本地缓存与资源完整性。可取消准备，已保存配置会继续保留。"));
         SaveSizes(window, directory, "attempt-production-setup-resources"); AssertProductionText(window);
+        shell.ConnectionAttempt.Begin(); shell.ConnectionAttempt.Observe(new(ConnectionAttemptStage.Bootstrap, "建立 TUN 与 Xray 本地代理。"));
+        shell.ConnectionAttempt.Fail(RuntimeFailures.Message("proxy.port-in-use"));
+        SaveSizes(window, directory, "attempt-port-conflict");
+        shell.ConnectionAttempt.Begin(); shell.ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "通过内置 Xray · 非家宽分组节点 · SOCKS5 127.0.0.1:17890 下载规则。"));
         shell.OnboardingVisible = false;
         SaveSizes(window, directory, "attempt-resources");
         shell.ConnectionAttempt.Fail("资源未通过完整性校验。已验证缓存与原有配置已保留，请检查后重试。");
@@ -51,10 +55,10 @@ internal static class ConnectionAttemptChecks
     {
         int retries = 0; ConnectionAttemptViewModel? model = null;
         model = new(() => { retries++; model!.Begin(); });
-        for (int phase = 0; phase < 5; phase++)
+        for (int phase = 0; phase < 6; phase++)
         {
             model.Begin(); model.Observe(new((ConnectionAttemptStage)phase, "受控的阶段进度。"));
-            Check(model.IsVisible && model.IsRunning && !model.HasFailed && model.Steps.Select(step => step.State).SequenceEqual(Enumerable.Range(0, 5).Select(index => index < phase ? "完成" : index == phase ? "进行中" : "等待")), "Five-phase progress did not distinguish completed/current/pending steps.");
+            Check(model.IsVisible && model.IsRunning && !model.HasFailed && model.Steps.Select(step => step.State).SequenceEqual(Enumerable.Range(0, 6).Select(index => index < phase ? "完成" : index == phase ? "进行中" : "等待")), "Six-phase progress did not distinguish completed/current/pending steps.");
             if (phase > 0) { string title = model.Title; model.Observe(new(ConnectionAttemptStage.Validating, "迟到的旧进度")); Check(model.Title == title, "A late earlier phase moved progress backwards."); }
             model.Fail("本阶段未通过校验，已保留此前正常文件。");
             string[] states = model.Steps.Select(step => step.State).ToArray(); string detail = model.Detail;
@@ -66,7 +70,7 @@ internal static class ConnectionAttemptChecks
             model.Fail("已取消准备。", canceled: true);
             Check(!model.IsRunning && model.Title.Contains("取消", StringComparison.Ordinal), "Cancellation did not terminate a phase.");
         }
-        Check(retries == 5, "Pure retry action did not execute once per failed phase.");
+        Check(retries == 6, "Pure retry action did not execute once per failed phase.");
         model.Begin(); model.Complete(); string completed = model.Detail;
         model.Observe(new(ConnectionAttemptStage.Resources, "迟到的资源回调"));
         Check(!model.IsRunning && !model.HasFailed && !model.Title.Contains("模拟", StringComparison.Ordinal) && model.Detail == completed && model.Steps.All(step => step.State == "完成"), "Production completion leaked preview wording or accepted stale progress.");
@@ -78,7 +82,7 @@ internal static class ConnectionAttemptChecks
         var point = retry.TranslatePoint(new Point(retry.Bounds.Width / 2, retry.Bounds.Height / 2), window) ?? throw new InvalidOperationException("Missing retry control coordinates.");
         window.MouseMove(point); Save(window, Path.Combine(directory, "attempt-retry-control-hover.png"));
         window.MouseDown(point, MouseButton.Left); Save(window, Path.Combine(directory, "attempt-retry-control-pressed.png")); window.MouseUp(point, MouseButton.Left); Flush();
-        Check(retries == 6 && model.IsRunning && !model.HasFailed, "Compiled retry binding did not receive real pointer input.");
+        Check(retries == 7 && model.IsRunning && !model.HasFailed, "Compiled retry binding did not receive real pointer input.");
         window.Close();
     }
     private static void AssertProductionText(Window window)
