@@ -59,6 +59,24 @@ internal static class ProductionCompositionChecks
         Save(window,Path.Combine(directory,"production-unavailable.png"));AssertNoPreviewText(window);
         loadedBackend.Runtime=new(true,true,true,"已确认后台服务与 TUN 接管。");Complete(vm.RefreshStatusAsync());Check(vm.PreviewRunning,"A fresh confirmed status did not recover the production state.");
         window.Close();Complete(vm.DisposeAsync().AsTask());
+
+        var offlineBackend = new InjectedBackend(true) { Offline = true, AllowApply = true, ResourcePause = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var offline = new ShellViewModel(offlineBackend); Complete(offline.InitializeAsync()); offline.OnboardingVisible = true; offline.SetupStep = 4;
+        var offlineWindow = new MainWindow { DataContext = offline, Width = 1260, Height = 860 }; offlineWindow.Show();
+        var connecting = offline.ApplyCommand.ExecuteAsync(); Flush();
+        Check(offlineBackend.RuntimeMutationCalls == 1 && offline.ConnectionAttempt.Steps[3].State == "完成"
+            && offline.ConnectionAttempt.Steps[4].State == "进行中", "Offline interface flags prevented TUN before resource preparation.");
+        Save(offlineWindow, Path.Combine(directory, "tun-offline-started-normal.png"));
+        offlineWindow.Width = 980; offlineWindow.Height = 700;
+        Save(offlineWindow, Path.Combine(directory, "tun-offline-started-compact.png"));
+        offlineBackend.ResourcePause.SetException(new ResourcePreparationException("rules-cn", "xray-socks5:127.0.0.1:17890", 443, PreparationStage.Downloading, false));
+        Complete(connecting);
+        Check(offline.ConnectionAttempt.Steps[3].State == "完成" && offline.ConnectionAttempt.Steps[4].State == "需处理"
+            && offline.ConnectionAttempt.Detail.Contains("非家宽", StringComparison.Ordinal), "Outbound resource failure was incorrectly attributed to TUN creation.");
+        Save(offlineWindow, Path.Combine(directory, "tun-offline-resource-failure-compact.png"));
+        offlineBackend.ResourcePause = null; Complete(offline.ApplyCommand.ExecuteAsync());
+        Check(offline.PreviewRunning && !offline.ConnectionAttempt.HasFailed, "Retry with cached resources was gated on offline physical links.");
+        offlineWindow.Close(); Complete(offline.DisposeAsync().AsTask());
     }
     private static void AssertNoPreviewText(Window window)
     {
@@ -89,12 +107,17 @@ internal static class ProductionCompositionChecks
         public Exception? SubscriptionFailure { get; set; }
         public int SubscriptionCalls { get; private set; }
         public int RuntimeMutationCalls { get; private set; }
-        public Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken=default)=>Task.FromResult(new ClientBootstrap(_document,[new("test-home","en5","Studio Ethernet","有线接口",true),new("test-other","en0","Travel Wi-Fi","无线接口",true)],Applications(),populated,Runtime));
+        public bool Offline { get; init; }
+        public bool AllowApply { get; init; }
+        public TaskCompletionSource<ClientPreparedResources>? ResourcePause { get; set; }
+        private IProgress<ClientOperationProgress>? _progress;
+        public void SetProgressSink(IProgress<ClientOperationProgress>? progress) => _progress = progress;
+        public Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken=default)=>Task.FromResult(new ClientBootstrap(_document,[new("test-home","en5","Studio Ethernet",Offline ? "未连接" : "有线接口",!Offline),new("test-other","en0","Travel Wi-Fi",Offline ? "未连接" : "无线接口",!Offline)],Applications(),populated,Runtime));
         private static MacPolicyDocument Document(bool populated)
         {
             var document=new MacPolicyDocument();if(!populated)return document;
             document.Interfaces.HomeId="test-home";document.Interfaces.NonHomeId="test-other";
-            document.Nodes.Add(new(){Id="test-proxy",Name="Workspace Node",Protocol=NodeProtocol.Vless,Server="node.example.invalid",Port=443,UserId="11111111-1111-4111-8111-111111111111",Tls=true});document.Defaults.Global=ExitChoice.Proxy("test-proxy");
+            document.Nodes.Add(new(){Id="test-proxy",Name="Workspace Node",Protocol=NodeProtocol.Vless,Server="node.example.invalid",Port=443,UserId="11111111-1111-4111-8111-111111111111",Tls=true});document.Groups.Add(new() { Id = "test-global", Name = "Global", Kind = GroupKind.Select, MemberIds = ["test-proxy"], SelectedMemberId = "test-proxy" });document.Defaults.Global=ExitChoice.Proxy("test-global");
             document.Applications.Add(new(){Id="test-editor",Name="Sample Editor",BundlePath="/Applications/Sample Editor.app",PrimaryExecutable="/Applications/Sample Editor.app/Contents/MacOS/Sample Editor",ExecutablePaths=["/Applications/Sample Editor.app/Contents/MacOS/Sample Editor"],Via=ExitChoice.NonHome});return document;
         }
         private static IReadOnlyList<ClientApplication> Applications()=>[new("test-editor","Sample Editor","vscode","开发工具","/Applications/Sample Editor.app","/Applications/Sample Editor.app/Contents/MacOS/Sample Editor",[],false)];
@@ -111,10 +134,21 @@ internal static class ProductionCompositionChecks
             const string yaml = "proxies: [{name: Direct node, type: socks5, server: node.example.invalid, port: 1080}]\nproxy-groups: [{name: Global, type: select, proxies: [Direct node]}]";
             return Task.FromResult(SubscriptionReconciler.Merge(current, "direct-first", ClashSubscriptionImporter.Import(yaml, "direct-first")));
         }
-        public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=>PreparationFailure is {} failure?Task.FromException<ClientPreparedResources>(failure):_fixtures.PrepareResourcesAsync(document,cancellationToken);
+        public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=> ResourcePause?.Task ?? (PreparationFailure is {} failure?Task.FromException<ClientPreparedResources>(failure):_fixtures.PrepareResourcesAsync(document,cancellationToken));
         public Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document,InterfaceBinding binding,CancellationToken cancellationToken=default)=>Task.FromResult<IReadOnlyList<GroupProbe>>([]);
-        public Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) { RuntimeMutationCalls++; return Task.CompletedTask; }
-        public Task<ApplyResult> ApplyAsync(MacPolicyDocument document,XrayCompileOptions options,IReadOnlyDictionary<string,byte[]> assets,CancellationToken cancellationToken=default)=>Task.FromResult(new ApplyResult(ApplyDisposition.Rejected,null,[new("test.only","This injected composition never starts a network core.")]));
+        public Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) {
+            RuntimeMutationCalls++;
+            if (Offline) Check(options.Interfaces.Count == 2, "Offline interface identities were removed before TUN compilation.");
+            var bootstrap = XrayConfigCompiler.Compile(document, new() { Interfaces = options.Interfaces, ResourceBootstrap = true });
+            Check(bootstrap.IsSuccess, "Valid offline interfaces prevented bootstrap compilation.");
+            _progress?.Report(new(ConnectionAttemptStage.Bootstrap, "正在建立 TUN；物理出口在线状态单独处理。"));
+            return Task.CompletedTask;
+        }
+        public Task<ApplyResult> ApplyAsync(MacPolicyDocument document,XrayCompileOptions options,IReadOnlyDictionary<string,byte[]> assets,CancellationToken cancellationToken=default){
+            if (!AllowApply) return Task.FromResult(new ApplyResult(ApplyDisposition.Rejected,null,[new("test.only","This injected composition never starts a network core.")]));
+            Runtime = new(true, true, true, "后台服务已确认接管。");
+            return Task.FromResult(new ApplyResult(ApplyDisposition.Applied,"synthetic-offline",[]));
+        }
         public Task<bool> StopAsync(CancellationToken cancellationToken=default){RuntimeMutationCalls++;Runtime=Runtime with{Running=false};return Task.FromResult(true);}
         public Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken=default)=>StatusFailure is {} failure?Task.FromException<ClientRuntimeState>(failure):Task.FromResult(Runtime);
         public Task SaveDraftAsync(MacPolicyDocument document,CancellationToken cancellationToken=default){_document=document;return Task.CompletedTask;}

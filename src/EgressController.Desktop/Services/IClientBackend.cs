@@ -42,6 +42,7 @@ public interface IClientBackend : IAsyncDisposable
         CancellationToken cancellationToken = default) => ProbeAsync(document,
             options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);
     Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task PrepareResourceProxyAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task EndConnectionAsync(bool applied) => Task.CompletedTask;
     Task<ApplyResult> ApplyAsync(MacPolicyDocument document, XrayCompileOptions options,
         IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default);

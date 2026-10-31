@@ -162,6 +162,8 @@ public sealed class XrayCompileOptions
 {
     // Transient resource preparation: TUN traffic is blocked until complete rules are available.
     public bool ResourceBootstrap { get; set; }
+    // Startup may close the resource route while automatic groups await observations after TUN creation.
+    public bool DeferAutomaticGroupSelection { get; set; }
     public List<InterfaceBinding> Interfaces { get; set; } = [];
     public List<GroupProbe> Probes { get; set; } = [];
     public List<RuleSourceBinding> PreparedRuleSources { get; set; } = [];

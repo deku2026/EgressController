@@ -67,7 +67,8 @@ public sealed class ProductionModeTests
     [Theory]
     [InlineData("proxy.port-in-use")]
     [InlineData("tun.in-use")]
-    [InlineData("interface.unavailable")]
+    [InlineData("interface.identity")]
+    [InlineData("dns.snapshot")]
     [InlineData("core.permission")]
     [InlineData("tun.timeout")]
     public async Task PhysicalStartupFailureSurvivesIpcWithoutRawExceptionText(string code)

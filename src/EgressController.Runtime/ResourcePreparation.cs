@@ -49,7 +49,7 @@ public sealed class ResourcePreparationException(string resourceId, string inter
     {
         string label = stage switch { PreparationStage.CheckingCache => "检查缓存", PreparationStage.Downloading => "下载", PreparationStage.Validating => "验证", PreparationStage.Publishing => "保存", _ => "准备" };
         string help = exit.StartsWith("subscription-direct:", StringComparison.Ordinal) ? "订阅使用非家宽物理网卡直连。请检查订阅地址、网络与 DNS 后重试；不会改用系统代理或 Xray。" : failure is { } reason ? new ResourceProxyConfigurationException(reason).Message
-            : exit.StartsWith("xray-socks5:", StringComparison.Ordinal) ? $"请检查 Xray TUN、非家宽分组节点和本地代理 {exit}；不会改走系统代理或直连。" : exit == "system-proxy" ? "请检查当前系统代理或默认网络后重试；可用缓存已保留。" : "请检查所选物理接口后重试；不会切换出口。";
+            : exit.StartsWith("xray-socks5:", StringComparison.Ordinal) ? $"请检查所选非家宽网卡、分组节点和 Xray 本地代理 {exit}；不会改走系统代理或直连。" : exit == "system-proxy" ? "请检查当前系统代理或默认网络后重试；可用缓存已保留。" : "请检查所选物理接口后重试；不会切换出口。";
         return $"资源 {id} {label}{(timeout ? "超时" : "失败")}。{help}";
     }
 }

@@ -130,7 +130,7 @@ public sealed class ProductionClientBackend : IClientBackend
     }
     public async Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, InterfaceBinding binding, CancellationToken cancellationToken = default)
     {
-        await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
+        await CheckInterfaceIdentityAsync(binding, cancellationToken).ConfigureAwait(false);
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         var options = new XrayCompileOptions { Interfaces = interfaces.Where(Physical).Select(item => new InterfaceBinding(item.ServiceId, item.BsdName)).ToList() };
@@ -141,9 +141,9 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         if (!RequiredGroupProbes.NeedsProbes(document, options)) return options.Probes.ToArray();
         var binding = options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId);
-        await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
-        _preparationStage = ConnectionAttemptStage.Core;
-        Report(ConnectionAttemptStage.Core, "只检查当前策略使用的自动分组；复用有效结果，不测速无关节点。");
+        await CheckInterfaceIdentityAsync(binding, cancellationToken).ConfigureAwait(false);
+        _preparationStage = ConnectionAttemptStage.Resources;
+        Report(ConnectionAttemptStage.Resources, "TUN 已建立，正在检查所选自动分组；出口绑定失败只影响该连接，不会自动换卡。");
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
         return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe required outbound groups without TUN"), Path.Combine(_root, "probes")))
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requiredOnly: true).ConfigureAwait(false);
@@ -152,11 +152,8 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         Report(ConnectionAttemptStage.Core, "验证内置 Xray；不需要下载内核。");
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
-        foreach (string id in new[] { document.Interfaces.HomeId, document.Interfaces.NonHomeId })
-        {
-            var binding = options.Interfaces.SingleOrDefault(item => item.StableId == id) ?? throw new RuntimeFailureException("interface.unavailable");
-            await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
-        }
+        // TUN creation does not depend on physical link/IP availability. The helper verifies
+        // configured service identities; Xray binds each outbound only when it opens a socket.
         _launch = new(core.ExecutablePath, core.Sha256, document.Interfaces.HomeId, document.Interfaces.NonHomeId);
         await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
         var current = await _helper.InspectAsync(cancellationToken).ConfigureAwait(false);
@@ -166,6 +163,8 @@ public sealed class ProductionClientBackend : IClientBackend
         Report(ConnectionAttemptStage.Bootstrap, $"建立 TUN 与 Xray SOCKS5 127.0.0.1:{document.Defaults.ResourceProxyPort}；规则未就绪前暂停普通流量。");
         await _coordinator.BeginResourceBootstrapAsync(document, options, cancellationToken).ConfigureAwait(false);
     }
+    public Task PrepareResourceProxyAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
+        => _coordinator.CompleteResourceBootstrapAsync(document, options, cancellationToken);
     public Task EndConnectionAsync(bool applied) => _coordinator.EndResourceBootstrapAsync(applied);
     public async Task<ApplyResult> ApplyAsync(MacPolicyDocument document, XrayCompileOptions options, IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default)
     {
@@ -178,8 +177,6 @@ public sealed class ProductionClientBackend : IClientBackend
             if (!compiled.IsSuccess) return new(ApplyDisposition.Rejected, null, compiled.Diagnostics);
             var diagnostics = RuntimeAssetValidator.Validate(compiled.Json!, assets);
             if (diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error)) return new(ApplyDisposition.Rejected, null, diagnostics);
-            var binding = options.Interfaces.Single(item => item.StableId == snapshot.Interfaces.NonHomeId);
-            await CheckBindingAsync(binding, cancellationToken).ConfigureAwait(false);
             _preparationStage = ConnectionAttemptStage.Core;
             Report(ConnectionAttemptStage.Core, "验证安装包内置 Xray 与本地核心缓存。");
             var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
@@ -276,11 +273,11 @@ public sealed class ProductionClientBackend : IClientBackend
     private Task<PreparedCoreRelease> PrepareCoreAsync(CancellationToken token) => new XrayCoreReleaseManager(ResourceTransport(), _cache,
         Path.Combine(_root, "cores"), _ => ValueTask.FromResult(ResourceExitSnapshot.Xray(17890)))
         .PrepareBundledAsync(Path.Combine(AppContext.BaseDirectory, "core", "Xray-macos-arm64-v8a.zip"), token);
-    private async Task CheckBindingAsync(InterfaceBinding binding, CancellationToken cancellationToken)
+    private async Task CheckInterfaceIdentityAsync(InterfaceBinding binding, CancellationToken cancellationToken)
     {
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
-        if (!interfaces.Any(item => Physical(item) && item.ServiceId == binding.StableId && item.BsdName == binding.BsdName && item.IsActive))
-            throw new RuntimeFailureException("interface.unavailable");
+        if (!interfaces.Any(item => Physical(item) && item.ServiceId == binding.StableId && item.BsdName == binding.BsdName))
+            throw new RuntimeFailureException("interface.identity");
     }
     private static bool Physical(MacNetworkInterface item) => !item.BsdName.StartsWith("utun", StringComparison.Ordinal) && item.BsdName != "lo0";
     private static ClientApplication MapApplication(MacApplication item)

@@ -45,11 +45,8 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             content.Add(name, bytes);
         }
         var interfaces = new NativeMacPlatform(LiveOperationGate.ForExplicitLiveUse()).ReadInterfaces();
-        string home = interfaces.SingleOrDefault(item => item.ServiceId == plan.HomeServiceId && item.IsActive)?.BsdName
-            ?? throw new RuntimeFailureException("interface.unavailable");
-        string nonHome = interfaces.SingleOrDefault(item => item.ServiceId == plan.NonHomeServiceId && item.IsActive)?.BsdName
-            ?? throw new RuntimeFailureException("interface.unavailable");
-        var validation = MacHelperConfigurationValidator.Validate(content["xray.json"], home, nonHome);
+        var selected = MacRuntimeInterfaces.Resolve(interfaces, plan.HomeServiceId, plan.NonHomeServiceId);
+        var validation = MacHelperConfigurationValidator.Validate(content["xray.json"], selected.Home, selected.NonHome);
         if (!validation.IsValid || RuntimeAssetValidator.Validate(System.Text.Encoding.UTF8.GetString(content["xray.json"]), content)
             .Any(diagnostic => diagnostic.Severity == EgressController.Policy.DiagnosticSeverity.Error)) throw new InvalidDataException("Runtime configuration failed the privilege allow-list.");
         string root = Path.Combine(MacHelperPaths.PrivateRoot, "generations"); HostFiles.PrivateDirectory(native, root);
@@ -98,7 +95,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             { throw new RuntimeFailureException("core.permission"); }
         }
         var snapshots = native.ReadDnsSnapshots().Where(snapshot => snapshot.ServiceId == plan.HomeServiceId || snapshot.ServiceId == plan.NonHomeServiceId).ToArray();
-        if (snapshots.Length != 2) throw new RuntimeFailureException("interface.unavailable");
+        if (snapshots.Length != 2) throw new RuntimeFailureException("dns.snapshot");
         var dns = new MacDnsRecoverySnapshot(1, Guid.NewGuid(), DateTimeOffset.UtcNow, snapshots); dns.Validate();
         HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns), HelperHostJson.Default.RecoveryJournal));
         _dnsRestored = false; _failure = null;

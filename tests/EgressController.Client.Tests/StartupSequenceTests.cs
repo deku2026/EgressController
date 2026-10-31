@@ -43,6 +43,36 @@ public sealed class StartupSequenceTests
         var group = Assert.Single(shell.Document.Groups, item => item.Id == "local-bootstrap-group"); Assert.Null(group.SelectedMemberId); Assert.Equal(GroupKind.Select, group.Kind);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task OfflinePhysicalLinksDoNotPreventTunOrApplyingCachedPolicy(bool homeOnline, bool nonHomeOnline)
+    {
+        var backend = new Backend("") { HomeOnline = homeOnline, NonHomeOnline = nonHomeOnline };
+        var shell = new ShellViewModel(backend); await shell.InitializeAsync();
+        Assert.Equal(2, shell.CompileOptions().Interfaces.Count);
+        await shell.ApplyPreviewAsync();
+        Assert.Equal(new[] { "bootstrap", "rules", "apply", "finish" }, backend.Calls);
+        Assert.True(shell.PreviewRunning); Assert.False(shell.ConnectionAttempt.HasFailed);
+        Assert.Contains("en0", shell.GeneratedConfig); Assert.Contains("en5", shell.GeneratedConfig);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AutomaticGroupNetworkWorkRunsAfterTunAndErrorsBelongToResources(bool failProbe)
+    {
+        var backend = new Backend("") { AutomaticGroup = true, FailProbe = failProbe, NonHomeOnline = false };
+        var shell = new ShellViewModel(backend); await shell.InitializeAsync();
+        try { await shell.ApplyPreviewAsync(); } catch (IOException) { }
+        Assert.Equal(new[] { "bootstrap", "probes" }, backend.Calls.Take(2));
+        Assert.Equal(failProbe ? "restore" : "finish", backend.Calls[^1]);
+        Assert.Equal("完成", shell.ConnectionAttempt.Steps[3].State);
+        if (failProbe) Assert.Equal("需处理", shell.ConnectionAttempt.Steps[4].State);
+        else Assert.False(shell.ConnectionAttempt.HasFailed);
+    }
+
     private sealed class Backend(string failure) : IClientBackend
     {
         public List<string> Calls { get; } = [];
@@ -50,6 +80,10 @@ public sealed class StartupSequenceTests
         public DateTimeOffset Now => DateTimeOffset.UtcNow;
         public string LogDirectory => "/synthetic/logs";
         private bool _running;
+        public bool HomeOnline { get; init; } = true;
+        public bool NonHomeOnline { get; init; } = true;
+        public bool AutomaticGroup { get; init; }
+        public bool FailProbe { get; init; }
         public Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken = default)
         {
             var document = new MacPolicyDocument
@@ -59,10 +93,16 @@ public sealed class StartupSequenceTests
                 Nodes = [new() { Id = "node", Name = "Node", Server = "proxy.example.invalid", Protocol = NodeProtocol.Vless, Tls = true, Port = 443, UserId = "11111111-1111-4111-8111-111111111111" }],
                 Applications = [new() { Id = "safari", Name = "Safari", BundleIdentifier = "com.apple.Safari", BundlePath = "/Applications/Safari.app", PrimaryExecutable = "/Applications/Safari.app/Contents/MacOS/Safari", ExecutablePaths = ["/Applications/Safari.app/Contents/MacOS/Safari"], Via = ExitChoice.Home }]
             };
-            return Task.FromResult(new ClientBootstrap(document, [new("home", "en0", "Ethernet", "", true), new("other", "en5", "Wi-Fi", "", true)], [], true, new(false, true, true, "Stopped")));
+            if (AutomaticGroup) { document.Groups[0].Kind = GroupKind.UrlTest; document.Groups[0].TestUrl = "https://probe.example.invalid/"; }
+            return Task.FromResult(new ClientBootstrap(document, [new("home", "en0", "Ethernet", "", HomeOnline), new("other", "en5", "Wi-Fi", "", NonHomeOnline)], [], true, new(false, true, true, "Stopped")));
         }
         public Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
         { Calls.Add("bootstrap"); if (failure == "bootstrap") throw new RuntimeFailureException("proxy.port-in-use"); return Task.CompletedTask; }
+        public Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
+        {
+            Calls.Add("probes"); if (FailProbe) throw new IOException("Synthetic outbound failure");
+            return Task.FromResult<IReadOnlyList<GroupProbe>>([new("node", true, 20, Now, "https://probe.example.invalid/")]);
+        }
         public Task EndConnectionAsync(bool applied) { Calls.Add(applied ? "finish" : "restore"); return Task.CompletedTask; }
         public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
         {

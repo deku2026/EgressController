@@ -96,6 +96,67 @@ public sealed class ResourceBootstrapTests
         Assert.Equal("core.bundle", error.Code); Assert.Equal(0, transport.RequestCount); Assert.False(Directory.Exists(path));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task TunStartsBeforeAutomaticSelectionAndBothPhasesRestoreOriginalGeneration(bool existing, bool failSecondApply)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var core = new MockCoreRuntime(); var store = new InMemoryGenerationStore();
+        var coordinator = new ConfigurationCoordinator(core, store, new BoundedLifecycleLog());
+        var policy = ConfigurationTests.Policy(); var options = ConfigurationTests.Options();
+        if (existing) await coordinator.ApplyAsync(policy, options, ConfigurationTests.Assets(), "previous", token);
+        var original = coordinator.Applied;
+        policy.Groups.Add(new() { Id = "auto", Name = "Auto", Kind = GroupKind.UrlTest, MemberIds = ["node-1"], TestUrl = "https://probe.example.invalid/" });
+        policy.Defaults.Global = ExitChoice.Proxy("auto");
+        await coordinator.BeginResourceBootstrapAsync(policy, options, token);
+        Assert.Equal("blocked", (string?)JsonNode.Parse(core.Current!.XrayJson)!["routing"]!["rules"]![0]!["outboundTag"]);
+        Assert.DoesNotContain("ext:", core.Current.XrayJson);
+        Assert.Equal(original, await store.ReadCurrentAsync(token));
+        Assert.False(XrayConfigCompiler.Compile(policy, options).IsSuccess);
+        options.Probes = [new("node-1", true, 20, options.Now, "https://probe.example.invalid/")];
+        core.FailApply = failSecondApply;
+        if (failSecondApply) await Assert.ThrowsAsync<IOException>(() => coordinator.CompleteResourceBootstrapAsync(policy, options, token));
+        else
+        {
+            await coordinator.CompleteResourceBootstrapAsync(policy, options, token);
+            Assert.Equal("node-1", (string?)JsonNode.Parse(core.Current!.XrayJson)!["routing"]!["rules"]![0]!["outboundTag"]);
+            int count = core.ApplyCount;
+            await coordinator.CompleteResourceBootstrapAsync(policy, options, token);
+            Assert.Equal(count, core.ApplyCount);
+        }
+        await coordinator.EndResourceBootstrapAsync(false);
+        Assert.Equal(original, core.Current); Assert.Equal(original, await store.ReadCurrentAsync(token));
+    }
+
+    [Fact]
+    public async Task ExplicitStopDuringProbeCannotBeUndoneByLateResourcePreparation()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var core = new MockCoreRuntime(); var coordinator = new ConfigurationCoordinator(core, new InMemoryGenerationStore(), new BoundedLifecycleLog());
+        var policy = ConfigurationTests.Policy(); var options = ConfigurationTests.Options();
+        await coordinator.BeginResourceBootstrapAsync(policy, options, token);
+        Assert.True(await coordinator.StopAsync("Explicit user stop", token));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.CompleteResourceBootstrapAsync(policy, options, token));
+        await coordinator.EndResourceBootstrapAsync(false);
+        Assert.Null(core.Current); Assert.Equal(1, core.ApplyCount);
+    }
+
+    [Fact]
+    public void DeferredAutomaticSelectionCannotWeakenCompletePolicyOrMissingManualSelection()
+    {
+        var policy = ConfigurationTests.Policy(); var options = ConfigurationTests.Options();
+        options.DeferAutomaticGroupSelection = true;
+        policy.Groups[0].Kind = GroupKind.UrlTest; policy.Groups[0].TestUrl = "https://probe.example.invalid/";
+        Assert.False(XrayConfigCompiler.Compile(policy, options).IsSuccess);
+        options.ResourceBootstrap = true;
+        Assert.True(XrayConfigCompiler.Compile(policy, options).IsSuccess);
+        policy.Groups[0].Kind = GroupKind.Select; policy.Groups[0].SelectedMemberId = null;
+        Assert.False(XrayConfigCompiler.Compile(policy, options).IsSuccess);
+    }
+
     private sealed class Handler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

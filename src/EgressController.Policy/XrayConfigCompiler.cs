@@ -27,6 +27,9 @@ public static partial class XrayConfigCompiler
         {
             if (selections.TryGetValue(id, out var found)) return found;
             var selected = GroupSelector.Resolve(id, doc, options.Probes, options.Now, options.ProbeMaxAge);
+            if (options.ResourceBootstrap && options.DeferAutomaticGroupSelection && !selected.IsSuccess
+                && selected.Diagnostics.Count > 0 && selected.Diagnostics.All(item => item.Code == "group.probes"))
+                return "blocked"; // No first-node substitute, direct fallback, or synthetic observation.
             diagnostics.AddRange(selected.Diagnostics);
             if (selected.NodeId is not { } nodeId) return null;
             selections[id] = nodeId;

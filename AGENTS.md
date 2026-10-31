@@ -6,6 +6,7 @@ The active product is a native Avalonia/.NET macOS client with Xray-core as its 
 
 - Apple Silicon macOS comes first. Keep compiled XAML bindings, NativeAOT and macOS native window controls. No WebView.
 - Applications, domain sets and IP sets share three exits: home, non-home, or a specified proxy group. Route entrypoints never choose individual nodes; manual group membership may select nodes or nested groups.
+- TUN startup must not require physical links or IP addresses to be online. Verify configured interface identity independently; bind only when sending traffic, fail that connection without switching exits. Establish TUN before automatic-group probes and rule downloads.
 - User application rules precede user domain/IP sets, then China domain/IP defaults to non-home; all other TCP/UDP requires a global proxy. Proxy server connections use non-home only. Failed binding fails the connection; never silently choose another interface.
 - Clash YAML supplies nodes/groups/providers only. Never import its listeners, DNS, TUN, controller or route policy. Unsupported protocols/plugins/group semantics need explicit diagnostics; never silently drop parameters.
 - Typed policy and versioned YAML DSL are the facts; Xray JSON and GeoSite/GeoIP DAT are generated artifacts. Stable IDs survive renaming and subscription reordering. Retain unresolved selections for explicit repair.

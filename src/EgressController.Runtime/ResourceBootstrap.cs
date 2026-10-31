@@ -8,11 +8,17 @@ public sealed partial class ConfigurationCoordinator
     private RuntimeGeneration? _beforeBootstrap;
     private bool _bootstrapActive;
 
-    public async Task BeginResourceBootstrapAsync(MacPolicyDocument document, XrayCompileOptions options,
-        CancellationToken cancellationToken = default)
+    public Task BeginResourceBootstrapAsync(MacPolicyDocument document, XrayCompileOptions options,
+        CancellationToken cancellationToken = default) => ApplyResourceBootstrapAsync(document, options, false, cancellationToken);
+
+    public Task CompleteResourceBootstrapAsync(MacPolicyDocument document, XrayCompileOptions options,
+        CancellationToken cancellationToken = default) => ApplyResourceBootstrapAsync(document, options, true, cancellationToken);
+
+    private async Task ApplyResourceBootstrapAsync(MacPolicyDocument document, XrayCompileOptions options,
+        bool completing, CancellationToken cancellationToken)
     {
         var bootstrapOptions = new XrayCompileOptions { Interfaces = options.Interfaces.ToList(), Probes = options.Probes.ToList(),
-            Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, ResourceBootstrap = true };
+            Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, ResourceBootstrap = true, DeferAutomaticGroupSelection = !completing };
         var compiled = XrayConfigCompiler.Compile(document, bootstrapOptions);
         if (!compiled.IsSuccess) throw new InvalidDataException(string.Join(" ", compiled.Diagnostics.Select(item => item.Message)));
         string policy = PolicyYaml.Write(document);
@@ -21,12 +27,13 @@ public sealed partial class ConfigurationCoordinator
         await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_bootstrapActive) throw new InvalidOperationException("A resource preparation already owns the runtime.");
+            if (_bootstrapActive && !completing) throw new InvalidOperationException("A resource preparation already owns the runtime.");
             // A ready, unchanged resource route serves refreshes without touching the running TUN.
             if (Applied is { } active && ResourceRouteIdentity(active.XrayJson) == ResourceRouteIdentity(generation.XrayJson)) return;
-            _beforeBootstrap = Applied;
+            if (completing && !_bootstrapActive) throw new InvalidOperationException("Resource preparation no longer owns the runtime.");
+            if (!_bootstrapActive) _beforeBootstrap = Applied;
             await core.ValidateAsync(generation, cancellationToken).ConfigureAwait(false);
-            Event("configuration.bootstrap", "用户连接：先建立 TUN 与非家宽 Xray 资源代理", generation.Id);
+            Event("configuration.bootstrap", completing ? "TUN 已建立：应用所选分组的资源出口" : "用户连接：先建立 TUN，出口在线状态不作为启动条件", generation.Id);
             _bootstrapActive = true;
             try { await core.ApplyAsync(generation, cancellationToken).ConfigureAwait(false); Applied = generation; }
             catch

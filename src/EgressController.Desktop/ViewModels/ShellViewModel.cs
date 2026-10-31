@@ -58,7 +58,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public string RefreshInventoryLabel => IsPreview ? "显式刷新示例清单" : "刷新固定清单";
     public string WorkspaceSafetyText => IsPreview ? "预览安全模式 · 不接管系统流量" : "Xray 唯一内核 · 出口严格绑定";
     public string SetupPermissionText => IsPreview ? "完全隔离 · 不使用管理员权限" : "启动时请求必要的网络授权";
-    public string SetupApplyDescription => IsPreview ? "当前仅应用到内存模拟环境，真实 TUN 与系统 DNS 保持未启用。" : "先启动内置 Xray TUN，再经非家宽分组节点准备规则并应用分流；失败会恢复连接前状态。";
+    public string SetupApplyDescription => IsPreview ? "当前仅应用到内存模拟环境，真实 TUN 与系统 DNS 保持未启用。" : "TUN 启动不要求物理网卡在线。建立后经所选非家宽节点准备规则；出口失败会明确提示，准备未完成时恢复原网络状态。";
     public string SubscriptionDescription => IsPreview ? "隔离预览使用 example.invalid 示例 URL，读取内存响应；不会访问真实订阅。" : "订阅和节点提供器通过非家宽物理网卡直连，无需启动 Xray 或 TUN。直连失败时请检查订阅地址与网络后重试。";
     public string SubscriptionName => Document.Subscriptions.FirstOrDefault()?.Name ?? "节点订阅";
     public string CatalogDescription => IsPreview ? "先搜索，再明确选择。AI、开发、浏览器与日常应用均可添加。" : "从已安装的应用中搜索并选择，添加时读取完整的固定可执行清单。";
@@ -475,11 +475,11 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     }
     private InterfaceBinding RequireNonHomeBinding(MacPolicyDocument? document = null)
     {
-        var policy = document ?? Document; var binding = _interfaces.FirstOrDefault(item => item.Id == policy.Interfaces.NonHomeId && item.IsActive);
-        if (binding is null) throw new IOException("请选择当前可用的非家宽物理网卡；不会自动切换接口。");
+        var policy = document ?? Document; var binding = _interfaces.FirstOrDefault(item => item.Id == policy.Interfaces.NonHomeId);
+        if (binding is null) throw new RuntimeFailureException("interface.identity");
         return new(binding.Id, binding.BsdName);
     }
-    public XrayCompileOptions CompileOptions(MacPolicyDocument? candidate = null) => new() { Interfaces = _interfaces.Where(item => item.IsActive).Select(item => new InterfaceBinding(item.Id, item.BsdName)).ToList(), Probes = _probes.ToList(), PreparedRuleSources = _prepared.Bindings.ToList(), Now = _backend.Now };
+    public XrayCompileOptions CompileOptions(MacPolicyDocument? candidate = null) => new() { Interfaces = _interfaces.Select(item => new InterfaceBinding(item.Id, item.BsdName)).ToList(), Probes = _probes.ToList(), PreparedRuleSources = _prepared.Bindings.ToList(), Now = _backend.Now };
     private void SetPreparedResources(ClientPreparedResources prepared) { _prepared = prepared; Raise(nameof(SourceStatusText)); }
     public IReadOnlyDictionary<string, byte[]> PreparedAssets() => _prepared.Assets;
     public void CompileDraft() { if (!IsPreview) throw new InvalidOperationException("Use asynchronous production validation."); CompileDraftAsync().GetAwaiter().GetResult(); }
@@ -515,12 +515,14 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             var candidate = CopyDocument(Document); long revision = _revision;
             var policyErrors = PolicyValidator.Validate(candidate).Where(item => item.Severity == DiagnosticSeverity.Error && item.Code != "group.no-observation").ToArray();
             if (policyErrors.Length > 0) { CurrentIssue = string.Join(" ", policyErrors.Select(item => item.Message).Distinct()); ConnectionAttempt.Fail(CurrentIssue); return; }
-            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Core, "验证内置 Xray 与所选节点，随后建立 TUN 和本地代理。"));
+            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Core, "验证内置 Xray，随后请求授权并建立 TUN；无需物理网卡在线。"));
+            await _backend.BeginConnectionAsync(candidate, CompileOptions(candidate), ActionToken);
+            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "TUN 已建立，准备所选代理分组与规则；出口连接失败不会自动换卡。"));
             if (RequiredGroupProbes.NeedsProbes(candidate, CompileOptions(candidate)))
             {
                 var probes = await _backend.PrepareRequiredProbesAsync(candidate, CompileOptions(candidate), ActionToken); _probes.Clear(); _probes.AddRange(probes); RefreshNodeLatencies();
             }
-            await _backend.BeginConnectionAsync(candidate, CompileOptions(candidate), ActionToken);
+            await _backend.PrepareResourceProxyAsync(candidate, CompileOptions(candidate), ActionToken);
             ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "TUN 与本地代理已确认，检查缓存并通过非家宽分组节点下载缺失规则。"));
             SetPreparedResources(await _backend.PrepareResourcesAsync(candidate, ActionToken));
             if (!CompilePrepared(candidate).IsSuccess) { ConnectionAttempt.Fail(CurrentIssue); return; }

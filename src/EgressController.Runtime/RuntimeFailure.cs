@@ -13,10 +13,11 @@ public static class RuntimeFailures
         ["core.bundle"] = "安装包缺少或损坏了内置 Xray。请使用完整的最新 Egress.app；不会联网下载内核来启动自身。",
         ["subscription.interface"] = "订阅需要直连。请先选择当前已连接的非家宽物理网卡，再重试导入；无需启动 Xray 或 TUN。",
         ["subscription.dns"] = "订阅直连所用 DNS 地址无效。请在设置中填写明确的非回环 DNS IP 地址后重试。",
-        ["proxy.not-ready"] = "尚未确认 Egress 自带的 Xray TUN 与本地代理。请先导入本地节点、选择非家宽网卡和全局分组，然后连接。",
+        ["proxy.not-ready"] = "尚未确认 Egress 自带的 Xray TUN 与本地代理。请先导入订阅、选择非家宽网卡和全局分组，然后连接。",
         ["proxy.port-in-use"] = "Xray 本地 SOCKS5 端口已被占用。请在「设置 → 网络与 TUN」更改端口，或退出占用程序后重试。",
         ["tun.in-use"] = "所选 TUN 接口已被占用。请退出冲突的 VPN，或在配置中修改 tun.name 后重试。",
-        ["interface.unavailable"] = "所选物理网卡未连接或身份已变化。请检查家宽和非家宽网卡；不会自动改走其他出口。",
+        ["interface.identity"] = "保存的出口网卡身份无法解析。请在设置中重新选择对应网卡；断网本身不阻止 TUN 启动，也不会自动换卡。",
+        ["dns.snapshot"] = "无法备份所选网络服务的 DNS 设置。请检查系统网络服务配置后重试；尚未修改 DNS。",
         ["authorization.denied"] = "管理员授权被取消或拒绝。请重新连接并允许安装网络辅助服务。",
         ["helper.install"] = "网络辅助服务安装失败。请检查管理员权限与完整安装包，再重试。",
         ["helper.missing"] = "当前目录缺少网络辅助服务。请使用完整 Egress.app 连接；Rider 仍可编译并启动界面。",
@@ -25,7 +26,7 @@ public static class RuntimeFailures
         ["core.validation-timeout"] = "内置 Xray 配置检查超时。请检查节点配置及本地安全软件后重试。",
         ["core.configuration"] = "内置 Xray 拒绝了生成配置。请检查节点协议、TUN 设置和规则后重试。",
         ["core.exited"] = "Xray 在确认接管前退出。请检查节点配置、端口和 TUN 占用后重试。",
-        ["tun.timeout"] = "等待 TUN 路由接管超时。请检查冲突 VPN、网卡连接及辅助服务权限。",
+        ["tun.timeout"] = "等待 TUN 路由接管超时。请检查冲突 VPN、TUN 设置及辅助服务权限。",
         ["recovery.failed"] = "连接准备失败后的网络恢复尚未确认。请停止连接并打开日志目录检查；当前不显示健康状态。",
         ["runtime.failed"] = "网络启动未完成。请打开日志目录检查当前故障后重试。"
     };

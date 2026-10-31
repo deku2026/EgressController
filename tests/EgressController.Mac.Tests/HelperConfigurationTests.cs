@@ -21,6 +21,7 @@ public sealed class HelperConfigurationTests
     [InlineData("external-listener")]
     [InlineData("udp")]
     [InlineData("resource-direct")]
+    [InlineData("resource-blocked")]
     [InlineData("tun-proxy-leak")]
     [InlineData("missing-resource-route")]
     [InlineData("dns-tun-leak")]
@@ -34,13 +35,14 @@ public sealed class HelperConfigurationTests
             case "external-listener": root["inbounds"]![1]!["listen"] = "0.0.0.0"; break;
             case "udp": root["inbounds"]![1]!["settings"]!["udp"] = true; break;
             case "resource-direct": rules[0]!["outboundTag"] = "nonhome"; break;
+            case "resource-blocked": rules[0]!["outboundTag"] = "blocked"; break;
             case "tun-proxy-leak": rules.Last()!["outboundTag"] = "node-1"; break;
             case "missing-resource-route": rules.RemoveAt(0); break;
             case "dns-tun-leak": rules[1]!["inboundTag"] = new JsonArray("dns-query", "tun"); break;
             case "empty-rules": rules.Clear(); break;
         }
         var result = MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(root.ToJsonString()), "en0", "en5");
-        Assert.Equal(mutation == "normal", result.IsValid);
+        Assert.Equal(mutation is "normal" or "resource-blocked", result.IsValid);
     }
 
     [Theory]
@@ -157,7 +159,17 @@ public sealed class HelperConfigurationTests
         return result.Json!;
     }
 
-    private static string Generated(bool bootstrap = false)
+    [Fact]
+    public void ClosedAutomaticGroupBootstrapPassesHelperButClosedCompleteResourceRouteDoesNot()
+    {
+        string closed = Generated(bootstrap: true, pendingAutomatic: true);
+        Assert.True(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(closed), "en0", "en5").IsValid);
+        var normal = JsonNode.Parse(Generated())!;
+        normal["routing"]!["rules"]![0]!["outboundTag"] = "blocked";
+        Assert.False(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(normal.ToJsonString()), "en0", "en5").IsValid);
+    }
+
+    private static string Generated(bool bootstrap = false, bool pendingAutomatic = false)
     {
         // Same shape as Runtime.ConfigurationTests, compiled rather than duplicating expected JSON.
         var policy = new MacPolicyDocument
@@ -171,7 +183,8 @@ public sealed class HelperConfigurationTests
                 PrimaryExecutable = "/Applications/Example.app/Contents/MacOS/Example",
                 ExecutablePaths = ["/Applications/Example.app/Contents/MacOS/Example", "/Applications/Example.app/Contents/Helpers/OldHelper"], Via = ExitChoice.Home }]
         };
-        var result = XrayConfigCompiler.Compile(policy, new() { ResourceBootstrap = bootstrap, Interfaces = [new("home-service", "en0"), new("other-service", "en5")] });
+        if (pendingAutomatic) { policy.Groups[0].Kind = GroupKind.UrlTest; policy.Groups[0].TestUrl = "https://probe.example.invalid/"; }
+        var result = XrayConfigCompiler.Compile(policy, new() { ResourceBootstrap = bootstrap, DeferAutomaticGroupSelection = pendingAutomatic, Interfaces = [new("home-service", "en0"), new("other-service", "en5")] });
         Assert.True(result.IsSuccess, string.Join(';', result.Diagnostics.Select(item => item.Message)));
         return result.Json!;
     }

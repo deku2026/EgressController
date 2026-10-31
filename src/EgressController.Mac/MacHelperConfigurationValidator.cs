@@ -162,7 +162,8 @@ public static class MacHelperConfigurationValidator
                 if (ruleTag == "resources")
                 {
                     resourcesRouted = resourceProxy && ruleIndex == 0 && rule.EnumerateObject().Count() == 3
-                        && OneString(rule.GetProperty("inboundTag"), "resources") && ProxyProtocols.Contains(protocols[target]);
+                        && OneString(rule.GetProperty("inboundTag"), "resources")
+                        && (ProxyProtocols.Contains(protocols[target]) || bootstrap && target == "blocked");
                     Need(resourcesRouted, "resource-route", "Resource SOCKS must route first and exclusively to the selected proxy.");
                 }
                 if (ruleTag == "dns-upstream")
