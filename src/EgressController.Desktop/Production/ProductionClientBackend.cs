@@ -268,6 +268,21 @@ public sealed class ProductionClientBackend : IClientBackend
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException)
         { return new(false, false, false, "特权助手未安装或当前不可用；尚未接管系统网络。"); }
     }
+    public async Task ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
+    {
+        await _apply.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ConfigurationReset.ExecuteAsync(current, token =>
+                _coordinator.Applied is null && !File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath)
+                    ? Task.FromResult(true)
+                    : _coordinator.StopAsync("用户确认重置配置：停止接管并恢复网络", token), _drafts.ResetAsync, cancellationToken).ConfigureAwait(false);
+            _launch = null; _savedResourcePort = new MacPolicyDocument().Defaults.ResourceProxyPort;
+            _lastLoggedStage = null;
+            _diagnostics.Record("configuration.reset", "network restored; draft backed up; empty setup saved; caches retained");
+        }
+        finally { _apply.Release(); }
+    }
     public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default) => _drafts.SaveAsync(document, cancellationToken);
     public Task<ConnectionWorkspaceSnapshot> ReadConnectionsAsync(CancellationToken cancellationToken = default)
     {

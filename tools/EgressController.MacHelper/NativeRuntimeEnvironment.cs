@@ -22,6 +22,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     private readonly OperationDiagnostics _diagnostics = new(new HelperServiceLog(native));
     private readonly CoreStartupDiagnosis _startup = new();
     private static string ControlSocket => Path.Combine(MacHelperPaths.PrivateRoot, "routing.sock");
+    private static string AssetDirectory => Path.Combine(MacHelperPaths.PrivateRoot, "assets");
     private static string JournalPath => Path.Combine(MacHelperPaths.PrivateRoot, "recovery.json");
 
     public async Task ValidateAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken)
@@ -39,7 +40,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         var manifest = JsonSerializer.Deserialize(manifestBytes, MacHelperWireJson.Default.MacRuntimeManifest)
             ?? throw new InvalidDataException("Missing runtime manifest.");
         if (manifest.GenerationId != plan.GenerationId || manifest.Files is null || manifest.Files.Count is < 1 or > 256 || !manifest.Files.ContainsKey("xray.json")
-            || manifest.Files.Keys.Any(name => !ConfigurationCoordinator.SafeArtifactName(name) || name is "runtime-manifest.json" or "recovery.json" or "core.runtime.json"))
+            || manifest.Files.Keys.Any(name => !ConfigurationCoordinator.SafeArtifactName(name) || name is "runtime-manifest.json" or "recovery.json" or "core.runtime.json" or "routing.runtime.json"))
             throw new InvalidDataException("Invalid runtime manifest.");
         var content = new Dictionary<string, byte[]>(StringComparer.Ordinal); long total = 0;
         foreach (var (name, hash) in manifest.Files)
@@ -81,6 +82,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     public async Task ApplyAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken)
     {
         string directory = Path.Combine(MacHelperPaths.PrivateRoot, "generations", plan.GenerationId);
+        string runtimeJson = PrepareRuntimeAssets(directory);
         if (_active is { } previous && _core is { HasExited: false } && Inspect().TunTakenOver
             && previous.HomeServiceId == plan.HomeServiceId && previous.NonHomeServiceId == plan.NonHomeServiceId)
         {
@@ -123,7 +125,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         {
             _observer = new XrayConnectionObserver(plan.GenerationId);
             _startup.Reset();
-            var runtime = JsonNode.Parse(configBytes)!.AsObject();
+            var runtime = JsonNode.Parse(runtimeJson)!.AsObject();
             runtime["api"] = new JsonObject { ["tag"] = "egress-routing", ["listen"] = ControlSocket,
                 ["services"] = new JsonArray("RoutingService") };
             HostFiles.AtomicWrite(native, Path.Combine(directory, "core.runtime.json"), System.Text.Encoding.UTF8.GetBytes(runtime.ToJsonString()));
@@ -213,7 +215,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         };
         start.ArgumentList.Add("run"); if (testOnly) start.ArgumentList.Add("-test");
         start.ArgumentList.Add("-config"); start.ArgumentList.Add(Path.Combine(workingDirectory, testOnly ? "xray.json" : "core.runtime.json"));
-        XrayProcessEnvironment.Configure(start, workingDirectory);
+        XrayProcessEnvironment.Configure(start, testOnly ? workingDirectory : AssetDirectory);
         var child = Process.Start(start) ?? throw new IOException("Xray did not start.");
         _ = DrainCoreAsync(child.StandardOutput, observer);
         _ = DrainCoreAsync(child.StandardError, observer);
@@ -221,20 +223,52 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     }
     private Task DrainCoreAsync(StreamReader reader, XrayConnectionObserver? observer)
         => XrayConnectionOutputPump.DrainAsync(reader, observer, _startup.Observe);
-    private static async Task ReplaceRoutesAsync(string directory, CancellationToken cancellationToken)
+    private string PrepareRuntimeAssets(string directory)
     {
+        var manifest = JsonSerializer.Deserialize(HostFiles.ReadOwned(native, Path.Combine(directory, "runtime-manifest.json"), 0, 1024 * 1024), MacHelperWireJson.Default.MacRuntimeManifest)
+            ?? throw new InvalidDataException("Missing verified runtime manifest.");
+        var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var (name, hash) in manifest.Files)
+        {
+            if (!ConfigurationCoordinator.SafeArtifactName(name)) throw new InvalidDataException("Invalid artifact name.");
+            byte[] bytes = HostFiles.ReadOwned(native, Path.Combine(directory, name), 0, 64 * 1024 * 1024);
+            if (!MacHelperRequestValidator.ContentMatches(bytes, hash)) throw new InvalidDataException("Verified runtime contents changed.");
+            files.Add(name, bytes);
+        }
+        var publication = RuntimeAssetPublication.Prepare(System.Text.Encoding.UTF8.GetString(files["xray.json"]), files);
+        HostFiles.PrivateDirectory(native, AssetDirectory);
+        foreach (var (name, bytes) in publication.Files)
+        {
+            string target = Path.Combine(AssetDirectory, name);
+            if (!File.Exists(target)) HostFiles.AtomicWrite(native, target, bytes);
+            if (!MacHelperRequestValidator.ContentMatches(HostFiles.ReadOwned(native, target, 0, 64 * 1024 * 1024), name[..64]))
+                throw new InvalidDataException("Published runtime asset failed integrity verification.");
+        }
+        // Helper-only output; callers cannot submit this name in a manifest.
+        HostFiles.AtomicWrite(native, Path.Combine(directory, "routing.runtime.json"), System.Text.Encoding.UTF8.GetBytes(publication.Json));
+        return publication.Json;
+    }
+    private async Task ReplaceRoutesAsync(string directory, CancellationToken cancellationToken)
+    {
+        PrepareRuntimeAssets(directory); // Also republishes verified rollback assets if needed.
         var start = new ProcessStartInfo(MacHelperPaths.InstalledXray) { WorkingDirectory = directory,
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (string argument in new[] { "api", "adrules", "--server=unix://" + ControlSocket, "--timeout=8", "--append=false", Path.Combine(directory, "xray.json") }) start.ArgumentList.Add(argument);
-        XrayProcessEnvironment.Configure(start, directory);
+        foreach (string argument in new[] { "api", "adrules", "--server=unix://" + ControlSocket, "--timeout=8", "--append=false", Path.Combine(directory, "routing.runtime.json") }) start.ArgumentList.Add(argument);
+        XrayProcessEnvironment.Configure(start, AssetDirectory);
         using var child = Process.Start(start) ?? throw new RuntimeFailureException("routing.update");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(12));
-        var stdout = XrayConnectionOutputPump.DrainAsync(child.StandardOutput, null);
-        var stderr = XrayConnectionOutputPump.DrainAsync(child.StandardError, null);
+        var diagnosis = new RoutingUpdateDiagnosis();
+        var stdout = XrayConnectionOutputPump.DrainAsync(child.StandardOutput, null, diagnosis.Observe);
+        var stderr = XrayConnectionOutputPump.DrainAsync(child.StandardError, null, diagnosis.Observe);
         try { await child.WaitForExitAsync(deadline.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { _diagnostics.Record("routing.rpc-failed", cancellationToken.IsCancellationRequested ? "caller-cancelled" : "rpc.timeout"); throw; }
         finally { if (!child.HasExited) { child.Kill(); await child.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } }
         await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
-        if (child.ExitCode != 0) throw new RuntimeFailureException("routing.update");
+        if (child.ExitCode != 0)
+        {
+            _diagnostics.Record("routing.rpc-failed", $"exit={child.ExitCode}; code={diagnosis.Code}");
+            throw new RuntimeFailureException("routing.update");
+        }
     }
     private static async Task StopOwnedCoreAsync(Process process)
     {

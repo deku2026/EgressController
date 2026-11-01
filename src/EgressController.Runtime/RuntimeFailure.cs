@@ -34,7 +34,8 @@ public static class RuntimeFailures
         ["tun.timeout"] = "等待 TUN 路由接管超时。请检查冲突 VPN、TUN 设置及辅助服务权限。",
         ["recovery.failed"] = "连接准备失败后的网络恢复尚未确认。请停止连接并打开日志目录检查；当前不显示健康状态。",
         ["resources.no-proxy"] = "默认分组中没有测速成功的代理节点。请在分组页测速或更换成员；下载不会回退到 DIRECT。",
-        ["routing.update"] = "分组切换未完成，已恢复原路由；TUN 保持运行。请重试。",
+        ["reset.restore"] = "尚未确认网络已停止并恢复，未清空配置。请打开日志目录检查后重试。",
+        ["routing.update"] = "路由更新未完成，已恢复更新前的规则。请打开日志目录查看原因后重试。",
         ["runtime.failed"] = "网络启动未完成。请打开日志目录检查当前故障后重试。"
     };
     public static bool IsKnown(string code) => Messages.ContainsKey(code);

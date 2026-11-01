@@ -66,7 +66,7 @@ public static class PreviewChecks
         string beforeStop = PolicyYaml.Write(vm.Document); int beforeResume = vm.Core.ApplyCount;
         await vm.TogglePreviewAsync(); Check(!vm.PreviewRunning && vm.Core.Current is null && PolicyYaml.Write(vm.Document) == beforeStop, "Stopping preview did not stop the mock runtime or preserve configuration.");
         await vm.TogglePreviewAsync(); Check(vm.PreviewRunning && vm.Core.Current is not null && vm.Core.ApplyCount == beforeResume + 1 && PolicyYaml.Write(vm.Document) == beforeStop, "Resuming unchanged configuration failed to apply the stopped generation.");
-        var onboarding = new ShellViewModel("onboarding"); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); Check(onboarding.SetupStep == 1 && onboarding.HasIssue, "First-run setup skipped required subscription import.");
+        var onboarding = new ShellViewModel("onboarding"); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); Check(onboarding.SetupStep == 1 && !onboarding.NextSetupCommand.CanExecute(null), "First-run setup skipped required subscription import.");
         await onboarding.ImportSubscriptionAsync(); onboarding.NextSetupCommand.Execute(null);
         Check(onboarding.SetupStep == 2 && onboarding.SelectedGlobalTarget is not null, "Subscription did not initialize a default group for retention setup.");
         onboarding.SelectedGlobalTarget = onboarding.GlobalChoices.Single(choice => choice.Name == "手动选择");

@@ -50,6 +50,7 @@ internal static class Program
             }
             window.Close();
         }
+        ResetInteractions(directory);
         GroupInteractions(directory);
         BootstrapSearchInteractions(directory);
         Interactions(directory);
@@ -58,6 +59,34 @@ internal static class Program
         log.Verify();
         Console.WriteLine("Mac preview: connection-attempt phases/cancel/retry/production wording, connection filtering/sorting, truthful sparse observations, virtualization and viewport preservation; 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, binding checks, injected production first-run/native-PNG/empty-telemetry/error-redaction checks passed. Live operations blocked.");
         return 0;
+    }
+    private static void ResetInteractions(string directory)
+    {
+        var vm = new ShellViewModel("settings"); var window = new MainWindow { DataContext = vm, Width = 1260, Height = 860 }; window.Show(); Flush();
+        var trigger = Find<Button>(window, "SettingsResetButton"); trigger.BringIntoView(); Flush();
+        Save(window, Path.Combine(directory, "reset-settings-normal.png"));
+        Click(window, trigger); Check(vm.ResetRequested, "Settings reset did not open its confirmation.");
+        var cancel = Find<Button>(window, "CancelResetButton");
+        Check(cancel.IsFocused, "Reset confirmation must initially focus the non-destructive choice.");
+        Save(window, Path.Combine(directory, "reset-confirm-normal.png"));
+        window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, "reset-confirm-compact.png"));
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null); Flush(); Check(!vm.ResetRequested && vm.Document.Nodes.Count > 0, "Escape did not preserve current setup.");
+        vm.OnboardingVisible = true; vm.SetupStep = 4;
+        vm.Document.Interfaces.NonHomeId = vm.Document.Interfaces.HomeId; vm.CompileDraft(); Flush();
+        var errorTrigger = Find<Button>(window, "SetupResetButton");
+        Save(window, Path.Combine(directory, "reset-error-compact.png")); Click(window, errorTrigger);
+        var confirm = Find<Button>(window, "ConfirmResetButton"); var point = Center(window, confirm);
+        window.MouseMove(point); Save(window, Path.Combine(directory, "reset-hover.png"));
+        window.MouseDown(point, MouseButton.Left); Save(window, Path.Combine(directory, "reset-pressed.png"));
+        window.MouseMove(new Point(2, 2)); window.MouseUp(new Point(2, 2), MouseButton.Left); Flush();
+        confirm.Focus(NavigationMethod.Tab); Save(window, Path.Combine(directory, "reset-focused.png"));
+        confirm.IsEnabled = false; Save(window, Path.Combine(directory, "reset-disabled.png")); confirm.IsEnabled = true;
+        Click(window, confirm);
+        Check(!vm.ResetRequested && vm.OnboardingVisible && vm.SetupStep == 0 && vm.Document.Nodes.Count == 0 && vm.SelectedHomeInterface is null,
+            "Confirm reset did not return to a blank first setup step.");
+        Check(!vm.ConnectionAttempt.IsVisible && !vm.HasIssue && !vm.PreviewRunning, "Reset left stale progress or runtime status.");
+        Save(window, Path.Combine(directory, "reset-first-step-compact.png"));
+        window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "reset-first-step-normal.png")); window.Close();
     }
     private static void GroupInteractions(string directory)
     {

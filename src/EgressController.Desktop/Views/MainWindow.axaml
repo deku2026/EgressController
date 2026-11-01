@@ -1,5 +1,5 @@
 <Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:views="using:EgressController.Desktop.Views" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.MainWindow" x:DataType="vm:ShellViewModel" Title="{Binding WindowTitle}" Width="1260" Height="860" MinWidth="960" MinHeight="660" WindowStartupLocation="CenterScreen" WindowDecorations="Full">
- <Grid ColumnDefinitions="202,*">
+ <Grid><Grid ColumnDefinitions="202,*" IsEnabled="{Binding ResetClosed}">
   <Border Background="{StaticResource Sidebar}" BorderBrush="#E5E9F1" BorderThickness="0,0,1,0">
    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="15,25,15,17">
     <StackPanel Margin="9,0,0,0" Spacing="12">
@@ -25,13 +25,13 @@
     <StackPanel Spacing="7"><TextBlock Classes="title" Text="{Binding PageTitle}"/><TextBlock Classes="muted" Text="{Binding PageDescription}"/></StackPanel>
     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center"><TextBlock Classes="caption" Text="{Binding SaveStatus}"/><Button Content="取消操作" Command="{Binding CancelOperationCommand}" IsVisible="{Binding IsBusy}" Classes="quiet" FontSize="10"/><Border IsVisible="{Binding IsPreview}" Background="#FFF8EB" BorderBrush="#F0E3C8" BorderThickness="1" CornerRadius="5" Padding="8,4"><TextBlock Text="PREVIEW" FontSize="9" FontWeight="SemiBold" LetterSpacing=".9" Foreground="#A17E40"/></Border></StackPanel>
    </Grid>
-   <StackPanel Grid.Row="1"><Border IsVisible="{Binding HasIssue}" Background="#FFF0F0" BorderBrush="#F1D6D9" BorderThickness="1" CornerRadius="8" Margin="30,0,30,16" Padding="13,10"><TextBlock Text="{Binding CurrentIssue}" Foreground="#A74958" FontSize="12" TextWrapping="Wrap"/></Border><views:ConnectionAttemptView DataContext="{Binding ConnectionAttempt}" Margin="30,0,30,15"/></StackPanel>
+   <StackPanel Grid.Row="1"><Border IsVisible="{Binding HasIssue}" Background="#FFF0F0" BorderBrush="#F1D6D9" BorderThickness="1" CornerRadius="8" Margin="30,0,30,16" Padding="13,10"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="12"><TextBlock Text="{Binding CurrentIssue}" Foreground="#A74958" FontSize="12" TextWrapping="Wrap"/><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="日志目录" Command="{Binding ShowLogDirectoryCommand}" IsEnabled="{Binding CanEdit}"/><Button Name="ErrorResetButton" Content="重置并重新设置" Command="{Binding RequestResetCommand}"/></StackPanel></Grid></Border><views:ConnectionAttemptView DataContext="{Binding ConnectionAttempt}" Margin="30,0,30,15"/></StackPanel>
    <Grid Grid.Row="2" Margin="30,0,30,22" IsEnabled="{Binding CanEdit}">
     <views:OverviewView IsVisible="{Binding OverviewVisible}"/><views:ApplicationsView IsVisible="{Binding AppsVisible}"/><views:RulesView IsVisible="{Binding RulesVisible}"/><views:NodesView IsVisible="{Binding NodesVisible}"/><views:SettingsView IsVisible="{Binding SettingsVisible}"/>
    </Grid>
    <Border Grid.Row="3" BorderBrush="#E9ECF2" BorderThickness="0,1,0,0" Background="#FCFDFE" Padding="29,10"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBlock Text="{Binding Notice}" FontSize="10" Foreground="#8993A5" TextTrimming="CharacterEllipsis"/><Button Grid.Column="1" Classes="link" Content="查看诊断" Command="{Binding OpenLogsCommand}" FontSize="10" MinHeight="18"/></Grid></Border>
   </Grid>
   <views:SetupOverlay Grid.ColumnSpan="2" IsVisible="{Binding OnboardingVisible}"/>
- </Grid>
+ </Grid><views:ResetConfigurationOverlay IsVisible="{Binding ResetRequested}"/></Grid>
  <Window.KeyBindings><KeyBinding Gesture="Meta+1" Command="{Binding OverviewCommand}"/><KeyBinding Gesture="Meta+2" Command="{Binding AppsCommand}"/><KeyBinding Gesture="Meta+3" Command="{Binding RulesCommand}"/><KeyBinding Gesture="Meta+4" Command="{Binding NodesCommand}"/></Window.KeyBindings>
 </Window>

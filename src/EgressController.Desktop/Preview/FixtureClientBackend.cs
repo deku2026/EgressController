@@ -125,6 +125,13 @@ public sealed class FixtureClientBackend : IClientBackend
     {
         cancellationToken.ThrowIfCancellationRequested(); SavedPath = PrivatePreviewFiles.WriteText("preview-policy.yaml", PolicyYaml.Write(document)); return Task.CompletedTask;
     }
+    public string? ResetBackupPath { get; private set; }
+    public Task ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
+        => ConfigurationReset.ExecuteAsync(current, StopAsync, async (snapshot, token) =>
+        {
+            ResetBackupPath = PrivatePreviewFiles.WriteText("preview-policy-before-reset.yaml", PolicyYaml.Write(snapshot));
+            await SaveDraftAsync(new(), token);
+        }, cancellationToken);
     public Task OpenLogDirectoryAsync(CancellationToken cancellationToken = default)
     {
         PrivatePreviewFiles.WriteText("preview-events.log", string.Join("\n", Lifecycle.Events.Select(item => $"{item.Time:HH:mm} [{item.Kind}] {item.Cause}"))); return Task.CompletedTask;

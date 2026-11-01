@@ -30,6 +30,7 @@ def main():
     run("dotnet", "build", "EgressController.slnx", "-c", args.configuration, "--no-restore", "-p:EgressMockOnly=true", "-p:EgressPrepareRiderPayload=false")
     for name in PROJECTS:
         run("dotnet", "run", "--project", ROOT / "tests" / name, "-c", args.configuration, "--no-build", "--", "--progress", "off")
+    run(sys.executable, ROOT / "build" / "Verify-XrayRoutingRpc.py")
     run(sys.executable, ROOT / "build" / "Build-MacNative.py", "--configuration", args.configuration)
     run("dotnet", "run", "--project", "tools/EgressController.MacPreview", "-c", args.configuration, "--no-build", "--", "--screenshots", ROOT / "artifacts" / "mac-ui")
     if not args.without_package:

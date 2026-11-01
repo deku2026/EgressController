@@ -14,6 +14,10 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 管理员密码只授权网络助手安装，Rider 和主界面保持普通用户权限，无需以管理员身份打开 Rider。失败时向导顶部直接显示错误，可点击“查看诊断”或“打开日志目录”；日志位于 `~/Library/Logs/EgressController/lifecycle.log`，包含安装阶段、系统退出码和连接恢复结果。
 
+**从头设置**：在“设置 → 网络与 TUN”或连接失败提示中点击“重置并重新设置”。确认后先停止接管、恢复网络，再备份当前配置并清空网卡、订阅、分组、应用和规则选择。缓存、日志及用量记录保留；不会自动连接。恢复或保存失败时保留当前配置并显示原因。
+
+![重置确认（隔离预览）](docs/images/mac-reset-setup.png)
+
 `--preview` 才进入隔离 UI；示例 URL 和示例测速只出现在预览中：
 
 ```sh
@@ -57,10 +61,10 @@ dotnet run --project src/EgressController.Desktop -- --preview
 ```sh
 # 构建机获取固定发布归档；不会启动 Xray/TUN。
 gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
-python3 build/Verify-Mac.py --version 0.1.4
+python3 build/Verify-Mac.py --version 0.1.5
 ```
 
-**开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
+**开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、内置 Xray 命令行与模拟 Unix RPC 的规则资源回归检查、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
 
 产物：`artifacts/package/Egress.app`、`EgressController-osx-arm64.zip` 和 `SHA256SUMS.txt`。使用本地 ad-hoc 签名，未做 Developer ID 签名或公证。本轮自动验收不代表已实测双网卡 TCP/UDP/IPv4/IPv6 出口。
 

@@ -11,9 +11,7 @@ public sealed class DraftPolicyStore(string directory)
     private const int MaximumBytes = 16 * 1024 * 1024;
     public async Task SaveAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
-        byte[] yaml = Encoding.UTF8.GetBytes(PolicyYaml.Write(document));
-        if (yaml.Length > MaximumBytes || document.Version != 1) throw new InvalidDataException("Policy draft exceeds supported limits.");
-        byte[] bytes = Encoding.UTF8.GetBytes("EGRESS-DRAFT-1\n" + Convert.ToHexStringLower(SHA256.HashData(yaml)) + "\n" + Encoding.UTF8.GetString(yaml));
+        byte[] bytes = Encode(document);
         await _write.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -24,6 +22,30 @@ public sealed class DraftPolicyStore(string directory)
             DurableFiles.Replace(current, bytes);
         }
         finally { _write.Release(); }
+    }
+    public async Task ResetAsync(MacPolicyDocument currentDraft, CancellationToken cancellationToken = default)
+    {
+        byte[] backup = Encode(currentDraft), empty = Encode(new());
+        await _write.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            DurableFiles.CreatePrivateDirectory(directory);
+            cancellationToken.ThrowIfCancellationRequested();
+            // Keep the edited draft separately; subsequent ordinary saves must not rotate this backup away.
+            DurableFiles.Replace(Path.Combine(directory, "policy.before-reset.draft"), backup);
+            cancellationToken.ThrowIfCancellationRequested();
+            // Prepare an empty recovery draft before committing the primary reset. The original edited
+            // policy already has a durable, separate backup; no write failure is treated as success.
+            DurableFiles.Replace(Path.Combine(directory, "policy.previous.draft"), empty);
+            DurableFiles.Replace(Path.Combine(directory, "policy.draft"), empty);
+        }
+        finally { _write.Release(); }
+    }
+    private static byte[] Encode(MacPolicyDocument document)
+    {
+        byte[] yaml = Encoding.UTF8.GetBytes(PolicyYaml.Write(document));
+        if (yaml.Length > MaximumBytes || document.Version != 1) throw new InvalidDataException("Policy draft exceeds supported limits.");
+        return Encoding.UTF8.GetBytes("EGRESS-DRAFT-1\n" + Convert.ToHexStringLower(SHA256.HashData(yaml)) + "\n" + Encoding.UTF8.GetString(yaml));
     }
     public Task<MacPolicyDocument?> LoadAsync(CancellationToken cancellationToken = default)
     {

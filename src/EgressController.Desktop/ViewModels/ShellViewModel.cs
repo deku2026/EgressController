@@ -96,6 +96,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         ConnectionAttempt = new(() => ApplyCommand.Execute(null));
         _backend.SetProgressSink(new UiProgress(progress => ConnectionAttempt.Observe(progress)));
         ResetDslCommand = new(() => { DslText = PolicyYaml.Write(Document); Notice = "已从当前配置重新生成 DSL。"; }); TogglePreviewCommand = new(() => RunOperationAsync(TogglePreviewAsync));
+        InitializeResetCommands();
         BeginSetupCommand = new(() => { SetupStep = 0; OnboardingVisible = true; }); CloseSetupCommand = new(() => OnboardingVisible = false); NextSetupCommand = new(() => RunOperationAsync(NextSetupAsync), () => CanAdvanceSetup && !IsBusy); BackSetupCommand = new(() => SetupStep = Math.Max(0, SetupStep - 1), () => SetupStep > 0 && !IsBusy);
     }
     public IReadOnlyList<Choice> InterfaceChoices { get; private set; } = [];
@@ -222,7 +223,13 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         get => SetupGlobalMemberChoices.FirstOrDefault(choice => choice.Id == SetupGlobalGroup?.SelectedMemberId);
         set { if (_reconciling || value is null || SetupGlobalGroup is not { } group || group.SelectedMemberId == value.Id) return; group.SelectedMemberId = value.Id; Raise(); StateChanged(); RaiseGroup(); NextSetupCommand.Refresh(); }
     }
-    public bool CanAdvanceSetup => SetupStep != 2 || !SetupGlobalManual || SetupGlobalGroup is { } group && group.SelectedMemberId is { } member && group.MemberIds.Contains(member, StringComparer.Ordinal);
+    public bool CanAdvanceSetup => SetupStep switch
+    {
+        0 => SelectedHomeInterface is not null && SelectedNonHomeInterface is not null && SelectedHomeInterface.Id != SelectedNonHomeInterface.Id,
+        1 => _subscriptionReady,
+        2 => SelectedGlobalTarget is not null && (!SetupGlobalManual || SetupGlobalGroup is { } group && group.SelectedMemberId is { } member && group.MemberIds.Contains(member, StringComparer.Ordinal)),
+        _ => true
+    };
     public string SetupSubscriptionStatus => _subscriptionReady ? NodeCountLabel : "尚未导入";
     public string SetupProgress => $"{SetupStep + 1} / 5"; public bool SetupInterfaces => SetupStep == 0; public bool SetupSubscription => SetupStep == 1; public bool SetupGlobal => SetupStep == 2; public bool SetupApplications => SetupStep == 3; public bool SetupReview => SetupStep == 4;
     public string NextSetupLabel => SetupStep == 4 ? (IsPreview ? "校验并完成" : "校验并启动") : "继续";
@@ -304,6 +311,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private void RefreshCommands()
     {
         ConfirmAppsCommand.Refresh(); RefreshSelectedInventoryCommand.Refresh(); NextSetupCommand.Refresh(); BackSetupCommand.Refresh();
+        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh();
     }
     private void RecordFailure(string operation, Exception error)
     { try { _backend.RecordFailure(operation, error); } catch (Exception) { /* Diagnostics are observational. */ } }
@@ -374,7 +382,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     }
     private void StateChanged()
     {
-        _revision++; _needsValidation = true; Raise(nameof(ValidationLabel)); HasChanges = true; DslText = PolicyYaml.Write(Document); Notice = IsPreview ? "更改已保存在草稿中，校验后可应用到模拟环境。" : "更改已保存在草稿中，校验后可应用。"; CurrentIssue = ""; Raise(nameof(ProxyResolvedName));
+        _revision++; _needsValidation = true; Raise(nameof(ValidationLabel)); HasChanges = true; DslText = PolicyYaml.Write(Document); Notice = IsPreview ? "更改已保存在草稿中，校验后可应用到模拟环境。" : "更改已保存在草稿中，校验后可应用。"; CurrentIssue = ""; Raise(nameof(ProxyResolvedName)); NextSetupCommand.Refresh();
     }
     private async Task ShowApplicationCatalogAsync()
     {

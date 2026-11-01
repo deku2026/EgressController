@@ -26,6 +26,11 @@ public sealed class ConnectionAttemptViewModel(Action retry) : Bindable
     public bool HasFailed { get => _failed; private set => Set(ref _failed, value); }
     public string Title { get => _title; private set => Set(ref _title, value); }
     public string Detail { get => _detail; private set => Set(ref _detail, value); }
+    public void Reset()
+    {
+        IsVisible = false; IsRunning = false; HasFailed = false; _stage = 0; Title = "准备连接"; Detail = "";
+        foreach (var step in Steps) step.Update("等待");
+    }
     public void Begin()
     {
         IsVisible = true; IsRunning = true; HasFailed = false; _stage = 0;
