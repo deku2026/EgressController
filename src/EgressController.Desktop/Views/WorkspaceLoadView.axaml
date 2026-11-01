@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:EgressController.Desktop.Views" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.WorkspaceLoadView" x:DataType="vm:ShellViewModel">
+ <Border Classes="card" MaxWidth="560" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="28">
+  <StackPanel Spacing="16">
+   <ui:Glyph Kind="apps" Width="32" Height="32" Foreground="{StaticResource Accent}" HorizontalAlignment="Left"/>
+   <TextBlock Name="WorkspaceLoadTitle" Text="{Binding WorkspaceLoadTitle}" Classes="section"/>
+   <TextBlock Text="{Binding WorkspaceLoadDescription}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryInk}" LineHeight="22"/>
+   <views:NetworkRecoveryNotice IsVisible="{Binding HasRecoveryIssue}"/>
+   <ProgressBar IsVisible="{Binding IsLoading}" IsIndeterminate="True" Height="3"/>
+   <WrapPanel IsVisible="{Binding HasWorkspaceLoadIssue}">
+    <Button Name="RetryWorkspaceButton" Content="重新载入" Command="{Binding RetryWorkspaceCommand}" Classes="primary" Margin="0,0,8,0"/>
+    <Button Content="打开日志目录" Command="{Binding ShowLogDirectoryCommand}" Classes="soft" Margin="0,0,8,0"/>
+    <Button IsVisible="{Binding CanResetWorkspace}" Content="重新设置" Command="{Binding RequestResetCommand}" Classes="quiet"/>
+   </WrapPanel>
+  </StackPanel>
+ </Border>
+</UserControl>

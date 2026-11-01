@@ -15,7 +15,7 @@ public sealed partial class ShellViewModel
         ? "设置已重置，可以从头配置。系统网络恢复尚未确认，请修复助手后重试恢复。"
         : "无法确认后台助手状态。更新应用后可能需要重新授权，修复不会启动连接。";
     public AsyncUiCommand RepairNetworkCommand { get; private set; } = null!;
-    public bool ResetRequested { get => _resetRequested; private set { if (Set(ref _resetRequested, value)) { Raise(nameof(ResetClosed)); ConfirmResetCommand?.Refresh(); } } }
+    public bool ResetRequested { get => _resetRequested; private set { if (Set(ref _resetRequested, value)) { Raise(nameof(ResetClosed)); Raise(nameof(WorkspaceNavigationEnabled)); RefreshNavigationCommands(); ConfirmResetCommand?.Refresh(); } } }
     public bool ResetClosed => !ResetRequested;
     public string ResetIssue { get => _resetIssue; private set { if (Set(ref _resetIssue, value)) Raise(nameof(HasResetIssue)); } }
     public bool HasResetIssue => ResetIssue.Length > 0;
@@ -24,10 +24,10 @@ public sealed partial class ShellViewModel
     public AsyncUiCommand ConfirmResetCommand { get; private set; } = null!;
     private void InitializeResetCommands()
     {
-        RequestResetCommand = new(() => { ResetIssue = ""; ResetRequested = true; }, () => CanEdit);
+        RequestResetCommand = new(() => { ResetIssue = ""; ResetRequested = true; }, () => CanResetWorkspace);
         CancelResetCommand = new(() => ResetRequested = false, () => !IsBusy);
-        ConfirmResetCommand = new(() => RunOperationAsync(ResetConfigurationAsync), () => ResetRequested && CanEdit);
-        RepairNetworkCommand = new(() => RunOperationAsync(RepairNetworkAsync), () => HasRecoveryIssue && CanEdit);
+        ConfirmResetCommand = new(() => RunOperationAsync(ResetConfigurationAsync), () => ResetRequested && CanResetWorkspace);
+        RepairNetworkCommand = new(() => RunOperationAsync(RepairNetworkAsync), () => HasRecoveryIssue && CanResetWorkspace);
     }
     private async Task RepairNetworkAsync()
     {
@@ -83,7 +83,9 @@ public sealed partial class ShellViewModel
         if (Connections.IsPaused) Connections.TogglePauseCommand.Execute(null);
         Connections.Reconcile(new([], _backend.Now, true, "完成设置并连接后开始观测。"));
         Connections.ResetFiltersCommand.Execute(null); Connections.IsOpen = false;
-        PageIndex = 0; SetupStep = 0; OnboardingVisible = true; ResetRequested = false;
+        PageIndex = 0; SetupStep = 0; OnboardingVisible = !HasWorkspaceLoadIssue && _interfaces.Count > 0; ResetRequested = false;
+        if (HasWorkspaceLoadIssue || _interfaces.Count == 0) _workspaceLoadIssue = "设置已重置。重新载入网卡与应用目录后，即可从第一步开始。";
+        PublishWorkspaceState();
         foreach (string property in new[] { nameof(ConfigValid), nameof(ValidationLabel), nameof(SetupSubscriptionStatus), nameof(SourceStatusText), nameof(ProxyResolvedName), nameof(TunStatusText) }) Raise(property);
         Notice = "已备份原配置并重置。从选择两张网卡开始重新设置。";
         AddEvent("重置并重新设置", result.NetworkRestored

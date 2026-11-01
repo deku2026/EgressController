@@ -8,7 +8,7 @@ public sealed record ClientApplication(string Id, string Name, string Product, s
     string? PrimaryExecutable, IReadOnlyList<string> ExecutablePaths, bool InventoryComplete, string? BundleIdentifier = null,
     byte[]? IconPng = null, string? InventoryError = null);
 public sealed record ClientBootstrap(MacPolicyDocument Document, IReadOnlyList<ClientInterface> Interfaces,
-    IReadOnlyList<ClientApplication> Applications, bool HasSavedPolicy, ClientRuntimeState Runtime);
+    IReadOnlyList<ClientApplication> Applications, bool HasSavedPolicy, ClientRuntimeState Runtime, string? LoadIssue = null);
 public sealed record ClientRuntimeState(bool Running, bool Available, bool HelperInstalled, string Message);
 public sealed record ClientRuleCatalogEntry(string Id, string Name, string Detail, IReadOnlyList<string> Sources);
 public sealed record ClientPreparedResources(IReadOnlyList<RuleSourceBinding> Bindings,

@@ -88,6 +88,11 @@ static void pure_proxy_snapshot_tests(void)
 }
 int main(void)
 {
+    for (int active = 0; active <= 1; active++) for (int address = 0; address <= 1; address++) {
+        uint8_t result[2048] = {0}; size_t size = 0;
+        assert(egress_mac_interface_fixture(active, address, result, sizeof(result) - 1, &size) == EGRESS_MAC_OK);
+        assert(strstr((const char *)result, active || address ? "\"isActive\":true" : "\"isActive\":false") != NULL);
+    }
     assert(egress_mac_abi_version() == 1);
     assert(egress_mac_path_is_absolute("/synthetic/Example.app") == 1);
     assert(egress_mac_path_is_absolute("Applications/Example.app") == 0);

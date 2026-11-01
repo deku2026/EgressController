@@ -20,6 +20,8 @@ EGRESS_MAC_API int32_t egress_mac_copy_abi_info_json(uint8_t *output, size_t cap
 EGRESS_MAC_API int32_t egress_mac_copy_canonical_path(const char *path_utf8, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_bundle_json(const char *path_utf8, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_icon_png(const char *path_utf8, uint32_t pixels, uint8_t *output, size_t capacity, size_t *required);
+/* Pure fixture through the same production interface serializer; never queries network state. */
+EGRESS_MAC_API int32_t egress_mac_interface_fixture(int32_t active, int32_t has_address, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_interfaces_json(uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_dns_json(uint8_t *output, size_t capacity, size_t *required);
 /* One gated live settings capture; binary plist bytes remain caller-owned and bounded to 256KiB. */

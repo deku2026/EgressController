@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
-    parser.add_argument("--version", default="0.1.8")
+    parser.add_argument("--version", default="0.1.9")
     parser.add_argument("--xray-archive", type=Path, default=ROOT / "artifacts/core/Xray-macos-arm64-v8a.zip",
                         help="Offline official pinned Xray archive, carried inside the app; never executed during packaging.")
     parser.add_argument("--output-root", type=Path, default=ROOT / "artifacts/package")

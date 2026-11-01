@@ -29,6 +29,8 @@ internal static class Program
         string directory = Path.GetFullPath(args[flag + 1]); Directory.CreateDirectory(directory);
         AppBuilder.Configure<DesktopApplication>().WithInterFont().With(MacFonts.Options()).UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
         var log = new BindingLog(); Logger.Sink = log;
+        UiAuditChecks.Run(directory);
+        if (args.Contains("--ui-audit-only", StringComparer.Ordinal)) { log.Verify(); return 0; }
         ConnectionAttemptChecks.Run(directory);
         ConnectionWorkspaceChecks.Run(directory);
         if(connectionChecksOnly){log.Verify();Console.WriteLine("Connection-attempt phases, cancel/retry and production wording; workspace input, truthful sparse facts, sorting, virtualization and stable refresh checks passed; live operations blocked.");return 0;}
@@ -129,8 +131,13 @@ internal static class Program
         window.MouseDown(point, MouseButton.Left); Save(window, Path.Combine(directory, "groups-member-pressed.png")); window.MouseUp(point, MouseButton.Left); Flush();
         Check(group.Model.SelectedMemberId == GroupGraph.Direct && vm.Core.RestartCount == restarts && !vm.HasChanges, "A group selection did not hot-apply independently of TUN restart: selected=" + group.Model.SelectedMemberId + ", restarts=" + vm.Core.RestartCount + "/" + restarts + ", dirty=" + vm.HasChanges);
         var selected = window.GetVisualDescendants().OfType<Button>().First(button => button.IsEffectivelyVisible && button.DataContext is GroupMemberRow { Id: GroupGraph.Direct });
-        selected.Focus(NavigationMethod.Tab); Save(window, Path.Combine(directory, "groups-member-focused.png"));
+        Check(!vm.IsBusy && selected.IsEffectivelyEnabled && selected.Focus(NavigationMethod.Tab), "Completed group switch left member buttons disabled or unfocusable.");
+        Save(window, Path.Combine(directory, "groups-member-focused.png"));
         selected.IsEnabled = false; Save(window, Path.Combine(directory, "groups-member-disabled.png")); selected.IsEnabled = true;
+        var second = window.GetVisualDescendants().OfType<Button>().First(button => button.IsEffectivelyVisible && button.DataContext is GroupMemberRow member && member.Id != GroupGraph.Direct && member.CanSelect);
+        string secondId = ((GroupMemberRow)second.DataContext!).Id; second.BringIntoView(); Flush(); Click(window, second);
+        Check(group.Model.SelectedMemberId == secondId && second.IsEffectivelyEnabled && vm.Core.RestartCount == restarts,
+            "A second pointer selection failed after the first group switch, or restarted TUN.");
         vm.OnboardingVisible = true; vm.SetupStep = 2; Save(window, Path.Combine(directory, "groups-retention-compact.png"));
         window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "groups-retention-normal.png"));
         window.Close();

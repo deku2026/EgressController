@@ -18,8 +18,8 @@ public static class Program
             var request = new MacHelperWireRequest(2, Guid.NewGuid(), 1, MacHelperCommand.Inspect);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(request, MacHelperWireJson.Default.MacHelperWireRequest);
             if (JsonSerializer.Deserialize(bytes, MacHelperWireJson.Default.MacHelperWireRequest) != request) return 1;
-            if (OperatingSystem.IsMacOS()) MacNativeContractChecks.VerifyFileInfo();
-            Console.WriteLine("Helper mock smoke passed; pure native file-info/AOT JSON contract verified; no live initialization."); return 0;
+            if (OperatingSystem.IsMacOS()) { MacNativeContractChecks.VerifyFileInfo(); MacNativeContractChecks.VerifyInterfaceInfo(); }
+            Console.WriteLine("Helper mock smoke passed; pure native file-info/interface AOT JSON contracts verified; no live initialization."); return 0;
         }
         try { return await RunProductionAsync(args).ConfigureAwait(false); }
         catch (Exception error)

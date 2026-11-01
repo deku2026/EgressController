@@ -18,7 +18,7 @@
    <Button Name="PauseConnectionDisplayButton" Grid.Column="2" Content="{Binding PauseLabel}" Command="{Binding TogglePauseCommand}" ToolTip.Tip="{Binding PauseDescription}" FontSize="11"/>
   </Grid>
   <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-   <ComboBox Name="CompactConnectionAppFilter" IsVisible="False" Width="145" ItemsSource="{Binding Applications}" SelectedItem="{Binding SelectedApplication,Mode=TwoWay}" AutomationProperties.Name="按应用筛选连接" MinHeight="28" FontSize="10" Padding="8,4"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:ConnectionApplicationFilter"><TextBlock Text="{Binding Name}" FontSize="10"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+   <ComboBox Name="CompactConnectionAppFilter" IsVisible="False" Width="145" ItemsSource="{Binding Applications}" SelectedItem="{Binding SelectedApplication,Mode=TwoWay}" AutomationProperties.Name="按应用筛选连接" MinHeight="28" FontSize="10" Padding="8,4"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:ConnectionApplicationFilter"><TextBlock Text="{Binding Name}" FontSize="10" ToolTip.Tip="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
    <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="7"><Ellipse Fill="{Binding StatusBrush}" Width="5" Height="5"/><TextBlock Grid.Column="1" Text="{Binding StatusLabel}" FontSize="10" Foreground="{StaticResource SecondaryInk}"/><TextBlock Grid.Column="2" Text="{Binding SourceCaption}" FontSize="10" Foreground="{StaticResource MutedInk}" TextTrimming="CharacterEllipsis"/></Grid>
    <TextBlock Grid.Column="2" Text="{Binding UpdatedLabel}" FontSize="9" Foreground="{StaticResource MutedInk}"/>
   </Grid>
@@ -65,7 +65,7 @@
            <TextBlock Grid.Column="4" Text="{Binding RouteLabel}" FontSize="10" Foreground="{Binding RouteBrush}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding RouteLabel}"/>
            <TextBlock Grid.Column="5" Text="{Binding Uploaded}" FontSize="9.5" HorizontalAlignment="Right"/>
            <TextBlock Grid.Column="6" Text="{Binding Downloaded}" FontSize="9.5" HorizontalAlignment="Right"/>
-           <Border Grid.Column="7" Background="#F0F3F8" CornerRadius="4" Padding="4,3" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock Text="{Binding Transport}" FontSize="8" Foreground="#7B8AA2"/></Border>
+           <Border Grid.Column="7" Background="#F0F3F8" CornerRadius="4" Padding="4,3" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock Text="{Binding Transport}" FontSize="8" Foreground="{StaticResource SecondaryInk}"/></Border>
           </Grid>
          </DataTemplate></ListBox.ItemTemplate>
         </ListBox>

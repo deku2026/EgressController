@@ -6,7 +6,7 @@
     <TextBlock Text="{Binding RecoveryMessage}" FontSize="11" Foreground="#856A38" TextWrapping="Wrap" LineHeight="18"/>
     <WrapPanel Orientation="Horizontal">
      <Button Name="RepairNetworkButton" Content="修复助手并恢复网络" Command="{Binding RepairNetworkCommand}" FontSize="11" Margin="0,0,8,0"/>
-     <Button Content="打开日志目录" Command="{Binding ShowLogDirectoryCommand}" IsEnabled="{Binding CanEdit}" Classes="quiet" FontSize="11"/>
+     <Button Content="打开日志目录" Command="{Binding ShowLogDirectoryCommand}" Classes="quiet" FontSize="11"/>
     </WrapPanel>
    </StackPanel>
   </Grid>

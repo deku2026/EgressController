@@ -42,7 +42,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public ConnectionAttemptViewModel ConnectionAttempt { get; }
     public bool IsLoading { get; private set; }
     public bool IsBusy => _busy > 0;
-    public bool CanEdit => !_closing && !IsBusy && !IsLoading;
+    public bool CanEdit => !_closing && !IsBusy && WorkspaceReady;
     private CancellationTokenSource? _operation;
     private TaskCompletionSource? _operationCompletion;
     private bool _closing;
@@ -85,7 +85,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         Connections = new(backend.IsPreview);
         CancelOperationCommand = new(() => _operation?.Cancel());
         ManageGroupsCommand = new(() => ManagingGroups = !ManagingGroups);
-        OverviewCommand = new(() => PageIndex = 0); AppsCommand = new(() => PageIndex = 1); RulesCommand = new(() => PageIndex = 2); NodesCommand = new(() => PageIndex = 3); SettingsCommand = new(() => PageIndex = 4);
+        OverviewCommand = new(() => PageIndex = 0, () => WorkspaceNavigationEnabled); AppsCommand = new(() => PageIndex = 1, () => WorkspaceNavigationEnabled); RulesCommand = new(() => PageIndex = 2, () => WorkspaceNavigationEnabled); NodesCommand = new(() => PageIndex = 3, () => WorkspaceNavigationEnabled); SettingsCommand = new(() => PageIndex = 4, () => WorkspaceNavigationEnabled);
         OpenLogsCommand = new(() => { OnboardingVisible = false; PageIndex = 4; SettingsTab = 4; });
         ShowLogDirectoryCommand = new(() => RunOperationAsync(ShowLogDirectoryAsync));
         RefreshSelectedInventoryCommand = new(() => RunOperationAsync(RefreshSelectedInventoryAsync), () => SelectedApp is not null && !IsBusy);
@@ -99,7 +99,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         ConnectionAttempt = new(() => ApplyCommand.Execute(null));
         _backend.SetProgressSink(new UiProgress(progress => ConnectionAttempt.Observe(progress)));
         ResetDslCommand = new(() => { DslText = PolicyYaml.Write(Document); Notice = "已从当前配置重新生成 DSL。"; }); TogglePreviewCommand = new(() => RunOperationAsync(TogglePreviewAsync));
-        InitializeResetCommands(); InitializeHomeCheck();
+        InitializeResetCommands(); InitializeHomeCheck(); InitializeWorkspaceCommands();
         BeginSetupCommand = new(() => { SetupStep = 0; OnboardingVisible = true; }); CloseSetupCommand = new(() => OnboardingVisible = false); NextSetupCommand = new(() => RunOperationAsync(NextSetupAsync), () => CanAdvanceSetup && !IsBusy); BackSetupCommand = new(() => SetupStep = Math.Max(0, SetupStep - 1), () => SetupStep > 0 && !IsBusy);
     }
     public IReadOnlyList<Choice> InterfaceChoices { get; private set; } = [];
@@ -147,8 +147,9 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public string ApplicationCountLabel => $"{ApplicationCount} 个已管理应用"; public string RuleCountLabel => $"{RuleCount} 个用户集合";
     public string NodeCountLabel => $"{Document.Nodes.Count(x => x.IsSupported)} 个受支持节点 · {Document.Nodes.Count(x => !x.IsSupported)} 项不支持";
     public bool AddingApps { get => _addingApps; set { if (Set(ref _addingApps, value) && value) _ = LoadVisibleIconsAsync(); } }
-    public bool AddingRules { get => _addingRules; set => Set(ref _addingRules, value); }
-    public bool CreatingCustomRule { get => _customRule; set => Set(ref _customRule, value); }
+    public bool AddingRules { get => _addingRules; set { if (Set(ref _addingRules, value)) Raise(nameof(RulesWorkspaceEnabled)); } }
+    public bool RulesWorkspaceEnabled => !AddingRules && !CreatingCustomRule;
+    public bool CreatingCustomRule { get => _customRule; set { if (Set(ref _customRule, value)) Raise(nameof(RulesWorkspaceEnabled)); } }
     public int SelectedCatalogCount => _catalog.Count(x => x.IsSelected); public string AddSelectedLabel => $"添加所选应用{(SelectedCatalogCount > 0 ? $" · {SelectedCatalogCount}" : "")}";
     public AppRow? SelectedApp { get => _selectedApp; set { if (Set(ref _selectedApp, value)) { Raise(nameof(HasSelectedApp)); Raise(nameof(SelectedAppName)); Raise(nameof(SelectedAppPaths)); RefreshSelectedInventoryCommand.Refresh(); } } }
     public bool HasSelectedApp => SelectedApp is not null;
@@ -169,7 +170,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public bool ConfigValid { get; private set; }
     public string ValidationLabel => _needsValidation ? "草稿等待校验" : ConfigValid ? "配置校验通过" : "配置需要调整";
     public bool HasChanges { get => _hasChanges; private set { if (Set(ref _hasChanges, value)) Raise(nameof(SaveStatus)); } }
-    public string SaveStatus => HasChanges ? "有待应用的更改" : "配置已同步";
+    public string SaveStatus => !WorkspaceReady ? "工作空间未就绪" : HasChanges ? "有待应用的更改" : "配置已同步";
     public bool PreviewRunning { get => _previewRunning; private set { if (Set(ref _previewRunning, value)) { Raise(nameof(StatusTitle)); Raise(nameof(StatusDescription)); Raise(nameof(TogglePreviewLabel)); Raise(nameof(StatusIconBrush)); Raise(nameof(StatusSurfaceBrush)); } } }
     public string StatusTitle => IsLoading ? "正在载入工作空间" : _runtimeUnavailable ? (IsPreview ? "模拟运行状态不可用" : "网络服务状态不可用") : PreviewRunning ? (IsPreview ? "模拟网络已就绪" : "网络已连接") : IsPreview ? "模拟已手动停止" : _state.HelperInstalled ? "网络已停止" : "完成设置，连接你的网络";
     public string StatusDescription => IsPreview ? (_runtimeUnavailable ? "请查看诊断，校验后重新应用配置。" : PreviewRunning ? "出口严格绑定，策略清晰可见。" : "恢复模拟后继续使用保存的策略。") : string.IsNullOrWhiteSpace(_state.Message) ? "选择网卡与全局代理后启动。" : _state.Message;
@@ -215,8 +216,8 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public UiCommand CloseSetupCommand { get; }
     public AsyncUiCommand NextSetupCommand { get; }
     public UiCommand BackSetupCommand { get; }
-    public bool OnboardingVisible { get => _onboarding; set => Set(ref _onboarding, value); }
-    public int SetupStep { get => _step; set { if (Set(ref _step, value)) { foreach (string name in new[] { nameof(SetupTitle), nameof(SetupDescription), nameof(SetupProgress), nameof(SetupInterfaces), nameof(SetupSubscription), nameof(SetupGlobal), nameof(SetupApplications), nameof(SetupReview), nameof(NextSetupLabel) }) Raise(name); BackSetupCommand?.Refresh(); NextSetupCommand?.Refresh(); if (SetupStep == 3) _ = LoadVisibleIconsAsync(); } } }
+    public bool OnboardingVisible { get => _onboarding; set { if (Set(ref _onboarding, value)) { Raise(nameof(WorkspaceNavigationEnabled)); RefreshNavigationCommands(); } } }
+    public int SetupStep { get => _step; set { if (Set(ref _step, value)) { foreach (string name in new[] { nameof(SetupTitle), nameof(SetupDescription), nameof(SetupProgress), nameof(SetupScrollContent), nameof(SetupInterfaces), nameof(SetupSubscription), nameof(SetupGlobal), nameof(SetupApplications), nameof(SetupReview), nameof(NextSetupLabel) }) Raise(name); BackSetupCommand?.Refresh(); NextSetupCommand?.Refresh(); if (SetupStep == 3) _ = LoadVisibleIconsAsync(); } } }
     public string SetupTitle => SetupStep switch { 0 => "先认识你的两条网络", 1 => "接入你的节点订阅", 2 => "保留你需要的分组", 3 => "让常用应用先行", _ => "检查并启动连接" };
     public string SetupDescription => SetupStep switch { 0 => "家宽与非家宽需要绑定两张不同的物理网卡。", 1 => "仅导入节点与分组，DNS 与分流由 Egress 统一管理。", 2 => "应用只需选择分组；节点、DIRECT 和自动测速在分组内管理。", 3 => "选择需要单独分流的应用；以后也可以随时添加。", _ => IsPreview ? "先校验配置，再应用到隔离的模拟运行环境。" : "先请求管理员授权并启动内置 Xray TUN，再通过所选非家宽分组节点下载规则；失败时可以重试。" };
     private ProxyGroup? SetupGlobalGroup => Document.Groups.FirstOrDefault(group => group.Id == SelectedGlobalTarget?.Id);
@@ -236,23 +237,26 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     };
     public string SetupSubscriptionStatus => _subscriptionReady ? NodeCountLabel : "尚未导入";
     public string SetupProgress => $"{SetupStep + 1} / 5"; public bool SetupInterfaces => SetupStep == 0; public bool SetupSubscription => SetupStep == 1; public bool SetupGlobal => SetupStep == 2; public bool SetupApplications => SetupStep == 3; public bool SetupReview => SetupStep == 4;
+    public bool SetupScrollContent => SetupStep is 0 or 1 or 4;
     public string NextSetupLabel => SetupStep == 4 ? (IsPreview ? "校验并完成" : "校验并启动") : "继续";
     private static bool Matches(string text, string query) => string.IsNullOrWhiteSpace(query) || text.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase);
     private string GlobalId() => Document.Defaults.Global.TargetId ?? "";
     private void CatalogSelectionChanged() { Raise(nameof(SelectedCatalogCount)); Raise(nameof(AddSelectedLabel)); ConfirmAppsCommand.Refresh(); }
-    public Task InitializeAsync() => _initialization ??= LoadWorkspaceAsync();
-    private async Task LoadWorkspaceAsync()
+    public Task InitializeAsync() => _initialization ??= LoadWorkspaceAsync(_lifetime.Token);
+    private async Task LoadWorkspaceAsync(CancellationToken cancellationToken)
     {
-        IsLoading = true; Raise(nameof(IsLoading)); Raise(nameof(CanEdit)); Raise(nameof(StatusTitle));
+        IsLoading = true; _workspaceLoadIssue = ""; OnboardingVisible = false; PublishWorkspaceState();
         try
         {
-            var bootstrap = await _backend.LoadAsync(_lifetime.Token);
+            var bootstrap = await _backend.LoadAsync(cancellationToken);
             Document = bootstrap.Document; _interfaces = bootstrap.Interfaces; _applications = bootstrap.Applications.ToList();
             InterfaceChoices = _interfaces.Select(item => new Choice(item.Id, item.Name, item.Detail)).ToArray(); Raise(nameof(InterfaceChoices));
             _subscriptionReady = Document.Nodes.Count > 0 || Document.Groups.Count > 0;
             SubscriptionUrl = Document.Subscriptions.FirstOrDefault()?.Url ?? (IsPreview ? PreviewFixtures.SubscriptionUrl : "");
             _state = bootstrap.Runtime; PreviewRunning = _state.Running; SetRuntimeUnavailable(!_state.Available);
-            _initialized = true; RebuildProjection();
+            _initialized = true; _loadedDraft = true; RebuildProjection();
+            if (bootstrap.LoadIssue is { Length: > 0 } || _interfaces.Count == 0)
+            { _workspaceLoadIssue = bootstrap.LoadIssue ?? "没有找到可用的物理网卡。连接网卡后重新载入；已保存的配置保留。"; _savedDraftRevision = _revision; HasChanges = false; Notice = _workspaceLoadIssue; return; }
             if (IsPreview)
             {
                 _ruleCatalog = await _backend.LoadRuleCatalogAsync(Document, ActionToken);
@@ -271,10 +275,10 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         }
         catch (Exception exception) when (IsExpectedFailure(exception))
         {
-            RecordFailure("workspace.load", exception); CurrentIssue = SafeFailure(exception, "工作空间载入失败；请查看日志后重试。");
-            SetRuntimeUnavailable(true); Notice = "工作空间尚未完成载入。";
+            RecordFailure("workspace.load", exception); _workspaceLoadIssue = exception is OperationCanceledException ? "已取消载入。保存的配置保留，可随时重新载入。" : "工作空间载入失败。请重新载入，或打开日志目录查看原因。";
+            OnboardingVisible = false; Notice = "工作空间尚未完成载入；未更改保存的设置。";
         }
-        finally { IsLoading = false; Raise(nameof(IsLoading)); Raise(nameof(CanEdit)); Raise(nameof(StatusTitle)); }
+        finally { IsLoading = false; PublishWorkspaceState(); RefreshCommands(); }
     }
     private void ApplyScenario(string scenario)
     {
@@ -309,15 +313,20 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         }
         using var owned = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); _operation = owned;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); _operationCompletion = completion;
-        _busy++; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands();
+        _busy++; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); Raise(nameof(CanResetWorkspace)); RefreshCommands();
         try { await operation(); }
         catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("client.operation", exception); CurrentIssue = SafeFailure(exception, "操作未能完成，请检查配置与日志后重试。"); AddEvent("操作未完成", CurrentIssue, "diagnostic"); }
-        finally { if (ReferenceEquals(_operation, owned)) _operation = null; _busy--; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands(); completion.TrySetResult(); }
+        finally { if (ReferenceEquals(_operation, owned)) _operation = null; _busy--; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); Raise(nameof(CanResetWorkspace)); RefreshCommands(); completion.TrySetResult(); }
     }
+    private void RefreshNavigationCommands()
+    { OverviewCommand.Refresh(); AppsCommand.Refresh(); RulesCommand.Refresh(); NodesCommand.Refresh(); SettingsCommand.Refresh(); }
     private void RefreshCommands()
     {
+        RefreshNavigationCommands();
+        Raise(nameof(CanProbe));
+        foreach (var group in _groupRows) group.RefreshInteraction();
         ConfirmAppsCommand.Refresh(); RefreshSelectedInventoryCommand.Refresh(); NextSetupCommand.Refresh(); BackSetupCommand.Refresh();
-        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh(); RepairNetworkCommand.Refresh(); CheckHomeCommand.Refresh();
+        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh(); RepairNetworkCommand.Refresh(); CheckHomeCommand.Refresh(); RetryWorkspaceCommand.Refresh();
     }
     private void RecordFailure(string operation, Exception error)
     { try { _backend.RecordFailure(operation, error); } catch (Exception) { /* Diagnostics are observational. */ } }

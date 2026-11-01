@@ -17,7 +17,7 @@ public static class Program
         catch (InvalidOperationException exception) { Console.Error.WriteLine(exception.Message); return 2; }
         Mode = startup.Mode; Scenario = startup.Scenario;
         if (Mode is StartupMode.Preview or StartupMode.MockSmoke) PreviewEnvironment.Enter();
-        if (Mode == StartupMode.MockSmoke) { PreviewChecks.RunAsync().GetAwaiter().GetResult(); Console.WriteLine("Mac desktop mock smoke passed; production initialization was not entered."); return 0; }
+        if (Mode == StartupMode.MockSmoke) { if (OperatingSystem.IsMacOS()) EgressController.Mac.MacNativeContractChecks.VerifyInterfaceInfo(); PreviewChecks.RunAsync().GetAwaiter().GetResult(); Console.WriteLine("Mac desktop mock smoke passed; production initialization was not entered."); return 0; }
         if (ProductionHostLauncher.NeedsHandoff(Mode, System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported, OperatingSystem.IsMacOS()))
         {
             try { return ProductionHostLauncher.ReplaceWithNativeProduct(AppContext.BaseDirectory); }

@@ -1,8 +1,9 @@
 <Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Desktop.Presentation.MacTheme">
  <Styles.Resources>
-  <SolidColorBrush x:Key="Ink">#252A35</SolidColorBrush><SolidColorBrush x:Key="SecondaryInk">#6A7280</SolidColorBrush><SolidColorBrush x:Key="MutedInk">#8D97A9</SolidColorBrush>
+  <SolidColorBrush x:Key="Ink">#252A35</SolidColorBrush><SolidColorBrush x:Key="SecondaryInk">#6A7280</SolidColorBrush><SolidColorBrush x:Key="MutedInk">#727D90</SolidColorBrush>
   <SolidColorBrush x:Key="Surface">#FFFFFF</SolidColorBrush><SolidColorBrush x:Key="Workspace">#F5F6F8</SolidColorBrush><SolidColorBrush x:Key="Sidebar">#ECEEF2</SolidColorBrush><SolidColorBrush x:Key="Line">#E7E9ED</SolidColorBrush>
   <SolidColorBrush x:Key="Accent">#4476DC</SolidColorBrush><SolidColorBrush x:Key="Home">#8763CD</SolidColorBrush><SolidColorBrush x:Key="NonHome">#218F9C</SolidColorBrush><SolidColorBrush x:Key="Proxy">#4178D7</SolidColorBrush>
+  <SolidColorBrush x:Key="HomeInk">#7654B1</SolidColorBrush><SolidColorBrush x:Key="NonHomeInk">#167986</SolidColorBrush><SolidColorBrush x:Key="ProxyInk">#386DCE</SolidColorBrush>
   <SolidColorBrush x:Key="Success">#238467</SolidColorBrush><SolidColorBrush x:Key="Warning">#A46D25</SolidColorBrush><SolidColorBrush x:Key="Danger">#BE5261</SolidColorBrush>
   <SolidColorBrush x:Key="ConnectionRail">#F8FAFD</SolidColorBrush>
   <SolidColorBrush x:Key="ConnectionHeader">#F7F9FC</SolidColorBrush>
@@ -64,6 +65,9 @@
  <Style Selector="Expander.local-import"><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="{StaticResource SecondaryInk}"/><Setter Property="Background" Value="{StaticResource Workspace}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="CornerRadius" Value="7"/></Style>
  <Style Selector="NumericUpDown"><Setter Property="FontSize" Value="12"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/></Style>
  <Style Selector="ComboBox"><Setter Property="MinHeight" Value="33"/><Setter Property="FontSize" Value="12"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#DFE4EE"/><Setter Property="Padding" Value="10,5"/><Setter Property="HorizontalAlignment" Value="Stretch"/></Style>
+ <Style Selector="ComboBox:empty"><Setter Property="IsEnabled" Value="False"/><Setter Property="PlaceholderText" Value="暂无可选项"/></Style>
+ <Style Selector="ComboBox TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style>
+ <Style Selector="ComboBox"><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
  <Style Selector="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="4"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/></Style>
  <Style Selector="CheckBox"><Setter Property="FontSize" Value="12"/><Setter Property="MinHeight" Value="28"/></Style>
  <Style Selector="TabItem"><Setter Property="FontSize" Value="12"/><Setter Property="Padding" Value="12,9"/></Style>

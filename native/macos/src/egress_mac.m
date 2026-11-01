@@ -83,6 +83,22 @@ int32_t egress_mac_copy_icon_png(const char *path, uint32_t pixels, uint8_t *out
         return copy_bytes(png.bytes, png.length, output, capacity, required);
     } @catch (NSException *exception) { (void)exception; return fail(required, EGRESS_MAC_INTERNAL); } }
 }
+/* Shared by live enumeration and pure ABI fixtures: C logical expressions box as NSNumber integers.
+ * Use explicit CFBoolean-backed literals at the JSON boundary. */
+static NSDictionary *interface_record(NSString *serviceId, NSString *bsd, NSString *name,
+    NSString *type, NSString *hardware, BOOL active, NSArray *addresses)
+{
+    return @{ @"serviceId":serviceId, @"bsdName":bsd, @"displayName":name, @"interfaceType":type,
+        @"hardwareAddress":hardware, @"isActive":(active || addresses.count > 0) ? @YES : @NO, @"addresses":addresses };
+}
+int32_t egress_mac_interface_fixture(int32_t active, int32_t has_address, uint8_t *output, size_t capacity, size_t *required)
+{
+    @autoreleasepool {
+        if ((active != 0 && active != 1) || (has_address != 0 && has_address != 1)) return fail(required, EGRESS_MAC_INVALID);
+        return copy_json(@[interface_record(@"fixture-service", @"en8", @"Fixture USB", @"Ethernet", @"", active != 0,
+            has_address ? @[@"192.0.2.8", @"2001:db8::8"] : @[])], output, capacity, required);
+    }
+}
 int32_t egress_mac_copy_interfaces_json(uint8_t *output, size_t capacity, size_t *required)
 {
     @autoreleasepool { @try {
@@ -115,9 +131,9 @@ int32_t egress_mac_copy_interfaces_json(uint8_t *output, size_t capacity, size_t
                         for (NSString *address in serviceState[@"Addresses"]) if (![addresses containsObject:address]) [addresses addObject:address];
                 }
             }
-            [result addObject:@{ @"serviceId":string_or_empty(SCNetworkServiceGetServiceID(service)), @"bsdName":bsd,
-                @"displayName":string_or_empty(SCNetworkServiceGetName(service)), @"interfaceType":string_or_empty(SCNetworkInterfaceGetInterfaceType(interface)),
-                @"hardwareAddress":string_or_empty(SCNetworkInterfaceGetHardwareAddressString(interface)), @"isActive":@(active || addresses.count > 0), @"addresses":addresses }];
+            [result addObject:interface_record(string_or_empty(SCNetworkServiceGetServiceID(service)), bsd,
+                string_or_empty(SCNetworkServiceGetName(service)), string_or_empty(SCNetworkInterfaceGetInterfaceType(interface)),
+                string_or_empty(SCNetworkInterfaceGetHardwareAddressString(interface)), active, addresses)];
         }
         if (store != NULL) CFRelease(store);
         CFRelease(services);

@@ -37,12 +37,22 @@ public sealed class FixtureClientBackend : IClientBackend
         _coordinator = new(Core, new InMemoryGenerationStore(), Lifecycle);
     }
     public void SetSubscriptionPayload(string yaml) => _transport.Add(new Uri(PreviewFixtures.SubscriptionUrl), Encoding.UTF8.GetBytes(yaml));
-    public Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken = default)
+    public string? LoadIssue { get; set; }
+    public Exception? LoadFailure { get; set; }
+    public TaskCompletionSource? LoadGate { get; set; }
+    public int LoadCalls { get; private set; }
+    public bool LongLabels { get; set; }
+    public MacPolicyDocument? WorkspaceDocument { get; set; }
+    public IReadOnlyList<ClientInterface>? InterfaceOverride { get; set; }
+    public int SaveCalls { get; private set; }
+    public async Task<ClientBootstrap> LoadAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new ClientBootstrap(PreviewFixtures.CreateDocument(),
-            [new("fixture-ethernet", "en5", "USB 2.5G Ethernet", "家宽 · 有线连接", true), new("fixture-wifi", "en0", "Wi-Fi", "非家宽 · 无线连接", true), new("fixture-usb", "en9", "USB LAN", "未连接 · 示例接口", false)],
-            Catalog(), true, new(_running, true, true, "隔离示例运行")));
+        cancellationToken.ThrowIfCancellationRequested(); LoadCalls++;
+        if (LoadGate is { } gate) await gate.Task.WaitAsync(cancellationToken);
+        if (LoadFailure is { } error) throw error;
+        return new ClientBootstrap(WorkspaceDocument ?? PreviewFixtures.CreateDocument(),
+            InterfaceOverride ?? [new("fixture-ethernet", "en5", (LongLabels ? new string('W', 150) : "USB 2.5G Ethernet"), "家宽 · 有线连接", true), new("fixture-wifi", "en0", "Wi-Fi", "非家宽 · 无线连接", true), new("fixture-usb", "en9", "USB LAN", "未连接 · 示例接口", false)],
+            Catalog(), true, new(_running, true, true, "隔离示例运行"), LoadIssue);
     }
     private static IReadOnlyList<ClientApplication> Catalog() => PreviewFixtures.InstalledApplications.Select(app => new ClientApplication(app.Id, app.Name, app.Id == "codex" ? "codex" : app.Product, app.Category, app.BundlePath, app.PrimaryExecutable, [], false, "example.preview." + app.Id)).ToArray();
     public Task<IReadOnlyList<ClientApplication>> DiscoverApplicationsAsync(CancellationToken cancellationToken = default) => Task.FromResult(Catalog());
@@ -140,7 +150,7 @@ public sealed class FixtureClientBackend : IClientBackend
     }
     public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested(); SavedPath = PrivatePreviewFiles.WriteText("preview-policy.yaml", PolicyYaml.Write(document)); return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); SaveCalls++; SavedPath = PrivatePreviewFiles.WriteText("preview-policy.yaml", PolicyYaml.Write(document)); return Task.CompletedTask;
     }
     public string? ResetBackupPath { get; private set; }
     public Task<ConfigurationResetResult> ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)

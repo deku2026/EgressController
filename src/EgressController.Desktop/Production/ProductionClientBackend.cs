@@ -81,12 +81,19 @@ public sealed class ProductionClientBackend : IClientBackend
         _gate.Require("load production workspace");
         var document = await _drafts.LoadAsync(cancellationToken).ConfigureAwait(false);
         _savedResourcePort = document?.Defaults.ResourceProxyPort ?? 17890;
-        var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
-        var applications = await DiscoverApplicationsAsync(cancellationToken).ConfigureAwait(false);
+        MacNetworkInterface[] interfaces = []; IReadOnlyList<ClientApplication> applications = [];
+        var failures = new List<string>();
+        try { interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException)
+        { _diagnostics.Failure("workspace.interfaces", error); failures.Add("无法读取网卡信息，请重新载入。已保存的配置保留。"); }
+        try { applications = await DiscoverApplicationsAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException)
+        { _diagnostics.Failure("workspace.applications", error); failures.Add("无法读取应用目录，请重新载入。已保存的应用清单保留。"); }
         return new(document ?? new(), interfaces.Where(Physical).Select(item => new ClientInterface(item.ServiceId, item.BsdName,
             item.DisplayName, item.IsActive ? item.BsdName + " · 已连接" : item.BsdName + " · 未连接", item.IsActive)).ToArray(),
-            applications, document is not null, await ReadStatusAsync(cancellationToken).ConfigureAwait(false));
+            applications, document is not null, await ReadStatusAsync(cancellationToken).ConfigureAwait(false), failures.Count == 0 ? null : string.Join("\n", failures));
     }
+
     public async Task<IReadOnlyList<ClientApplication>> DiscoverApplicationsAsync(CancellationToken cancellationToken = default)
     {
         var found = await _catalog.DiscoverAsync(cancellationToken).ConfigureAwait(false);

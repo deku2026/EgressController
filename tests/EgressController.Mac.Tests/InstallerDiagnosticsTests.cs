@@ -47,7 +47,7 @@ public sealed class InstallerDiagnosticsTests
     [Fact]
     public void PureNativeFileInfoRoundTripsThroughTheProductionJsonContract()
     {
-        if (OperatingSystem.IsMacOS()) MacNativeContractChecks.VerifyFileInfo();
+        if (OperatingSystem.IsMacOS()) { MacNativeContractChecks.VerifyFileInfo(); MacNativeContractChecks.VerifyInterfaceInfo(); }
     }
 
     [Theory]

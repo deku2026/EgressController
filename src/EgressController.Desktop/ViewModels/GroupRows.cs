@@ -51,6 +51,11 @@ public sealed class GroupRow : Bindable
         foreach (var row in _members) row.Refresh();
         TestCommand.Refresh();
     }
+    public void RefreshInteraction()
+    {
+        foreach (var row in _members) row.RefreshAvailability();
+        TestCommand.Refresh();
+    }
 }
 public sealed class GroupMemberRow(ShellViewModel owner, GroupRow parent, string id) : Bindable
 {
@@ -65,6 +70,7 @@ public sealed class GroupMemberRow(ShellViewModel owner, GroupRow parent, string
     public string LatencyColor => !Supported || Latency is "超时" or "绑定失败" or "解析失败" or "握手失败" or "无路由" or "拒绝连接" or "内核退出" or "配置无效" or "连接失败" ? "#BF565C" : Latency.EndsWith("ms", StringComparison.Ordinal) ? "#26917C" : "#8A91A0";
     public bool CanSelect => owner.CanEdit && Supported;
     public AsyncUiCommand SelectCommand { get; } = new(() => owner.SelectGroupMemberAsync(parent.Id, id));
+    public void RefreshAvailability() { Raise(nameof(CanSelect)); SelectCommand.Refresh(); }
     public void Refresh()
     {
         foreach (string property in new[] { nameof(Name), nameof(Detail), nameof(Latency), nameof(LatencyColor), nameof(Selected), nameof(CanSelect) }) Raise(property);

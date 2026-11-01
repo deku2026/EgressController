@@ -1,11 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" xmlns:views="using:EgressController.Desktop.Views" x:Class="EgressController.Desktop.Views.NodesView" x:DataType="vm:ShellViewModel">
  <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="12">
-  <Border Classes="card" Padding="14,10">
+  <Border IsEnabled="{Binding !ManagingGroups}" Classes="card" Padding="14,10">
    <Grid RowDefinitions="Auto,Auto" RowSpacing="6">
     <Grid ColumnDefinitions="24,*,200,Auto,Auto" ColumnSpacing="10">
      <ui:Glyph Kind="globe" Width="19" Height="19" Foreground="{StaticResource Proxy}"/>
      <StackPanel Grid.Column="1" Spacing="2"><TextBlock Text="默认分组" FontWeight="Medium"/><TextBlock Text="新连接立即生效" Classes="caption"/></StackPanel>
-     <ComboBox Name="GlobalTargetBox" Grid.Column="2" ItemsSource="{Binding GlobalChoices}" SelectedItem="{Binding SelectedGlobalTarget,Mode=TwoWay}" VerticalAlignment="Center" PlaceholderText="选择默认分组"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+     <ComboBox Name="GlobalTargetBox" Grid.Column="2" ItemsSource="{Binding GlobalChoices}" SelectedItem="{Binding SelectedGlobalTarget,Mode=TwoWay}" VerticalAlignment="Center" PlaceholderText="选择默认分组"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}" ToolTip.Tip="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
      <Button Grid.Column="3" Command="{Binding ManageGroupsCommand}" Classes="quiet"><StackPanel Orientation="Horizontal" Spacing="6"><ui:Glyph Kind="sliders" Width="16" Height="16"/><TextBlock Text="管理"/></StackPanel></Button>
      <Button Grid.Column="4" Command="{Binding ToggleSubscriptionCommand}" Classes="quiet"><StackPanel Orientation="Horizontal" Spacing="6"><ui:Glyph Kind="refresh" Width="15" Height="15"/><TextBlock Text="订阅"/></StackPanel></Button>
     </Grid>
@@ -15,7 +15,7 @@
    </Grid>
   </Border>
 
-  <Grid Grid.Row="2" RowDefinitions="Auto,Auto" RowSpacing="7">
+  <Grid IsEnabled="{Binding !ManagingGroups}" Grid.Row="2" RowDefinitions="Auto,Auto" RowSpacing="7">
    <Grid ColumnDefinitions="*,220,Auto,Auto" ColumnSpacing="8">
     <TextBlock Text="{Binding GroupCountLabel}" Classes="caption"/>
     <TextBox Grid.Column="1" Name="NodeSearch" Text="{Binding NodeQuery,Mode=TwoWay}" PlaceholderText="搜索分组、节点" AutomationProperties.Name="搜索分组或节点"/>
@@ -24,7 +24,7 @@
    </Grid>
    <TextBlock Grid.Row="1" Text="{Binding ProbeProgress}" Classes="caption" HorizontalAlignment="Right"/>
   </Grid>
-  <Grid Grid.Row="3">
+  <Grid IsEnabled="{Binding !ManagingGroups}" Grid.Row="3">
    <ListBox Name="ProxyGroupList" ItemsSource="{Binding VisibleGroups}" ItemContainerTheme="{StaticResource GroupRowContainer}" Padding="0" AutoScrollToSelectedItem="False">
     <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
     <ListBox.ItemTemplate><DataTemplate x:DataType="vm:GroupRow">
@@ -33,7 +33,7 @@
        <Button Classes="group-header" Command="{Binding ToggleCommand}" AutomationProperties.Name="{Binding Name}">
         <Grid ColumnDefinitions="34,*" ColumnSpacing="11">
          <ui:ProductAvatar Product="{Binding Product}" Width="32" Height="32"/>
-         <StackPanel Grid.Column="1" Spacing="4"><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"/><Border Classes="group-badge" IsVisible="{Binding IsDefault}"><TextBlock Text="默认" FontSize="10" Foreground="{StaticResource Proxy}"/></Border></StackPanel><Grid ColumnDefinitions="Auto,*" ColumnSpacing="8"><TextBlock Text="{Binding Kind}" FontSize="10" Foreground="{StaticResource Proxy}"/><TextBlock Grid.Column="1" Text="{Binding Current}" FontSize="11" Foreground="{StaticResource SecondaryInk}" TextTrimming="CharacterEllipsis"/></Grid></StackPanel>
+         <StackPanel Grid.Column="1" Spacing="4"><Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontSize="13" FontWeight="SemiBold" ToolTip.Tip="{Binding Name}"/><Border Grid.Column="1" Classes="group-badge" IsVisible="{Binding IsDefault}"><TextBlock Text="默认" FontSize="10" Foreground="{StaticResource Proxy}"/></Border></Grid><Grid ColumnDefinitions="Auto,*" ColumnSpacing="8"><TextBlock Text="{Binding Kind}" FontSize="10" Foreground="{StaticResource Proxy}"/><TextBlock Grid.Column="1" Text="{Binding Current}" FontSize="11" Foreground="{StaticResource SecondaryInk}" TextTrimming="CharacterEllipsis"/></Grid></StackPanel>
         </Grid>
        </Button>
        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="8,0"><TextBlock Text="{Binding Latency}" Classes="caption"/><Border Classes="count-pill"><TextBlock Text="{Binding MemberCount}" FontSize="10"/></Border></StackPanel>
@@ -45,7 +45,7 @@
        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6"><TextBlock Text="{Binding Detail}" Classes="caption" TextWrapping="Wrap"/><Button Grid.Column="1" Content="自动优选" Classes="soft" Command="{Binding AutomaticCommand}" FontSize="11"/><Button Grid.Column="2" Content="故障转移" Classes="quiet" Command="{Binding FallbackCommand}" FontSize="11"/></Grid>
        <ItemsControl ItemsSource="{Binding Members}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><ui:MemberTilePanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:GroupMemberRow">
         <Button Classes="group-member" Classes.selected="{Binding Selected}" Command="{Binding SelectCommand}" IsEnabled="{Binding CanSelect}" MinHeight="58" ToolTip.Tip="{Binding Name}" AutomationProperties.Name="{Binding Name}">
-         <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5" ColumnSpacing="7"><TextBlock Text="{Binding Name}" FontSize="12" FontWeight="Medium" TextTrimming="CharacterEllipsis"/><ui:Glyph Grid.Column="1" Kind="check" Width="13" Height="13" IsVisible="{Binding Selected}" Foreground="{StaticResource Proxy}"/><TextBlock Grid.Row="1" Text="{Binding Detail}" FontSize="10" Foreground="{StaticResource SecondaryInk}" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Latency}" FontSize="10" Foreground="{Binding LatencyColor}"/></Grid>
+         <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5" ColumnSpacing="7"><TextBlock Text="{Binding Name}" FontSize="12" FontWeight="Medium" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}"/><ui:Glyph Grid.Column="1" Kind="check" Width="13" Height="13" IsVisible="{Binding Selected}" Foreground="{StaticResource Proxy}"/><TextBlock Grid.Row="1" Text="{Binding Detail}" FontSize="10" Foreground="{StaticResource SecondaryInk}" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Latency}" FontSize="10" Foreground="{Binding LatencyColor}"/></Grid>
         </Button>
        </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        <CheckBox IsChecked="{Binding ShowUnavailable,Mode=TwoWay}" Content="显示已移除 / 不支持的成员" FontSize="10" Foreground="{StaticResource SecondaryInk}"/>
@@ -55,8 +55,8 @@
    </ListBox>
    <TextBlock IsVisible="{Binding NoGroupsMatch}" Text="没有匹配的分组。导入订阅，或在「管理」中保留需要的分组。" Classes="caption" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center"/>
   </Grid>
-  <Border Grid.RowSpan="4" IsVisible="{Binding ManagingGroups}" Classes="card" Padding="20" ZIndex="2">
-   <Grid RowDefinitions="Auto,*" RowSpacing="16"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="4"><TextBlock Text="保留的分组" Classes="section"/><TextBlock Text="选择日常列表和应用中显示的分组" Classes="caption"/></StackPanel><Button Grid.Column="1" Command="{Binding ManageGroupsCommand}" Content="完成" Classes="primary"/></Grid><views:GroupRetentionView Grid.Row="1"/></Grid>
+  <Border Name="GroupManagementPanel" KeyboardNavigation.TabNavigation="Cycle" Grid.RowSpan="4" IsVisible="{Binding ManagingGroups}" Classes="card" Padding="20" ZIndex="2">
+   <Grid RowDefinitions="Auto,*" RowSpacing="16"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="4"><TextBlock Text="保留的分组" Classes="section"/><TextBlock Text="选择日常列表和应用中显示的分组" Classes="caption"/></StackPanel><Button Name="FinishGroupManagementButton" Grid.Column="1" Command="{Binding ManageGroupsCommand}" Content="完成" Classes="primary"/></Grid><views:GroupRetentionView Grid.Row="1"/></Grid>
   </Border>
  </Grid>
 </UserControl>
