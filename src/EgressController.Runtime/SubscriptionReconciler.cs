@@ -40,7 +40,16 @@ public static class SubscriptionReconciler
             if (incomingGroups.TryGetValue(previous.Id, out var replacement))
             {
                 // A missing selected member stays selected and becomes a validation error.
-                replacement.SelectedMemberId = previous.SelectedMemberId;
+                replacement.SelectedMemberId = previous.SelectedMemberId ?? replacement.SelectedMemberId;
+                replacement.Retained = previous.Retained;
+                replacement.StrategyOverridden = previous.StrategyOverridden;
+                if (previous.StrategyOverridden)
+                {
+                    replacement.Kind = previous.Kind;
+                    // DIRECT is an explicit user-added option, independent of subscription membership.
+                    if (previous.MemberIds.Contains(GroupGraph.Direct) && !replacement.MemberIds.Contains(GroupGraph.Direct))
+                        replacement.MemberIds.Add(GroupGraph.Direct);
+                }
             }
             else
             {

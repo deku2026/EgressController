@@ -11,7 +11,7 @@ using EgressController.Desktop.Services;
 namespace EgressController.Desktop.ViewModels;
 
 /// <summary>One typed policy draft; backend composition decides production versus explicit preview.</summary>
-public sealed class ShellViewModel : Bindable, IAsyncDisposable
+public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
 {
     private readonly IClientBackend _backend;
     private readonly CancellationTokenSource _lifetime = new();
@@ -81,8 +81,9 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         Connections = new(backend.IsPreview);
         CancelOperationCommand = new(() => _operation?.Cancel());
+        ManageGroupsCommand = new(() => ManagingGroups = !ManagingGroups);
         OverviewCommand = new(() => PageIndex = 0); AppsCommand = new(() => PageIndex = 1); RulesCommand = new(() => PageIndex = 2); NodesCommand = new(() => PageIndex = 3); SettingsCommand = new(() => PageIndex = 4);
-        OpenLogsCommand = new(() => { PageIndex = 4; SettingsTab = 4; });
+        OpenLogsCommand = new(() => { OnboardingVisible = false; PageIndex = 4; SettingsTab = 4; });
         ShowLogDirectoryCommand = new(() => RunOperationAsync(ShowLogDirectoryAsync));
         RefreshSelectedInventoryCommand = new(() => RunOperationAsync(RefreshSelectedInventoryAsync), () => SelectedApp is not null && !IsBusy);
         AddAppsCommand = new(() => RunOperationAsync(ShowApplicationCatalogAsync)); CancelAppsCommand = new(() => { AddingApps = false; foreach (var row in _catalog) row.IsSelected = false; });
@@ -100,12 +101,12 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public IReadOnlyList<Choice> InterfaceChoices { get; private set; } = [];
     public IReadOnlyList<Choice> GlobalChoices { get; private set; } = [];
     public IReadOnlyList<Choice> GroupChoices { get; private set; } = [];
-    public IReadOnlyList<Choice> GroupMemberChoices => SelectedGroupModel?.MemberIds.Select(id => new Choice(id, Document.Nodes.FirstOrDefault(x => x.Id == id)?.Name ?? Document.Groups.FirstOrDefault(x => x.Id == id)?.Name ?? id)).ToArray() ?? [];
+    public IReadOnlyList<Choice> GroupMemberChoices => SelectedGroupModel?.MemberIds.Select(id => new Choice(id, GroupGraph.Name(id, Document))).ToArray() ?? [];
     public IReadOnlyList<Choice> GroupStrategies { get; } = [new("Select", "手动选择"), new("UrlTest", "自动测速"), new("Fallback", "故障转移")];
     private Choice? _strategy;
     private bool _reconciling;
     private IReadOnlyList<Choice> _availableProxyChoices=[];
-    public Choice? SelectedStrategy { get => _strategy; set { if(_reconciling)return;if (Set(ref _strategy, value) && value is not null && SelectedGroupModel is { } g && Enum.TryParse<GroupKind>(value.Id, out var kind)) { if(g.Kind==kind)return;g.Kind = kind; StateChanged(); RaiseGroup(); } } }
+    public Choice? SelectedStrategy { get => _strategy; set { if(_reconciling)return;if (Set(ref _strategy, value) && value is not null && SelectedGroupModel is { } g && Enum.TryParse<GroupKind>(value.Id, out var kind)) { if(g.Kind==kind)return;g.Kind = kind; g.StrategyOverridden = true; StateChanged(); RaiseGroup(); } } }
     public ProxyGroup? SelectedGroupModel => Document.Groups.FirstOrDefault(x => x.Id == _group?.Id);
     public Choice? SelectedHomeInterface { get => _home; set { if(_reconciling)return;if (Set(ref _home, value) && value is not null) { if(Document.Interfaces.HomeId==value.Id)return;Document.Interfaces.HomeId = value.Id; StateChanged(); Raise(nameof(HomeInterfaceName)); } } }
     public Choice? SelectedNonHomeInterface { get => _nonHome; set { if(_reconciling)return;if (Set(ref _nonHome, value) && value is not null) { if(Document.Interfaces.NonHomeId==value.Id)return;Document.Interfaces.NonHomeId = value.Id; StateChanged(); Raise(nameof(NonHomeInterfaceName)); } } }
@@ -119,7 +120,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public string PageTitle => PageIndex switch { 0 => "总览", 1 => "应用分流", 2 => "规则集合", 3 => "节点与分组", _ => "设置" };
     public string PageDescription => PageIndex switch { 0 => "每一次连接，都有清晰的去向。", 1 => "为你的应用选择出口，未运行时策略依然保留。", 2 => "把域名与 IP 作为集合管理，让分流更简单。", 3 => "一个订阅，统一管理节点、分组与全局出口。", _ => "网络偏好、配置与诊断，尽在一处。" };
     public int SettingsTab { get => _settingsTab; set => Set(ref _settingsTab, value); }
-    public string NodeQuery { get => _nodeQuery; set { if (Set(ref _nodeQuery, value)) { Raise(nameof(VisibleNodes)); Raise(nameof(NoNodesMatch)); } } }
+    public string NodeQuery { get => _nodeQuery; set { if (Set(ref _nodeQuery, value)) { Raise(nameof(VisibleNodes)); Raise(nameof(NoNodesMatch)); PublishGroups(); } } }
     public IReadOnlyList<NodeRow> VisibleNodes => _nodes.Where(row => Matches(row.Name + " " + row.Protocol + " " + row.Model.Server + " "
         + string.Join(" ", Document.Groups.Where(group => group.MemberIds.Contains(row.Model.Id)).Select(group => group.Name)), NodeQuery)).ToArray();
     public bool NoNodesMatch => VisibleNodes.Count == 0;
@@ -177,7 +178,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         foreach (string property in new[] { nameof(StatusTitle), nameof(StatusDescription), nameof(TogglePreviewLabel), nameof(StatusIconBrush), nameof(StatusSurfaceBrush) }) Raise(property);
     }
     public string HomeInterfaceName => SelectedHomeInterface?.Name ?? "尚未选择"; public string NonHomeInterfaceName => SelectedNonHomeInterface?.Name ?? "尚未选择"; public string GlobalTargetName => SelectedGlobalTarget?.Name ?? "必须选择一个代理";
-    public string ProxyResolvedName => GroupSelector.Resolve(Document.Defaults.Global.TargetId ?? "", Document, _probes, _backend.Now).NodeId is { } id ? Document.Nodes.FirstOrDefault(x => x.Id == id)?.Name ?? "待选择" : "待校验";
+    public string ProxyResolvedName => GroupSelector.Resolve(Document.Defaults.Global.TargetId ?? "", Document, _probes, _backend.Now).NodeId is { } id ? GroupGraph.Name(id, Document) : "待校验";
     public IReadOnlyList<Observation> Observations => IsPreview ? PreviewFixtures.Observations : [];
     public bool HasObservations => Observations.Count > 0;
     public BoundedEvents Events { get; } = [];
@@ -211,8 +212,8 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     public UiCommand BackSetupCommand { get; }
     public bool OnboardingVisible { get => _onboarding; set => Set(ref _onboarding, value); }
     public int SetupStep { get => _step; set { if (Set(ref _step, value)) { foreach (string name in new[] { nameof(SetupTitle), nameof(SetupDescription), nameof(SetupProgress), nameof(SetupInterfaces), nameof(SetupSubscription), nameof(SetupGlobal), nameof(SetupApplications), nameof(SetupReview), nameof(NextSetupLabel) }) Raise(name); BackSetupCommand?.Refresh(); NextSetupCommand?.Refresh(); } } }
-    public string SetupTitle => SetupStep switch { 0 => "先认识你的两条网络", 1 => "接入你的节点订阅", 2 => "为全球流量指定出口", 3 => "让常用应用先行", _ => "检查并启动连接" };
-    public string SetupDescription => SetupStep switch { 0 => "家宽与非家宽需要绑定两张不同的物理网卡。", 1 => "仅导入节点与分组，DNS 与分流由 Egress 统一管理。", 2 => "中国大陆默认非家宽直连，其他流量始终使用此代理。", 3 => "选择需要单独分流的应用；以后也可以随时添加。", _ => IsPreview ? "先校验配置，再应用到隔离的模拟运行环境。" : "先请求管理员授权并启动内置 Xray TUN，再通过所选非家宽分组节点下载规则；失败时可以重试。" };
+    public string SetupTitle => SetupStep switch { 0 => "先认识你的两条网络", 1 => "接入你的节点订阅", 2 => "保留你需要的分组", 3 => "让常用应用先行", _ => "检查并启动连接" };
+    public string SetupDescription => SetupStep switch { 0 => "家宽与非家宽需要绑定两张不同的物理网卡。", 1 => "仅导入节点与分组，DNS 与分流由 Egress 统一管理。", 2 => "应用只需选择分组；节点、DIRECT 和自动测速在分组内管理。", 3 => "选择需要单独分流的应用；以后也可以随时添加。", _ => IsPreview ? "先校验配置，再应用到隔离的模拟运行环境。" : "先请求管理员授权并启动内置 Xray TUN，再通过所选非家宽分组节点下载规则；失败时可以重试。" };
     private ProxyGroup? SetupGlobalGroup => Document.Groups.FirstOrDefault(group => group.Id == SelectedGlobalTarget?.Id);
     public bool SetupGlobalManual => SetupGlobalGroup?.Kind == GroupKind.Select;
     public IReadOnlyList<Choice> SetupGlobalMemberChoices => SetupGlobalGroup?.MemberIds.Select(id => new Choice(id, Document.Nodes.FirstOrDefault(node => node.Id == id)?.Name ?? Document.Groups.FirstOrDefault(group => group.Id == id)?.Name ?? id)).ToArray() ?? [];
@@ -244,7 +245,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             if (IsPreview)
             {
                 _ruleCatalog = await _backend.LoadRuleCatalogAsync(Document, ActionToken);
-                await RunProbesAsync(); await CompileDraftAsync();
+                await MeasureGroupsAsync(applyAutomatic: false); await CompileDraftAsync();
             }
             else
             {
@@ -259,7 +260,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         }
         catch (Exception exception) when (IsExpectedFailure(exception))
         {
-            CurrentIssue = SafeFailure(exception, "工作空间载入失败；请查看日志后重试。");
+            RecordFailure("workspace.load", exception); CurrentIssue = SafeFailure(exception, "工作空间载入失败；请查看日志后重试。");
             SetRuntimeUnavailable(true); Notice = "工作空间尚未完成载入。";
         }
         finally { IsLoading = false; Raise(nameof(IsLoading)); Raise(nameof(CanEdit)); Raise(nameof(StatusTitle)); }
@@ -288,17 +289,29 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     private async Task RunOperationAsync(Func<Task> operation)
     {
         if (_disposed || IsBusy) return;
+        if (_maintainingGroups)
+        {
+            _groupMaintenanceCancellation?.Cancel();
+            if (_groupMaintenanceCompletion is { } pending) await pending.Task;
+            if (_disposed || IsBusy) return;
+        }
         using var owned = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); _operation = owned;
         _busy++; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands();
         try { await operation(); }
-        catch (Exception exception) when (IsExpectedFailure(exception)) { CurrentIssue = SafeFailure(exception, "操作未能完成，请检查配置与日志后重试。"); AddEvent("操作未完成", CurrentIssue, "diagnostic"); }
+        catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("client.operation", exception); CurrentIssue = SafeFailure(exception, "操作未能完成，请检查配置与日志后重试。"); AddEvent("操作未完成", CurrentIssue, "diagnostic"); }
         finally { if (ReferenceEquals(_operation, owned)) _operation = null; _busy--; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands(); }
     }
     private void RefreshCommands()
     {
         ConfirmAppsCommand.Refresh(); RefreshSelectedInventoryCommand.Refresh(); NextSetupCommand.Refresh(); BackSetupCommand.Refresh();
     }
-    private void AddEvent(string title, string detail, string kind) => Events.Insert(0, new(_backend.Now.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture), title, detail, kind));
+    private void RecordFailure(string operation, Exception error)
+    { try { _backend.RecordFailure(operation, error); } catch (Exception) { /* Diagnostics are observational. */ } }
+    private void AddEvent(string title, string detail, string kind)
+    {
+        Events.Insert(0, new(_backend.Now.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture), title, detail, kind));
+        try { _backend.RecordEvent(kind, title + " · " + detail); } catch (Exception) { }
+    }
     private ClientApplication? AppMetadata(string bundlePath) => _applications.FirstOrDefault(app => app.BundlePath == bundlePath);
     private static string StableObjectId(string prefix, string value) => prefix + (value.Length > 0 && value.Length <= 100 && char.IsAsciiLetterOrDigit(value[0]) && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.') ? value : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..24]);
     private bool RuleAlreadyAdded(ClientRuleCatalogEntry entry) => Document.RuleSets.Any(rule => rule.Id == StableObjectId("rule-", entry.Id) || entry.Sources.Count > 0 && entry.Sources.All(source => rule.Sources.Contains(source, StringComparer.Ordinal)));
@@ -308,7 +321,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         try
         {
         string? appId = SelectedApp?.Model.Id, ruleId = SelectedRule?.Model.Id;
-        _availableProxyChoices = Document.Groups.Where(group => group.IsSupported).Select(group => new Choice(group.Id, group.Name, "分组")).ToArray();
+        _availableProxyChoices = Document.Groups.Where(group => group.IsSupported && group.Retained).Select(group => new Choice(group.Id, group.Name, "分组")).ToArray();
         GlobalChoices=Document.Defaults.Global.TargetId is {Length:>0} missing&&!_availableProxyChoices.Any(choice=>choice.Id==missing)
             ?_availableProxyChoices.Append(new Choice(missing,"缺失的全局代理","请明确重新选择")).ToArray():_availableProxyChoices;
         GroupChoices = Document.Groups.Select(group => new Choice(group.Id, group.Name)).ToArray();
@@ -336,7 +349,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         _global = GlobalChoices.FirstOrDefault(choice => choice.Id == GlobalId()); _group = GroupChoices.FirstOrDefault(choice => choice.Id == _group?.Id) ?? GroupChoices.FirstOrDefault();
         SelectedApp = _apps.FirstOrDefault(row => row.Model.Id == appId); SelectedRule = _rules.FirstOrDefault(row => row.Model.Id == ruleId);
         foreach (string property in new[] { nameof(Nodes), nameof(GlobalChoices), nameof(GroupChoices), nameof(SelectedHomeInterface), nameof(SelectedNonHomeInterface), nameof(SelectedGlobalTarget), nameof(SelectedGroup), nameof(ApplicationCount), nameof(RuleCount), nameof(ApplicationCountLabel), nameof(RuleCountLabel), nameof(NodeCountLabel), nameof(AppsEmpty), nameof(RulesEmpty), nameof(NoAppsMatch), nameof(NoCatalogMatch), nameof(NoRulesMatch), nameof(RuleSuggestions), nameof(HomeInterfaceName), nameof(NonHomeInterfaceName), nameof(GlobalTargetName), nameof(SelectedAppName), nameof(SelectedRuleName), nameof(SelectedRuleSummary), nameof(DnsServer), nameof(SubscriptionName), nameof(SetupGlobalManual), nameof(SetupGlobalMemberChoices), nameof(SelectedSetupGlobalMember) }) Raise(property);
-        Raise(nameof(VisibleNodes)); Raise(nameof(NoNodesMatch)); Raise(nameof(ResourceProxyPort)); RaiseGroup(); CatalogSelectionChanged(); DslText = PolicyYaml.Write(Document);
+        RebuildGroups(); Raise(nameof(VisibleNodes)); Raise(nameof(NoNodesMatch)); Raise(nameof(ResourceProxyPort)); RaiseGroup(); CatalogSelectionChanged(); DslText = PolicyYaml.Write(Document);
         }
         finally{_reconciling=false;}
     }
@@ -441,8 +454,8 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
                 Kind = GroupKind.Select, MemberIds = imported.Nodes.Where(node => node.IsSupported).Select(node => node.Id).ToList() }] };
         Document = SubscriptionReconciler.Merge(Document, sourceId, imported);
         _probes.Clear(); _subscriptionReady = true; CurrentIssue = ""; LocalSubscriptionYaml = "";
-        RebuildProjection(); StateChanged(); Raise(nameof(SetupSubscriptionStatus));
-        Notice = "本地节点已导入。请选择非家宽网卡、全局分组和成员，然后连接。";
+        InitializeImportedDefault(); RebuildProjection(); StateChanged(); Raise(nameof(SetupSubscriptionStatus));
+        Notice = "本地节点与分组已导入。保留需要的分组并选择默认组，然后连接。";
     }
     public async Task ImportSubscriptionAsync()
     {
@@ -451,17 +464,21 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         try
         {
             var imported = await _backend.ImportSubscriptionAsync(uri, Document, ActionToken);
-            Document = imported; _probes.Clear(); _subscriptionReady = Document.Nodes.Count > 0 || Document.Groups.Count > 0; RebuildProjection(); StateChanged();
-            if (IsPreview) await RunProbesAsync();
+            Document = imported; InitializeImportedDefault(); _probes.Clear(); _subscriptionReady = Document.Nodes.Count > 0 || Document.Groups.Count > 0; RebuildProjection(); StateChanged();
+            if (IsPreview) await MeasureGroupsAsync(applyAutomatic: false);
             Raise(nameof(SetupSubscriptionStatus)); Notice = $"订阅已更新：{NodeCountLabel}；原有选择已保留。"; AddEvent("订阅已更新", "已校验节点与分组；原有配置选择继续保留。", "subscription");
         }
-        catch (Exception exception) when (IsExpectedFailure(exception)) { Notice = exception is OperationCanceledException ? "订阅导入已取消；原有节点与缓存已保留。" : "订阅直连未完成；原有节点与缓存已保留，可以重试。"; CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
+        catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("subscription.import", exception); Notice = exception is OperationCanceledException ? "订阅导入已取消；原有节点与缓存已保留。" : "订阅直连未完成；原有节点与缓存已保留，可以重试。"; CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
     }
     public void RunProbes() { if (!IsPreview) throw new InvalidOperationException("Use asynchronous real probing."); RunProbesAsync().GetAwaiter().GetResult(); }
-    public async Task RunProbesAsync()
+    public Task RunProbesAsync() => MeasureGroupsAsync(applyAutomatic: true);
+    private async Task MeasureGroupsAsync(bool applyAutomatic)
     {
         CurrentIssue = ""; Notice = IsPreview ? "正在执行示例测速…" : "正在通过指定非家宽出口测速…";
-        var probes = await _backend.ProbeAsync(Document, RequireNonHomeBinding(), ActionToken); _probes.Clear(); _probes.AddRange(probes); RefreshNodeLatencies();
+        _ = RequireNonHomeBinding();
+        var probes = await _backend.ProbeMembersAsync(CopyDocument(Document), CompileOptions(),
+            GroupRequests(Document.Groups.Where(group => group.Retained), Document), ActionToken);
+        MergeProbes(probes); if (applyAutomatic) await ApplyAutomaticObservationsAsync(ActionToken);
         Notice = IsPreview ? "示例测速已完成；没有建立真实网络连接。" : $"测速已完成 · {_backend.Now.ToLocalTime():HH:mm:ss}；失败或缺失结果不显示为零。"; Raise(nameof(ProxyResolvedName));
     }
     private void RefreshNodeLatencies()
@@ -479,7 +496,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         if (binding is null) throw new RuntimeFailureException("interface.identity");
         return new(binding.Id, binding.BsdName);
     }
-    public XrayCompileOptions CompileOptions(MacPolicyDocument? candidate = null) => new() { Interfaces = _interfaces.Select(item => new InterfaceBinding(item.Id, item.BsdName)).ToList(), Probes = _probes.ToList(), PreparedRuleSources = _prepared.Bindings.ToList(), Now = _backend.Now };
+    public XrayCompileOptions CompileOptions(MacPolicyDocument? candidate = null) => new() { Interfaces = _interfaces.Select(item => new InterfaceBinding(item.Id, item.BsdName)).ToList(), Probes = _probes.ToList(), PreparedRuleSources = _prepared.Bindings.ToList(), Now = _backend.Now, ResourceNodeId = GroupGraph.ResourceNode(candidate ?? Document, _probes, _backend.Now) };
     private void SetPreparedResources(ClientPreparedResources prepared) { _prepared = prepared; Raise(nameof(SourceStatusText)); }
     public IReadOnlyDictionary<string, byte[]> PreparedAssets() => _prepared.Assets;
     public void CompileDraft() { if (!IsPreview) throw new InvalidOperationException("Use asynchronous production validation."); CompileDraftAsync().GetAwaiter().GetResult(); }
@@ -500,6 +517,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     {
         if (!PreviewRunning || _runtimeUnavailable) { await ApplyPreviewAsync(); return; }
         bool stopped = await _backend.StopAsync(ActionToken);
+        if (stopped) _appliedGroups = null;
         if (!stopped) { PreviewRunning = false; SetRuntimeUnavailable(true); CurrentIssue = "停止失败，网络服务状态不可用。请查看诊断后重试。"; return; }
         await RefreshStatusAsync(); Notice = IsPreview ? "模拟内核已停止；保存的配置与固定路径清单仍然保留。" : "网络已停止；保存的配置与固定路径清单继续保留。"; AddEvent("用户停止连接", Notice, "lifecycle");
     }
@@ -507,7 +525,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     {
         if (_applying) return; _applying = true;
         bool applied = false;
-        long attemptRevision = ++_attemptRevision; ConnectionAttempt.Begin();
+        long attemptRevision = ++_attemptRevision; CurrentIssue = ""; ConnectionAttempt.Begin();
         _backend.SetProgressSink(new UiProgress(progress => { if (_attemptRevision == attemptRevision) ConnectionAttempt.Observe(progress); }));
         try
         {
@@ -522,14 +540,14 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             {
                 var probes = await _backend.PrepareRequiredProbesAsync(candidate, CompileOptions(candidate), ActionToken); _probes.Clear(); _probes.AddRange(probes); RefreshNodeLatencies();
             }
-            await _backend.PrepareResourceProxyAsync(candidate, CompileOptions(candidate), ActionToken);
-            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "TUN 与本地代理已确认，检查缓存并通过非家宽分组节点下载缺失规则。"));
-            SetPreparedResources(await _backend.PrepareResourcesAsync(candidate, ActionToken));
+            ConnectionAttempt.Observe(new(ConnectionAttemptStage.Resources, "优先使用已验证缓存；缺失资源自动选择默认分组中可用的非 DIRECT 节点。"));
+            var ready = await _backend.PrepareConnectionResourcesAsync(candidate, CompileOptions(candidate), ActionToken);
+            MergeProbes(ready.Probes); SetPreparedResources(ready.Resources);
             if (!CompilePrepared(candidate).IsSuccess) { ConnectionAttempt.Fail(CurrentIssue); return; }
             var result = await _backend.ApplyAsync(candidate, CompileOptions(candidate), _prepared.Assets, ActionToken);
             if (result.Succeeded)
             {
-                applied = true;
+                applied = true; RememberAppliedGroups(candidate);
                 if (revision == _revision) HasChanges = false; CurrentIssue = ""; await RefreshStatusAsync();
                 Notice = result.Disposition == ApplyDisposition.Unchanged ? "配置已保存，运行内容未改变。" : IsPreview ? "配置已应用到模拟内核；未启动真实 TUN。" : "配置已应用，网络状态以后台服务实际报告为准。";
                 AddEvent("配置已应用", Notice, "configuration");
@@ -539,11 +557,11 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
             else { CurrentIssue = string.Join(" ", result.Diagnostics.Select(diagnostic => diagnostic.Message)); ConnectionAttempt.Fail(CurrentIssue); await RefreshStatusAsync(); }
         }
         catch (OperationCanceledException) { ConnectionAttempt.Fail("已取消本次准备；已验证缓存与保存的配置保留。", canceled: true); throw; }
-        catch (Exception error) when (IsExpectedFailure(error)) { ConnectionAttempt.Fail(SafeFailure(error, "连接准备失败，请检查 Xray 非家宽节点、端口、TUN 与授权状态后重试。")); throw; }
+        catch (Exception error) when (IsExpectedFailure(error)) { RecordFailure("connection.prepare", error); CurrentIssue = SafeFailure(error, "连接准备失败，请检查 Xray 非家宽节点、端口、TUN 与授权状态后重试。"); ConnectionAttempt.Fail(CurrentIssue); throw; }
         finally
         {
             try { await _backend.EndConnectionAsync(applied); if (!applied) await RefreshStatusAsync(); }
-            catch (RuntimeFailureException failure) { ConnectionAttempt.Fail(failure.Message); CurrentIssue = failure.Message; SetRuntimeUnavailable(true); throw; }
+            catch (RuntimeFailureException failure) { RecordFailure("connection.recovery", failure); ConnectionAttempt.Fail(failure.Message); CurrentIssue = failure.Message; SetRuntimeUnavailable(true); throw; }
             finally { _applying = false; }
         }
     }
@@ -557,7 +575,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
         var candidate = parsed.Document;
         if (IsProduction)
         {
-            Document = candidate; RebuildProjection(); StateChanged(); CurrentIssue = "";
+            Document = candidate; _subscriptionReady = Document.Groups.Count > 0; RebuildProjection(); StateChanged(); CurrentIssue = "";
             Notice = "DSL 结构已校验并保存为草稿；连接时通过内置 Xray 准备并验证规则。"; return;
         }
         var prepared = await _backend.PrepareResourcesAsync(candidate, ActionToken);
@@ -647,7 +665,7 @@ public sealed class ShellViewModel : Bindable, IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return; _disposed = true; _lifetime.Cancel(); if (_iconPump is not null) await _iconPump; await _backend.DisposeAsync();
+        if (_disposed) return; _disposed = true; _lifetime.Cancel(); if (_groupMaintenanceCompletion is { } maintenance) await maintenance.Task; if (_iconPump is not null) await _iconPump; await _backend.DisposeAsync();
         foreach (var icon in _icons.Values) icon.Dispose(); _icons.Clear(); _lifetime.Dispose();
     }
 }

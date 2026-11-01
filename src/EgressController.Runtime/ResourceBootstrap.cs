@@ -18,7 +18,7 @@ public sealed partial class ConfigurationCoordinator
         bool completing, CancellationToken cancellationToken)
     {
         var bootstrapOptions = new XrayCompileOptions { Interfaces = options.Interfaces.ToList(), Probes = options.Probes.ToList(),
-            Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, ResourceBootstrap = true, DeferAutomaticGroupSelection = !completing };
+            Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, ResourceBootstrap = true, DeferAutomaticGroupSelection = !completing, ResourceNodeId = options.ResourceNodeId };
         var compiled = XrayConfigCompiler.Compile(document, bootstrapOptions);
         if (!compiled.IsSuccess) throw new InvalidDataException(string.Join(" ", compiled.Diagnostics.Select(item => item.Message)));
         string policy = PolicyYaml.Write(document);

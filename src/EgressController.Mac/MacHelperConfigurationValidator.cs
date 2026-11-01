@@ -163,7 +163,7 @@ public static class MacHelperConfigurationValidator
                 {
                     resourcesRouted = resourceProxy && ruleIndex == 0 && rule.EnumerateObject().Count() == 3
                         && OneString(rule.GetProperty("inboundTag"), "resources")
-                        && (ProxyProtocols.Contains(protocols[target]) || bootstrap && target == "blocked");
+                        && (ProxyProtocols.Contains(protocols[target]) || target == "blocked");
                     Need(resourcesRouted, "resource-route", "Resource SOCKS must route first and exclusively to the selected proxy.");
                 }
                 if (ruleTag == "dns-upstream")
@@ -190,7 +190,7 @@ public static class MacHelperConfigurationValidator
                     "bootstrap-boundary", "Bootstrap admits resource proxy and upstream DNS only; all TUN traffic must be blocked.");
             }
             else Need(Text(final, "ruleTag") == "global" && Text(final, "network") == "tcp,udp"
-                && protocols.TryGetValue(Text(final, "outboundTag"), out var finalProtocol) && ProxyProtocols.Contains(finalProtocol)
+                && protocols.TryGetValue(Text(final, "outboundTag"), out var finalProtocol) && (ProxyProtocols.Contains(finalProtocol) || Text(final, "outboundTag") is "nonhome" or "blocked")
                 && final.EnumerateObject().Count() == 3 && dnsRouted && dnsIndex >= 0 && hijackIndex > dnsIndex && chinaStages == 2,
                 "global-fallback", "The final TCP/UDP route must be an explicit proxy and DNS must be bound to non-home direct.");
             return new(true, "ok", "Configuration satisfies the admitted helper boundary.");

@@ -106,6 +106,13 @@ int main(void)
     assert(required == length && bytes[length] == 0x5a);
     assert(memcmp(bytes, "{\"abiVersion\":1,", 16) == 0);
     free(bytes);
+    /* Run under EGRESS_MOCK_ONLY too: no file, user, socket or TUN access. */
+    uint8_t metadata[1024] = {0};
+    assert(egress_mac_file_info_fixture(0100600, metadata, sizeof(metadata) - 1, &required) == EGRESS_MAC_OK);
+    assert(strstr((const char *)metadata, "\"IsRegular\":true") != NULL);
+    assert(strstr((const char *)metadata, "\"IsDirectory\":false") != NULL);
+    assert(strstr((const char *)metadata, "\"IsSocket\":false") != NULL);
+    assert(strstr((const char *)metadata, "\"IsSymbolicLink\":false") != NULL);
     pure_route_tests();
     pure_proxy_snapshot_tests();
     return 0;

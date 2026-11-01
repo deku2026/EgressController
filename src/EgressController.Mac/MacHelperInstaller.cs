@@ -11,31 +11,61 @@ public interface IMacAdminAuthorization
     Task AuthorizeInstallAsync(string script, CancellationToken cancellationToken);
 }
 
-public sealed class MacAdminAuthorization(LiveOperationGate gate) : IMacAdminAuthorization
+public sealed class MacAdminAuthorization(LiveOperationGate gate, ILifecycleLog? log = null) : IMacAdminAuthorization
 {
     public async Task AuthorizeInstallAsync(string script, CancellationToken cancellationToken)
     {
         gate.Require("request administrator authorization to install the Egress helper"); cancellationToken.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo("/usr/bin/osascript") { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
-        start.ArgumentList.Add("-e"); start.ArgumentList.Add("do shell script " + AppleScriptLiteral(script) + " with administrator privileges with prompt \"Egress 需要安装经过校验的网络辅助服务。\"");
+        start.ArgumentList.Add("-e"); start.ArgumentList.Add(BuildAppleScript(script));
+        var diagnostics = new OperationDiagnostics(log);
+        diagnostics.Record("helper.authorization.requested", "macOS administrator prompt; GUI remains unprivileged");
         using var process = Process.Start(start) ?? throw new IOException("Unable to request administrator authorization.");
-        Task<string> output = process.StandardOutput.ReadToEndAsync(), error = process.StandardError.ReadToEndAsync();
+        Task<string> output = ReadBoundedOutputAsync(process.StandardOutput), error = ReadBoundedOutputAsync(process.StandardError);
         // Once authorization starts, finish the atomic installer; caller cancellation cannot abandon half an installation.
         await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); await Task.WhenAll(output, error).ConfigureAwait(false);
-        if (process.ExitCode != 0) throw new RuntimeFailureException(error.Result.Contains("-128", StringComparison.Ordinal)
-            || error.Result.Contains("-60007", StringComparison.Ordinal) ? "authorization.denied" : "helper.install");
+        diagnostics.Record("helper.authorization.finished", $"osascript-exit={process.ExitCode}");
+        // Redact before chunking, so a credential assignment cannot straddle log records.
+        foreach (string captured in new[] { output.Result, error.Result })
+        {
+            string safeOutput = OperationDiagnostics.SanitizeOutput(captured);
+            for (int offset = 0; offset < safeOutput.Length; offset += 900)
+                diagnostics.Record("helper.install.output", safeOutput.Substring(offset, Math.Min(900, safeOutput.Length - offset)));
+        }
+        if (process.ExitCode != 0) throw new RuntimeFailureException(ClassifyFailure(error.Result), $"osascript-exit={process.ExitCode}; see helper.install.output");
+    }
+    public static string ClassifyFailure(string error) => error.Contains("(-128)", StringComparison.Ordinal) || error.Contains("(-60007)", StringComparison.Ordinal)
+        ? "authorization.denied" : error.Contains("JsonException", StringComparison.Ordinal) ? "helper.install-data"
+        : error.Contains("Abort trap", StringComparison.Ordinal) || error.Contains("SIGABRT", StringComparison.Ordinal) ? "helper.install-crashed" : "helper.install";
+    public static string BuildAppleScript(string script, bool administrator = true)
+        // AppleScript discards stderr on success. Merge at shell entry so both
+        // success traces and failure traces (including the EXIT trap) survive.
+        => "do shell script " + AppleScriptLiteral("exec 2>&1; " + script)
+            + (administrator ? " with administrator privileges with prompt \"Egress 需要安装经过校验的网络辅助服务。\"" : "");
+    public static async Task<string> ReadBoundedOutputAsync(TextReader reader)
+    {
+        const int limit = 16384;
+        var tail = new System.Text.StringBuilder(); char[] buffer = new char[2048]; int count; bool truncated = false;
+        while ((count = await reader.ReadAsync(buffer).ConfigureAwait(false)) != 0)
+        {
+            tail.Append(buffer, 0, count);
+            if (tail.Length > limit) { tail.Remove(0, tail.Length - limit); truncated = true; }
+        }
+        return (truncated ? "[earlier output truncated]\n" : "") + tail;
     }
     private static string AppleScriptLiteral(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)
         .Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal) + "\"";
 }
 
 /// <summary>Only explicit UI installation/apply actions invoke this API. Startup never requests authorization.</summary>
-public sealed class MacHelperInstaller(LiveOperationGate gate, IMacAdminAuthorization? authorization = null)
+public sealed class MacHelperInstaller(LiveOperationGate gate, IMacAdminAuthorization? authorization = null, ILifecycleLog? log = null)
 {
     public async Task InstallAsync(MacHelperInstallPlan plan, CancellationToken cancellationToken = default)
     {
         gate.Require("install privileged helper with explicit administrator authorization");
         if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException();
+        var diagnostics = new OperationDiagnostics(log);
+        diagnostics.Record("helper.install.preflight", "validate explicit GUI/helper/native/core identity and pinned hashes");
         ValidatePlan(plan);
         var native = new NativeMacPrivileges(gate);
         if (plan.Installation.AuthorizedUserId != native.GetUserId()) throw new UnauthorizedAccessException("The helper installation belongs to another user.");
@@ -54,9 +84,14 @@ public sealed class MacHelperInstaller(LiveOperationGate gate, IMacAdminAuthoriz
                 Options = FileOptions.WriteThrough, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite }))
             { await stream.WriteAsync(manifest, cancellationToken).ConfigureAwait(false); stream.Flush(true); }
             string script = BuildAuthorizationScript(plan, manifestPath, Convert.ToHexStringLower(SHA256.HashData(manifest)));
-            await (authorization ?? new MacAdminAuthorization(gate)).AuthorizeInstallAsync(script, cancellationToken).ConfigureAwait(false);
+            await (authorization ?? new MacAdminAuthorization(gate, log)).AuthorizeInstallAsync(script, cancellationToken).ConfigureAwait(false);
         }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        catch (Exception error) { diagnostics.Failure("helper.install", error); throw; }
+        finally
+        {
+            try { if (Directory.Exists(root)) Directory.Delete(root, true); }
+            catch (Exception error) { diagnostics.Failure("helper.install.cleanup", error); }
+        }
     }
     public static void ValidatePlan(MacHelperInstallPlan plan)
     {
@@ -76,18 +111,25 @@ public sealed class MacHelperInstaller(LiveOperationGate gate, IMacAdminAuthoriz
         static string CopyAndVerify(string source, string target, string hash, string mode) =>
             "/usr/bin/install -o root -g wheel -m " + mode + " " + Quote(source) + " " + target + "; "
             + "[ \"$(/usr/bin/shasum -a 256 " + target + " | /usr/bin/cut -d ' ' -f 1)\" = " + Quote(hash.ToLowerInvariant()) + " ]; ";
-        return "set -eu; [ ! -L /Library/PrivilegedHelperTools ]; "
+        return "set -eu; egress_install_step=authorized; egress_install_stage=''; "
+            + "trap 'egress_install_result=$?; echo \"EGRESS_INSTALL stage=$egress_install_step exit=$egress_install_result\" >&2; "
+            + "if [ -n \"$egress_install_stage\" ]; then /bin/rm -rf \"$egress_install_stage\"; fi; exit \"$egress_install_result\"' EXIT; "
+            + "echo 'EGRESS_INSTALL stage=authorized' >&2; egress_install_step=secure-parent; [ ! -L /Library/PrivilegedHelperTools ]; "
             + "if [ ! -e /Library/PrivilegedHelperTools ]; then /usr/bin/install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools; fi; "
             + "[ -d /Library/PrivilegedHelperTools ]; [ \"$(/usr/bin/stat -f %u /Library/PrivilegedHelperTools)\" = 0 ]; "
             + "egress_install_parent_mode=$(/usr/bin/stat -f %Lp /Library/PrivilegedHelperTools); [ $((0$egress_install_parent_mode & 022)) -eq 0 ]; "
             + "egress_install_stage=$(/usr/bin/mktemp -d /Library/PrivilegedHelperTools/.egress-install.XXXXXXXX); "
-            + "trap '/bin/rm -rf \"$egress_install_stage\"' EXIT; /bin/chmod 700 \"$egress_install_stage\"; "
+            + "/bin/chmod 700 \"$egress_install_stage\"; egress_install_step=copy-helper; "
             + CopyAndVerify(plan.SourceHelperPath, "\"$egress_install_stage/helper\"", plan.Installation.HelperSha256, "700")
+            + "egress_install_step=copy-native; "
             + CopyAndVerify(plan.SourceNativeLibraryPath, "\"$egress_install_stage/libEgressMacNative.dylib\"", plan.Installation.NativeLibrarySha256, "600")
+            + "egress_install_step=copy-manifest; "
             + CopyAndVerify(manifestPath, "\"$egress_install_stage/install-plan.json\"", manifestSha256, "600")
+            + "egress_install_step=rewrite-manifest; "
             + "/usr/bin/plutil -replace SourceHelperPath -string \"$egress_install_stage/helper\" \"$egress_install_stage/install-plan.json\"; "
             + "/usr/bin/plutil -replace SourceNativeLibraryPath -string \"$egress_install_stage/libEgressMacNative.dylib\" \"$egress_install_stage/install-plan.json\"; "
             + "/usr/bin/plutil -convert json \"$egress_install_stage/install-plan.json\"; "
+            + "egress_install_step=run-installer; echo 'EGRESS_INSTALL stage=run-installer' >&2; "
             + "\"$egress_install_stage/helper\" --install \"$egress_install_stage/install-plan.json\"";
     }
     private static async Task VerifyAsync(string path, string expected, CancellationToken cancellationToken)

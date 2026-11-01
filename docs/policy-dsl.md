@@ -113,16 +113,15 @@ object `ToString()` output.
 
 `GroupSelector.Resolve` owns group semantics outside Xray:
 
-- `select` requires an explicit saved member; it never chooses the first item.
+- `select` resolves its saved member. A newly imported Clash group initializes that member from valid `default-selected`, otherwise its first declared member. Refresh preserves saved choices, including unresolved members for explicit repair.
 - `url-test` chooses the fastest fresh successful probe and retains the selected
   member while within its tolerance.
 - `fallback` chooses the first available member in the saved declaration order.
 - Stale, future-dated, missing, failed or invalid probes do not imply availability.
 - Probes must identify the exact group's test URL; observations from another
   endpoint cannot select a node for this group.
-- Nested groups and `dialer-proxy` chains are checked for cycles. DIRECT/REJECT
-  cannot resolve a proxy exit. Automatic groups containing such members cannot
-  silently change those members into proxies.
+- Nested groups and `dialer-proxy` chains are checked for cycles. DIRECT maps to non-home direct and REJECT to the blocked outbound when chosen as group members; neither can act as a node dialer. Automatic groups need an actual successful observation before selecting DIRECT.
+- `retained` controls visible choices without deleting dependencies. `strategy_override` preserves an explicit local mode choice on subscription refresh; `icon` is presentation metadata. See [group lifecycle](mac-proxy-groups.md).
 
 The runtime must obtain probes through the specified nonhome-bound proxy chain,
 then safely recompile/apply when an automatic selection actually changes. The
@@ -133,12 +132,12 @@ policy library does not perform reachability checks or change protection state.
 `XrayConfigCompiler.Compile(document, options)` returns JSON only after validation
 and group resolution succeed. The baseline is Xray `v26.10.29`, containing
 macOS process identification and the interface-binding fixes. It emits one native
-TUN inbound and no HTTP/SOCKS listener or network control listener. The initial
+TUN inbound plus a loopback-only TCP SOCKS resource listener and no network control listener. The initial
 outbound is a blackhole, so accidental unmatched traffic cannot default to direct.
 
 Routing order is system DNS and local-network handling, saved executable rules,
 ordered user domain/IP sets, China domains, China IPs, then all TCP/UDP to the
-mandatory global proxy. Domain and IP conditions for a single collection become
+mandatory default group (which may explicitly select DIRECT/REJECT). Domain and IP conditions for a single collection become
 separate rules with the same exit, preserving OR semantics. `IPOnDemand` is
 intentional: `IPIfNonMatch` would never reach its second pass after an explicit
 catch-all. Sniffing uses `routeOnly` and never replaces the actual destination.

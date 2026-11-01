@@ -40,7 +40,7 @@ public sealed class StartupSequenceTests
         shell.LocalSubscriptionYaml = "proxies:\n  - name: Local node\n    type: socks5\n    server: local-node.example.invalid\n    port: 1080\n";
         shell.ImportLocalSubscription();
         Assert.Contains(shell.Document.Nodes, node => node.Name == "Local node"); Assert.Empty(backend.Calls);
-        var group = Assert.Single(shell.Document.Groups, item => item.Id == "local-bootstrap-group"); Assert.Null(group.SelectedMemberId); Assert.Equal(GroupKind.Select, group.Kind);
+        var group = Assert.Single(shell.Document.Groups, item => item.SourceId == "local-bootstrap"); Assert.Null(group.SelectedMemberId); Assert.Equal(GroupKind.UrlTest, group.Kind);
     }
 
     [Theory]

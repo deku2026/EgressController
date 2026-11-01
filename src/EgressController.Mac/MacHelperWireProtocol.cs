@@ -11,6 +11,8 @@ public sealed record MacHelperEndpoint(string SocketPath, string ExpectedHelperP
 }
 public static class MacHelperPaths
 {
+    public const string ServiceLogDirectory = "/Library/Logs/EgressController";
+    public const string ServiceLog = ServiceLogDirectory + "/helper.log";
     public const string Label = "app.egresscontroller.mac.helper";
     public const string Installation = "/Library/Application Support/EgressController/Helper/installation.json";
     public const string PrivateRoot = "/Library/Application Support/EgressController/Helper";

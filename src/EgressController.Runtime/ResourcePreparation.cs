@@ -6,7 +6,8 @@ using EgressController.Policy;
 namespace EgressController.Runtime;
 
 public enum PreparationStage { Idle, CheckingCache, Downloading, Validating, Publishing, Ready, Canceled, Failed }
-public enum PreparationCachePolicy { CacheFirst, Refresh }
+public enum PreparationCachePolicy { CacheFirst, Refresh, CacheOnly }
+public sealed class ResourceCacheMissException : Exception;
 public enum ResourceExitKind { BoundInterface, SystemProxy, XrayProxy, DirectSubscription }
 public sealed record ResourceExitSnapshot(ResourceExitKind Kind, InterfaceBinding? Interface = null, int ProxyPort = 0)
 {
@@ -88,6 +89,7 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
                 : await cache.ReadAsync(cacheKey, token).ConfigureAwait(false);
             if (cached is not null && Valid(cached))
             { token.ThrowIfCancellationRequested(); Publish(PreparationStage.Ready, "本地缓存可用"); return cached; }
+            if (resource.CachePolicy == PreparationCachePolicy.CacheOnly) throw new ResourceCacheMissException();
             stage = PreparationStage.Downloading;
             Publish(stage, resource.Exit.Kind == ResourceExitKind.DirectSubscription ? "直连下载订阅 · 非家宽物理网卡 · 无需 Xray 或 TUN" : resource.Exit.Kind == ResourceExitKind.XrayProxy ? $"通过内置 Xray · 非家宽分组节点 · SOCKS5 127.0.0.1:{resource.Exit.ProxyPort} 下载" : resource.Exit.Kind == ResourceExitKind.SystemProxy ? "通过系统当前代理下载；未配置代理时使用系统默认网络" : "通过选定物理接口下载");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);

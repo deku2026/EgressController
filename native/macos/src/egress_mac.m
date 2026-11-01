@@ -140,7 +140,7 @@ int32_t egress_mac_copy_dns_json(uint8_t *output, size_t capacity, size_t *requi
                 return fail(required, EGRESS_MAC_IO);
             }
             [result addObject:@{ @"serviceId":string_or_empty(SCNetworkServiceGetServiceID(service)),
-                @"protocolWasPresent":@(protocol != NULL), @"protocolWasEnabled":@(protocol != NULL && SCNetworkProtocolGetEnabled(protocol)),
+                @"protocolWasPresent":protocol != NULL ? @YES : @NO, @"protocolWasEnabled":protocol != NULL && SCNetworkProtocolGetEnabled(protocol) ? @YES : @NO,
                 @"originalConfigurationPlistBase64":plist == nil ? (id)[NSNull null] : [plist base64EncodedStringWithOptions:0] }];
             if (protocol != NULL) CFRelease(protocol);
         }

@@ -55,7 +55,7 @@ public sealed class PolicyTests
         Assert.True(pq.Tls); Assert.StartsWith("mlkem768x25519plus.", pq.Encryption); Assert.Equal("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", pq.RealityPublicKey);
         Assert.Equal(pq.Id, imported.Nodes.First(x => x.Name == "chained-socks").DialerProxyId);
         Assert.False(imported.Nodes.First(x => x.Name == "unsupported").IsSupported);
-        Assert.All(imported.Groups, x => Assert.Null(x.SelectedMemberId));
+        Assert.All(imported.Groups, x => Assert.Equal(x.Kind == GroupKind.Select ? x.MemberIds.FirstOrDefault() : null, x.SelectedMemberId));
         foreach (var key in new[] { "dns", "tun", "rules", "mixed-port", "external-controller" }) Assert.Contains(imported.Diagnostics, x => x.Code == "subscription.ignored." + key);
     }
     [Fact]
@@ -221,11 +221,11 @@ public sealed class PolicyTests
         var result = XrayConfigCompiler.Compile(Document(), opts); Assert.False(result.IsSuccess); Assert.Null(result.Json); Assert.Contains(result.Diagnostics, x => x.Code == "interfaces.unavailable");
     }
     [Fact]
-    public void ManualGroupsRequireSelectionAndDirectCanNeverBeGlobalProxy()
+    public void ManualGroupsRequireValidSelectionAndDirectUsesNonHome()
     {
         var doc = Document(); var group = doc.Groups.First(x => x.Kind == GroupKind.Select); doc.Defaults.Global = ExitChoice.Proxy(group.Id);
-        Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
-        group.SelectedMemberId = "builtin:direct"; Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
+        group.SelectedMemberId = null; Assert.False(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
+        group.SelectedMemberId = "builtin:direct"; Assert.True(XrayConfigCompiler.Compile(doc, Options()).IsSuccess);
         group.SelectedMemberId = doc.Nodes.First(x => x.Name == "chained-socks").Id;
         var compiled = XrayConfigCompiler.Compile(doc, Options()); Assert.True(compiled.IsSuccess, string.Join(',', compiled.Diagnostics.Select(x => x.Code)));
         using var json = JsonDocument.Parse(compiled.Json!); var socks = json.RootElement.GetProperty("outbounds").EnumerateArray().First(x => x.GetProperty("protocol").GetString() == "socks");

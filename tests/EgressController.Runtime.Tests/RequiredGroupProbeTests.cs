@@ -81,7 +81,7 @@ public sealed class RequiredGroupProbeTests
         Assert.Equal(("node-2", InnerUrl), Assert.Single(process.Requests)); Assert.Contains(cached, results); Assert.Single(options.Probes);
         process.Requests.Clear();
         await new ObservatoryProbes(process).ProbeAsync(document, options, "/fixture/core", TestContext.Current.CancellationToken);
-        Assert.Equal(2, process.Requests.Count);
+        Assert.Equal(4, process.Requests.Count); // Each group's configured URL, including the manual group.
     }
     [Fact]
     public void InvalidLegacyNodeExitAndMissingManualSelectionDoNotTriggerWidenedNetworkWork()

@@ -95,5 +95,12 @@ proxy-groups:
   - name: 手动选择
     type: select
     proxies: [东京 · 01, 新加坡 · 02, 洛杉矶 · 03]
+  - {name: Claude, type: select, proxies: [全球优选, 东京 · 01, 新加坡 · 02, 洛杉矶 · 03, DIRECT]}
+  - {name: OpenAI, type: select, proxies: [全球优选, 东京 · 01, 新加坡 · 02, 洛杉矶 · 03, DIRECT]}
+  - {name: GitHub, type: select, proxies: [全球优选, 东京 · 01, 新加坡 · 02, 洛杉矶 · 03, DIRECT]}
+  - {name: Spotify, type: select, proxies: [DIRECT, 全球优选, 东京 · 01]}
+  - {name: YouTube, type: select, proxies: [全球优选, 东京 · 01, 新加坡 · 02, 洛杉矶 · 03, DIRECT]}
+  - {name: Google, type: select, proxies: [全球优选, 新加坡 · 02, DIRECT]}
+  - {name: Apple, type: select, proxies: [DIRECT, 全球优选, 东京 · 01]}
 """;
 }

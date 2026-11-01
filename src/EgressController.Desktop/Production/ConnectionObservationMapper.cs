@@ -28,11 +28,13 @@ public sealed class ConnectionObservationMapper
     {
         if (!CoreConnectionSnapshots.IsValid(snapshot, now)) return new(_last, now, false, "连接观测已过期或无法读取；历史记录不代表当前存活连接。");
         _observedGeneration = snapshot.GenerationId ?? _observedGeneration;
-        _applied.TryGetValue(snapshot.GenerationId ?? "", out var policy);
+
         var records = new List<ConnectionRecord>();
         foreach (var row in snapshot.Records)
         {
-            string key = (snapshot.GenerationId ?? "unknown") + ":" + row.Id;
+            string generation = row.GenerationId ?? snapshot.GenerationId ?? "unknown";
+            _applied.TryGetValue(generation, out var policy);
+            string key = generation + ":" + row.Id;
             _labels.TryGetValue(key, out var labels);
             var app = policy?.Applications.FirstOrDefault(item => "app-" + item.Id == row.MatchedRule);
             var rule = policy?.RuleSets.FirstOrDefault(item => ("domains-" + item.Id == row.MatchedRule || "ips-" + item.Id == row.MatchedRule));

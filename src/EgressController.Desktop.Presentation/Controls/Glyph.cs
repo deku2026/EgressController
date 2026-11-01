@@ -39,6 +39,8 @@ public sealed class Glyph : Control
             case "logs": context.DrawRectangle(null, pen, new Rect(5, 3, 14, 18), 2, 2); DrawPath(context, pen, "M9 8 L15 8 M9 12 L15 12 M9 16 L13 16"); break;
             case "plus": DrawPath(context, pen, "M5 12 L19 12 M12 5 L12 19"); break;
             case "refresh": DrawPath(context, pen, "M20 9 A8 8 0 1 0 20 16 M20 3 L20 9 L14 9"); break;
+            case "chevron-down": DrawPath(context, pen, "M5 9 L12 16 L19 9"); break;
+            case "chevron-up": DrawPath(context, pen, "M5 15 L12 8 L19 15"); break;
             case "check": DrawPath(context, pen, "M5 12 L10 17 L20 6"); break;
             case "globe": context.DrawEllipse(null, pen, new Point(12, 12), 9, 9); context.DrawEllipse(null, pen, new Point(12, 12), 4, 9); context.DrawLine(pen, new(3, 12), new(21, 12)); break;
             default: context.DrawRectangle(null, pen, new Rect(4, 4, 16, 16), 4, 4); break;

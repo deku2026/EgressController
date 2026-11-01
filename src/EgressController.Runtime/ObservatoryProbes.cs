@@ -16,7 +16,7 @@ public interface IObservatoryProcess
 public sealed class ObservatoryProbes(IObservatoryProcess process)
 {
     public async Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, XrayCompileOptions options,
-        string executable, CancellationToken cancellationToken = default, bool requiredOnly = false)
+        string executable, CancellationToken cancellationToken = default, bool requiredOnly = false, IReadOnlyList<RequiredGroupProbe>? requested = null)
     {
         var results = new List<GroupProbe>();
         var observations = options.Probes.ToList();
@@ -24,14 +24,13 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
             Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, PreparedRuleSources = options.PreparedRuleSources.ToList(),
             ChinaGeoSiteFile = options.ChinaGeoSiteFile, ChinaGeoIpFile = options.ChinaGeoIpFile, ChinaTag = options.ChinaTag };
         using var throttle = new SemaphoreSlim(3, 3);
-        var urls = document.Groups.Where(group => group.Kind is GroupKind.UrlTest or GroupKind.Fallback)
-            .Select(group => group.TestUrl).Distinct(StringComparer.Ordinal).ToArray();
+        var urls = document.Groups.Select(group => group.TestUrl).Distinct(StringComparer.Ordinal).ToArray();
         if (urls.Length == 0) urls = ["https://www.gstatic.com/generate_204"];
         var attempted = new HashSet<(string NodeId, string Url)>();
         do
         {
-            var requests = requiredOnly ? RequiredGroupProbes.Missing(document, working)
-                : document.Nodes.Where(node => node.IsSupported).SelectMany(node => urls.Select(url => new RequiredGroupProbe(node.Id, url))).ToArray();
+            var requests = requested ?? (requiredOnly ? RequiredGroupProbes.Missing(document, working)
+                : document.Nodes.Where(node => node.IsSupported).SelectMany(node => urls.Select(url => new RequiredGroupProbe(node.Id, url))).ToArray());
             requests = requests.Where(request => attempted.Add((request.NodeId, request.TestUrl))).ToArray();
             if (requests.Count == 0) break;
             var tasks = requests.Select(async item =>
@@ -39,6 +38,7 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                 await throttle.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
+                    string outbound = item.NodeId == GroupGraph.Direct ? "nonhome" : item.NodeId == GroupGraph.Reject ? "blocked" : item.NodeId;
                     var draft = PolicyYaml.Read(PolicyYaml.Write(document)).Document!;
                     draft.Applications.Clear(); draft.RuleSets.Clear();
                     // Internal health requests still pass the public group-only route contract.
@@ -55,16 +55,16 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                         root["inbounds"] = new JsonArray();
                         root["routing"]!["rules"] = new JsonArray(
                             new JsonObject { ["inboundTag"] = new JsonArray("dns-query"), ["outboundTag"] = "nonhome" },
-                            new JsonObject { ["network"] = "tcp,udp", ["outboundTag"] = item.NodeId });
+                            new JsonObject { ["network"] = "tcp,udp", ["outboundTag"] = outbound });
                         root["log"] = new JsonObject { ["loglevel"] = "info" };
                         root["observatory"] = new JsonObject
                         {
-                            ["subjectSelector"] = new JsonArray(item.NodeId),
+                            ["subjectSelector"] = new JsonArray(outbound),
                             ["probeURL"] = item.TestUrl,
                             ["probeInterval"] = "1h",
                             ["enableConcurrency"] = false
                         };
-                        measured = await process.RunAsync(executable, root.ToJsonString(), item.NodeId, cancellationToken).ConfigureAwait(false);
+                        measured = await process.RunAsync(executable, root.ToJsonString(), outbound, cancellationToken).ConfigureAwait(false);
                     }
                     lock (results) results.Add(new(item.NodeId, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.TestUrl));
                 }

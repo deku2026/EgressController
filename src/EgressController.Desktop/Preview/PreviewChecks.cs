@@ -67,10 +67,12 @@ public static class PreviewChecks
         await vm.TogglePreviewAsync(); Check(!vm.PreviewRunning && vm.Core.Current is null && PolicyYaml.Write(vm.Document) == beforeStop, "Stopping preview did not stop the mock runtime or preserve configuration.");
         await vm.TogglePreviewAsync(); Check(vm.PreviewRunning && vm.Core.Current is not null && vm.Core.ApplyCount == beforeResume + 1 && PolicyYaml.Write(vm.Document) == beforeStop, "Resuming unchanged configuration failed to apply the stopped generation.");
         var onboarding = new ShellViewModel("onboarding"); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); Check(onboarding.SetupStep == 1 && onboarding.HasIssue, "First-run setup skipped required subscription import.");
-        await onboarding.ImportSubscriptionAsync(); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); Check(onboarding.SetupStep == 2 && onboarding.HasIssue, "First-run setup skipped mandatory global proxy selection.");
+        await onboarding.ImportSubscriptionAsync(); onboarding.NextSetupCommand.Execute(null);
+        Check(onboarding.SetupStep == 2 && onboarding.SelectedGlobalTarget is not null, "Subscription did not initialize a default group for retention setup.");
         onboarding.SelectedGlobalTarget = onboarding.GlobalChoices.Single(choice => choice.Name == "手动选择");
-        Check(onboarding.SelectedSetupGlobalMember is null && !onboarding.NextSetupCommand.CanExecute(null), "A first-run manual group silently preselected a node.");
-        onboarding.SelectedSetupGlobalMember = onboarding.SetupGlobalMemberChoices[1]; Check(onboarding.NextSetupCommand.CanExecute(null), "Explicit manual member selection did not unblock setup."); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); Check(!onboarding.OnboardingVisible && onboarding.Core.ApplyCount == 1, "First-run setup did not apply its validated mock configuration.");
+        Check(onboarding.SelectedSetupGlobalMember is not null && onboarding.NextSetupCommand.CanExecute(null), "Clash's first declared manual member did not initialize setup.");
+        onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null); onboarding.NextSetupCommand.Execute(null);
+        Check(!onboarding.OnboardingVisible && onboarding.Core.ApplyCount == 1, "First-run setup did not apply its validated mock configuration.");
         var empty = new ShellViewModel("empty"); await empty.ApplyPreviewAsync(); Check(empty.ConfigValid && empty.Core.ApplyCount == 1, "The empty managed workspace did not prepare mandatory China DAT assets on first apply.");
         bool denied = false; try { PreviewEnvironment.RequireLiveOperations(); } catch (InvalidOperationException) { denied = true; }
         Check(denied, "Live operations are accessible from the preview.");

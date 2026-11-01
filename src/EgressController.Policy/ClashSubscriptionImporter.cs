@@ -46,7 +46,7 @@ public static class ClashSubscriptionImporter
             {
                 var name = value.Text("name"); var id = StableId("group", sourceId, name);
                 if (!names.TryAdd(name, id)) { diagnostics.Add(new("subscription.duplicate-name", "订阅中存在重复节点或分组名称。", ObjectId: id)); continue; }
-                groups.Add(new() { Id = id, Name = name, SourceId = sourceId, Kind = PolicyYaml.ParseGroupKind(value.Text("type")), TestUrl = value.Text("url", "https://www.gstatic.com/generate_204"), IntervalSeconds = value.Integer("interval", 300), ToleranceMilliseconds = value.Integer("tolerance", 50) });
+                groups.Add(new() { Id = id, Name = name, SourceId = sourceId, Icon = value.Text("icon"), Kind = PolicyYaml.ParseGroupKind(value.Text("type")), TestUrl = value.Text("url", "https://www.gstatic.com/generate_204"), IntervalSeconds = value.Integer("interval", 300), ToleranceMilliseconds = value.Integer("tolerance", 50) });
             }
             foreach (var group in groups)
             {
@@ -65,13 +65,18 @@ public static class ClashSubscriptionImporter
                     if (provider is null) group.Diagnostics.Add(new("group.missing-provider", "分组引用的节点提供器不存在。", ObjectId: group.Id));
                     else { group.ProviderIds.Add(provider.Id); group.Diagnostics.AddRange(provider.Diagnostics); if (providerMembers.TryGetValue(providerName, out var members)) group.MemberIds.AddRange(members); }
                 }
-                // Never infer the first manual selection. The UI must choose an actual member.
-                group.SelectedMemberId = null;
+                // Clash selector defaults to its first declared member on a new import. Reconciliation preserves saved choices.
+                string initial = value.Text("default-selected");
+                string? initialId = initial == "DIRECT" ? GroupGraph.Direct : initial is "REJECT" or "REJECT-DROP" ? GroupGraph.Reject : names.GetValueOrDefault(initial);
+                group.SelectedMemberId = group.Kind == GroupKind.Select ? initialId is not null && group.MemberIds.Contains(initialId) ? initialId : group.MemberIds.FirstOrDefault() : null;
                 if (value.Get("filter") is not null || value.Get("exclude-filter") is not null || value.Boolean("include-all") || value.Boolean("include-all-proxies") || value.Boolean("include-all-providers"))
                     group.Diagnostics.Add(new("group.dynamic-membership", "动态分组筛选暂不支持，未静默扩大或缩小成员。", ObjectId: group.Id));
-                var allowedGroupKeys = new HashSet<string>(["<<", "name", "type", "proxies", "use", "url", "interval", "tolerance", "icon", "hidden", "filter", "exclude-filter", "include-all", "include-all-proxies", "include-all-providers"], StringComparer.Ordinal);
+                var allowedGroupKeys = new HashSet<string>(["<<", "name", "type", "default-selected", "proxies", "use", "url", "interval", "tolerance", "icon", "hidden", "filter", "exclude-filter", "include-all", "include-all-proxies", "include-all-providers"], StringComparer.Ordinal);
                 if (value.Keys().Any(key => !allowedGroupKeys.Contains(key))) group.Diagnostics.Add(new("group.unknown-option", "分组包含尚未实现等价语义的选项。", ObjectId: group.Id));
             }
+            if (groups.Count == 0 && nodes.Any(node => node.IsSupported))
+                groups.Add(new() { Id = StableId("group", sourceId, "default"), Name = "默认分组", SourceId = sourceId,
+                    Kind = GroupKind.UrlTest, MemberIds = nodes.Where(node => node.IsSupported).Select(node => node.Id).ToList() });
             foreach (var node in nodes)
             {
                 if (node.DialerProxyId is { } name)

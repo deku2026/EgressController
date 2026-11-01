@@ -39,7 +39,7 @@ internal static class DslShapeValidator
         Rows("applications", ["id", "name", "path", "bundle_id", "primary_executable", "executables", "via", "enabled"], ["executables"], ["enabled"]);
         Rows("rule_sets", ["id", "name", "sources", "domains", "ip_cidrs", "via", "enabled"], ["sources", "domains", "ip_cidrs"], ["enabled"]);
         Rows("nodes", ["id", "name", "source_id", "protocol", "server", "port", "user_id", "password", "username", "cipher", "encryption", "flow", "security", "network", "tls", "skip_certificate_verify", "server_name", "fingerprint", "reality_public_key", "reality_short_id", "reality_spider_x", "alpn", "transport_path", "transport_host", "grpc_service_name", "plugin", "plugin_mode", "plugin_host", "tcp_fast_open", "dialer_proxy", "diagnostics"], ["alpn", "diagnostics"], ["tls", "skip_certificate_verify", "tcp_fast_open"], ["port"]);
-        Rows("groups", ["id", "name", "source_id", "kind", "members", "providers", "selected", "test_url", "interval", "tolerance", "diagnostics"], ["members", "providers", "diagnostics"], integers: ["interval", "tolerance"]);
+        Rows("groups", ["id", "name", "source_id", "kind", "retained", "strategy_override", "icon", "members", "providers", "selected", "test_url", "interval", "tolerance", "diagnostics"], ["members", "providers", "diagnostics"], booleans: ["retained", "strategy_override"], integers: ["interval", "tolerance"]);
         Rows("subscriptions", ["id", "name", "url"]);
         Rows("providers", ["id", "name", "source_id", "url", "diagnostics"], ["diagnostics"]);
         foreach (var rule in root.Items("rule_sets").OfType<YamlMappingNode>())

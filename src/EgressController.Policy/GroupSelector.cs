@@ -19,6 +19,7 @@ public static class GroupSelector
             if (!ancestors.Add(id)) { errors.Add(new("proxy.cycle", "代理引用存在循环。", ObjectId: id)); return null; }
             try
             {
+                if (id is GroupGraph.Direct or GroupGraph.Reject) return id;
                 if (doc.Nodes.FirstOrDefault(x => x.Id == id) is { } node)
                 {
                     errors.AddRange(node.Diagnostics); errors.AddRange(PolicyValidator.ValidateNode(node));
@@ -37,8 +38,14 @@ public static class GroupSelector
                 var candidates = new List<(string Id, double Latency)>();
                 foreach (var member in group.MemberIds)
                 {
+                    int diagnosticStart = errors.Count;
                     var nodeId = ResolveInner(member);
-                    if (nodeId is null) continue;
+                    if (nodeId is null)
+                    {
+                        // A failed nested automatic group is an unavailable candidate, not a failure of healthy siblings.
+                        if (errors.Skip(diagnosticStart).All(item => item.Code == "group.probes")) errors.RemoveRange(diagnosticStart, errors.Count - diagnosticStart);
+                        continue;
+                    }
                     var probe = probes?.Where(x => x.NodeId == nodeId && string.Equals(x.TestUrl, group.TestUrl, StringComparison.Ordinal) && x.ObservedAt <= clock && clock - x.ObservedAt <= age).OrderByDescending(x => x.ObservedAt).FirstOrDefault();
                     if (probe is { Available: true } && double.IsFinite(probe.LatencyMilliseconds) && probe.LatencyMilliseconds >= 0) candidates.Add((nodeId, probe.LatencyMilliseconds));
                 }

@@ -24,13 +24,16 @@ public static class HelperInstallation
     }
     public static async Task InstallAsync(string planPath, NativeMacPrivileges native)
     {
+        Program.WriteDiagnostic("stage=read-plan-metadata");
         var planOwner = native.ReadFileInfo(planPath);
         if (planOwner.IsSymbolicLink || !planOwner.IsRegular) throw new InvalidDataException("Invalid installer plan owner.");
+        Program.WriteDiagnostic("stage=read-plan");
         var plan = JsonSerializer.Deserialize(HostFiles.ReadOwned(native, planPath, planOwner.UserId, 65536), MacHelperWireJson.Default.MacHelperInstallPlan)
             ?? throw new InvalidDataException("Missing installation plan.");
         Validate(plan.Installation);
         if ((planOwner.UserId != 0 && plan.Installation.AuthorizedUserId != planOwner.UserId) || plan.SourceHelperPath != Environment.ProcessPath)
             throw new InvalidDataException("The installer identity differs from the authorized payload.");
+        Program.WriteDiagnostic("stage=verify-payloads");
         uint user = plan.Installation.AuthorizedUserId;
         uint guiOwner = native.ReadFileInfo(plan.Installation.AuthorizedGuiPath).UserId;
         if (guiOwner != 0 && guiOwner != user) throw new InvalidDataException("Unexpected GUI owner.");
@@ -46,6 +49,7 @@ public static class HelperInstallation
         await LaunchctlAsync(["bootout", "system/" + MacHelperPaths.Label], allowMissing: true).ConfigureAwait(false);
         if (File.Exists(MacHelperPaths.Installation))
             await new NativeRuntimeEnvironment(native, ReadInstalled(native)).RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+        Program.WriteDiagnostic("stage=prepare-directories");
         HostFiles.PrivateDirectory(native, MacHelperPaths.PrivateRoot);
         HostFiles.PrivateDirectory(native, "/Library/PrivilegedHelperTools", restrictToRoot: false);
         HostFiles.PrivateDirectory(native, "/Library/LaunchDaemons", restrictToRoot: false);
@@ -55,6 +59,7 @@ public static class HelperInstallation
         foreach (string path in targets) Backup(native, path);
         try
         {
+            Program.WriteDiagnostic("stage=publish-payloads");
             HostFiles.AtomicWrite(native, MacHelperPaths.NativeLibrary, library, 0x1ed);
             HostFiles.AtomicWrite(native, MacHelperPaths.InstalledXray, core, 0x1c0);
             HostFiles.AtomicWrite(native, MacHelperEndpoint.Installed.ExpectedHelperPath, helper, 0x1ed);
@@ -73,8 +78,9 @@ public static class HelperInstallation
             HostFiles.AtomicWrite(native, MacHelperPaths.LaunchDaemon, Encoding.UTF8.GetBytes(plist), 0x1a4);
             await LaunchctlAsync(["bootstrap", "system", MacHelperPaths.LaunchDaemon], allowMissing: false).ConfigureAwait(false);
         }
-        catch
+        catch (Exception original)
         {
+            Program.WriteDiagnostic("stage=rollback cause=" + OperationDiagnostics.Describe(original));
             await LaunchctlAsync(["bootout", "system/" + MacHelperPaths.Label], allowMissing: true).ConfigureAwait(false);
             foreach (string path in targets)
             {
@@ -95,13 +101,15 @@ public static class HelperInstallation
     }
     private static async Task LaunchctlAsync(string[] arguments, bool allowMissing)
     {
+        Program.WriteDiagnostic("stage=launchctl-" + arguments[0]);
         var start = new ProcessStartInfo("/bin/launchctl") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (string argument in arguments) start.ArgumentList.Add(argument);
         using var child = Process.Start(start) ?? throw new IOException("launchd command could not start.");
-        Task output = child.StandardOutput.ReadToEndAsync(), error = child.StandardError.ReadToEndAsync();
+        Task<string> output = MacAdminAuthorization.ReadBoundedOutputAsync(child.StandardOutput), error = MacAdminAuthorization.ReadBoundedOutputAsync(child.StandardError);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
         try { await child.WaitForExitAsync(timeout.Token).ConfigureAwait(false); await Task.WhenAll(output, error).ConfigureAwait(false); }
         finally { if (!child.HasExited) { child.Kill(true); await child.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } }
-        if (child.ExitCode != 0 && !allowMissing) throw new IOException("launchd rejected the helper operation.");
+        Program.WriteDiagnostic($"stage=launchctl-{arguments[0]} exit={child.ExitCode} allow-missing={allowMissing}; " + OperationDiagnostics.SanitizeOutput(output.Result + " " + error.Result));
+        if (child.ExitCode != 0 && !allowMissing) throw new RuntimeFailureException("helper.install", $"launchctl-{arguments[0]} exit={child.ExitCode}");
     }
 }

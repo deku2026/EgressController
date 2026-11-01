@@ -22,7 +22,18 @@ cmake = shutil.which("cmake") or next((str(path) for path in
     (Path("/opt/homebrew/bin/cmake"), Path("/usr/local/bin/cmake")) if path.is_file()), None)
 if cmake is None:
     parser.error("CMake is missing. Install CMake and Xcode Command Line Tools, then rebuild.")
-subprocess.run([cmake, "-G", "Unix Makefiles", "-S", str(root / "native" / "macos"), "-B", str(output),
+source = root / "native" / "macos"
+fresh = []
+cache = output / "CMakeCache.txt"
+if cache.is_file():
+    entries = dict(line.split("=", 1) for line in cache.read_text().splitlines()
+                   if line.startswith(("CMAKE_HOME_DIRECTORY:INTERNAL=", "CMAKE_CACHEFILE_DIR:INTERNAL=")))
+    if (entries.get("CMAKE_HOME_DIRECTORY:INTERNAL") != str(source.resolve())
+            or entries.get("CMAKE_CACHEFILE_DIR:INTERNAL") != str(output.resolve())):
+        # A worktree move invalidates CMake's absolute-path cache. Regenerate only build metadata.
+        fresh = ["--fresh"]
+        print("Regenerating native build metadata after checkout relocation.", flush=True)
+subprocess.run([cmake, *fresh, "-G", "Unix Makefiles", "-S", str(source), "-B", str(output),
                 "-DCMAKE_BUILD_TYPE=" + arguments.configuration, "-DCMAKE_OSX_ARCHITECTURES=" + arguments.architecture,
                 "-DBUILD_TESTING=" + ("OFF" if arguments.without_tests else "ON")], check=True)
 command = [cmake, "--build", str(output), "--config", arguments.configuration]

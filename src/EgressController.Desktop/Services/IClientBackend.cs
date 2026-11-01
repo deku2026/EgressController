@@ -13,6 +13,7 @@ public sealed record ClientRuntimeState(bool Running, bool Available, bool Helpe
 public sealed record ClientRuleCatalogEntry(string Id, string Name, string Detail, IReadOnlyList<string> Sources);
 public sealed record ClientPreparedResources(IReadOnlyList<RuleSourceBinding> Bindings,
     IReadOnlyDictionary<string, byte[]> Assets, IReadOnlyDictionary<string, GeoRuleSet> Sources);
+public sealed record ClientConnectionResources(ClientPreparedResources Resources, IReadOnlyList<GroupProbe> Probes);
 public enum ConnectionAttemptStage { Validating, Core, Authorization, Bootstrap, Resources, Connecting, Ready }
 public sealed record ClientOperationProgress(ConnectionAttemptStage Stage, string Detail);
 
@@ -22,6 +23,8 @@ public interface IClientBackend : IAsyncDisposable
     bool IsPreview { get; }
     DateTimeOffset Now { get; }
     string LogDirectory { get; }
+    void RecordEvent(string kind, string detail) { }
+    void RecordFailure(string operation, Exception error) { }
     void SetProgressSink(IProgress<ClientOperationProgress>? progress) { }
     Task<ConnectionWorkspaceSnapshot> ReadConnectionsAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(new ConnectionWorkspaceSnapshot([], Now, false, "当前没有连接观测数据。"));
@@ -38,14 +41,27 @@ public interface IClientBackend : IAsyncDisposable
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, InterfaceBinding binding,
         CancellationToken cancellationToken = default);
+    async Task<IReadOnlyList<GroupProbe>> ProbeMembersAsync(MacPolicyDocument document, XrayCompileOptions options,
+        IReadOnlyList<RequiredGroupProbe> requests, CancellationToken cancellationToken = default)
+    {
+        var probes = await ProbeAsync(document, options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);
+        return probes.Where(probe => requests.Any(request => request.NodeId == probe.NodeId && request.TestUrl == probe.TestUrl)).ToArray();
+    }
     Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options,
         CancellationToken cancellationToken = default) => ProbeAsync(document,
             options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);
     Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task PrepareResourceProxyAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    async Task<ClientConnectionResources> PrepareConnectionResourcesAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
+    {
+        await PrepareResourceProxyAsync(document, options, cancellationToken);
+        return new(await PrepareResourcesAsync(document, cancellationToken), options.Probes);
+    }
     Task EndConnectionAsync(bool applied) => Task.CompletedTask;
     Task<ApplyResult> ApplyAsync(MacPolicyDocument document, XrayCompileOptions options,
         IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default);
+    Task<ApplyResult> UpdateGroupsAsync(MacPolicyDocument document, XrayCompileOptions options,
+        IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default) => ApplyAsync(document, options, assets, cancellationToken);
     Task<bool> StopAsync(CancellationToken cancellationToken = default);
     Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default);
     Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default);

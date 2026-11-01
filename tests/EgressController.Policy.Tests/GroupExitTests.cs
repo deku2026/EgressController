@@ -37,7 +37,7 @@ public sealed class GroupExitTests
             Assert.Equal(doc.Nodes[0].Id, rule.GetProperty("outboundTag").GetString());
     }
     [Fact]
-    public void ServiceProxiesAnchorPreservesDeclaredGroupAndNodeMemberOrderWithoutInventingASelection()
+    public void ServiceProxiesAnchorPreservesDeclaredGroupAndNodeMemberOrderAndInitialClashSelection()
     {
         const string yaml = """
             ServiceProxies: &ServiceProxies [automatic, first, second]
@@ -54,7 +54,7 @@ public sealed class GroupExitTests
         var automatic = imported.Groups.Single(group => group.Name == "automatic");
         string first = imported.Nodes.Single(node => node.Name == "first").Id, second = imported.Nodes.Single(node => node.Name == "second").Id;
         foreach (var group in imported.Groups.Where(group => group.Kind == GroupKind.Select))
-        { Assert.Equal(new[] { automatic.Id, first, second }, group.MemberIds); Assert.Null(group.SelectedMemberId); }
+        { Assert.Equal(new[] { automatic.Id, first, second }, group.MemberIds); Assert.Equal(automatic.Id, group.SelectedMemberId); }
         Assert.Equal(new[] { second, first }, automatic.MemberIds);
         Assert.Contains(imported.Diagnostics, diagnostic => diagnostic.Code == "subscription.ignored.rules");
     }

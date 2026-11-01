@@ -120,6 +120,9 @@ public sealed class ProxyNode
 }
 public sealed class ProxyGroup
 {
+    public bool Retained { get; set; } = true;
+    public bool StrategyOverridden { get; set; }
+    public string Icon { get; set; } = "";
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string SourceId { get; set; } = "";
@@ -162,6 +165,7 @@ public sealed class XrayCompileOptions
 {
     // Transient resource preparation: TUN traffic is blocked until complete rules are available.
     public bool ResourceBootstrap { get; set; }
+    public string? ResourceNodeId { get; set; }
     // Startup may close the resource route while automatic groups await observations after TUN creation.
     public bool DeferAutomaticGroupSelection { get; set; }
     public List<InterfaceBinding> Interfaces { get; set; } = [];

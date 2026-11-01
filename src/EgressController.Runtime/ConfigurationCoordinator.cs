@@ -208,6 +208,8 @@ public sealed class InMemoryGenerationStore : IRuntimeGenerationStore
 public sealed class MockCoreRuntime : ICoreRuntime
 {
     public int ApplyCount { get; private set; }
+    public int RestartCount { get; private set; }
+    public int RouteUpdateCount { get; private set; }
     public int RestoreCount { get; private set; }
     public RuntimeGeneration? Current { get; private set; }
     public bool FailValidation { get; set; }
@@ -222,6 +224,7 @@ public sealed class MockCoreRuntime : ICoreRuntime
     {
         cancellationToken.ThrowIfCancellationRequested(); ApplyCount++;
         if (FailApply) throw new IOException("Injected core apply failure.");
+        if (Current is not null && RuntimeRoutingUpdate.CanReplace(Current.XrayJson, generation.XrayJson)) RouteUpdateCount++; else RestartCount++;
         Current = generation; return Task.CompletedTask;
     }
     public Task RestoreAsync(RuntimeGeneration? generation, CancellationToken cancellationToken)

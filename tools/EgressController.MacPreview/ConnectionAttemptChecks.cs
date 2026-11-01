@@ -21,6 +21,7 @@ internal static class ConnectionAttemptChecks
     {
         PreviewEnvironment.RequireIsolated();
         PureTransitionsAndRetry(directory);
+        InstallerFailureVisibility(directory);
         var backend = new InertBackend(); var shell = new ShellViewModel(backend); Complete(shell.InitializeAsync());
         string policy = PolicyYaml.Write(shell.Document);
         Check(shell.IsProduction && !shell.HasChanges && backend.ApplyCalls == 0 && backend.PreparationCalls == 0, "Injected production startup performed connection preparation or mutated the policy.");
@@ -48,6 +49,44 @@ internal static class ConnectionAttemptChecks
         SaveSizes(window, directory, "attempt-canceled"); AssertProductionText(window);
         Check(!shell.ConnectionAttempt.IsRunning && shell.ConnectionAttempt.HasFailed && shell.ConnectionAttempt.Title.Contains("取消", StringComparison.Ordinal), "Canceled attempt did not leave an actionable terminal state.");
         Check(PolicyYaml.Write(shell.Document) == policy && !shell.HasChanges && backend.ApplyCalls == 0 && backend.PreparationCalls == 0 && backend.StopCalls == 0, "Phase presentation changed policy or called a runtime/resource operation.");
+        window.Close(); Complete(shell.DisposeAsync().AsTask());
+    }
+
+    private static void InstallerFailureVisibility(string directory)
+    {
+        var backend = new InertBackend { FailInstallation = true };
+        var shell = new ShellViewModel(backend); Complete(shell.InitializeAsync());
+        shell.OnboardingVisible = true; shell.SetupStep = 4;
+        var window = new MainWindow { DataContext = shell, Width = 1260, Height = 860 }; window.Show(); Flush();
+        Complete(shell.ApplyCommand.ExecuteAsync());
+        Check(shell.HasIssue && shell.ConnectionAttempt.HasFailed && backend.Failures.Contains("connection.prepare"), "Installation failure was hidden or not logged.");
+        var error = window.GetVisualDescendants().OfType<Border>().Single(control => control.Name == "SetupErrorPanel");
+        var scroll = window.GetVisualDescendants().OfType<ScrollViewer>().Single(control => control.Name == "SetupContentScroll");
+        foreach (var size in new[] { (1260, 860), (980, 700) })
+        {
+            window.Width = size.Item1; window.Height = size.Item2; Flush();
+            scroll.Offset = new Vector(0, 9999); Flush();
+            var position = error.TranslatePoint(new Point(), window)!.Value;
+            Check(error.IsEffectivelyVisible && position.Y >= 0 && position.Y + error.Bounds.Height < window.Height,
+                "Setup error must stay visible above scroll content at both sizes.");
+            Save(window, Path.Combine(directory, $"attempt-install-error-{size.Item1}.png"));
+        }
+        var logs = window.GetVisualDescendants().OfType<Button>().Single(control => control.Name == "SetupOpenLogDirectoryButton");
+        var point = logs.TranslatePoint(new Point(logs.Bounds.Width / 2, logs.Bounds.Height / 2), window)!.Value;
+        window.MouseMove(point); Save(window, Path.Combine(directory, "attempt-install-logs-hover.png"));
+        logs.Focus(); Save(window, Path.Combine(directory, "attempt-install-logs-focus.png"));
+        window.MouseDown(point, MouseButton.Left); Save(window, Path.Combine(directory, "attempt-install-logs-pressed.png"));
+        window.MouseUp(point, MouseButton.Left); Flush(); Check(backend.OpenLogsCalls == 1, "Log directory button is obstructed.");
+        var diagnostics = window.GetVisualDescendants().OfType<Button>().Single(control => control.Name == "SetupViewDiagnosticsButton");
+        diagnostics.Command!.Execute(null); Flush();
+        Check(!shell.OnboardingVisible && shell.SettingsVisible && shell.SettingsTab == 4, "Opening diagnostics must dismiss the overlay without discarding choices.");
+        shell.OnboardingVisible = true; backend.WaitForRetry = new();
+        Task retry = shell.ApplyCommand.ExecuteAsync(); Flush();
+        Check(shell.IsBusy && !shell.HasIssue && !error.IsVisible, "A retry retained the previous failure banner.");
+        Check(scroll.IsEffectivelyEnabled, "The progress area cannot be scrolled while authorization is pending.");
+        Save(window, Path.Combine(directory, "attempt-install-retry-pending.png"));
+        backend.WaitForRetry.SetResult(); Complete(retry);
+        Check(shell.HasIssue && backend.ApplyCalls == 0 && backend.PreparationCalls == 0, "Injected install failure reached a real runtime/resource stage.");
         window.Close(); Complete(shell.DisposeAsync().AsTask());
     }
 
@@ -111,6 +150,19 @@ internal static class ConnectionAttemptChecks
         public bool IsPreview => false;
         public DateTimeOffset Now => new(2026, 10, 31, 14, 0, 0, TimeSpan.Zero);
         public string LogDirectory => PreviewEnvironment.SessionDirectory;
+        public bool FailInstallation;
+        public TaskCompletionSource? WaitForRetry;
+        public int OpenLogsCalls;
+        public List<string> Failures { get; } = [];
+        private IProgress<ClientOperationProgress>? _progress;
+        public void SetProgressSink(IProgress<ClientOperationProgress>? progress) => _progress = progress;
+        public void RecordFailure(string operation, Exception error) => Failures.Add(operation);
+        public async Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
+        {
+            _progress?.Report(new(ConnectionAttemptStage.Authorization, "请求管理员授权安装网络助手。"));
+            if (WaitForRetry is not null) await WaitForRetry.Task;
+            if (FailInstallation) throw new RuntimeFailureException("helper.install-data");
+        }
         public int ApplyCalls { get; private set; }
         public int PreparationCalls { get; private set; }
         public int StopCalls { get; private set; }
@@ -132,7 +184,7 @@ internal static class ConnectionAttemptChecks
         public Task<bool> StopAsync(CancellationToken cancellationToken = default) { StopCalls++; throw new InvalidOperationException("Inert attempt checks never stop a runtime."); }
         public Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new ClientRuntimeState(false, true, false, "尚未连接。"));
         public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task OpenLogDirectoryAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task OpenLogDirectoryAsync(CancellationToken cancellationToken = default) { OpenLogsCalls++; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using EgressController.Mac;
 using EgressController.Runtime;
@@ -18,6 +19,9 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     private string? _tunName, _tunCidr, _failure;
     private bool _dnsRestored = true;
     private XrayConnectionObserver? _observer;
+    private readonly OperationDiagnostics _diagnostics = new(new HelperServiceLog(native));
+    private readonly CoreStartupDiagnosis _startup = new();
+    private static string ControlSocket => Path.Combine(MacHelperPaths.PrivateRoot, "routing.sock");
     private static string JournalPath => Path.Combine(MacHelperPaths.PrivateRoot, "recovery.json");
 
     public async Task ValidateAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken)
@@ -35,7 +39,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         var manifest = JsonSerializer.Deserialize(manifestBytes, MacHelperWireJson.Default.MacRuntimeManifest)
             ?? throw new InvalidDataException("Missing runtime manifest.");
         if (manifest.GenerationId != plan.GenerationId || manifest.Files is null || manifest.Files.Count is < 1 or > 256 || !manifest.Files.ContainsKey("xray.json")
-            || manifest.Files.Keys.Any(name => !ConfigurationCoordinator.SafeArtifactName(name) || name is "runtime-manifest.json" or "recovery.json"))
+            || manifest.Files.Keys.Any(name => !ConfigurationCoordinator.SafeArtifactName(name) || name is "runtime-manifest.json" or "recovery.json" or "core.runtime.json"))
             throw new InvalidDataException("Invalid runtime manifest.");
         var content = new Dictionary<string, byte[]>(StringComparer.Ordinal); long total = 0;
         foreach (var (name, hash) in manifest.Files)
@@ -76,8 +80,24 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
 
     public async Task ApplyAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken)
     {
-        await RestoreAsync(CancellationToken.None).ConfigureAwait(false);
         string directory = Path.Combine(MacHelperPaths.PrivateRoot, "generations", plan.GenerationId);
+        if (_active is { } previous && _core is { HasExited: false } && Inspect().TunTakenOver
+            && previous.HomeServiceId == plan.HomeServiceId && previous.NonHomeServiceId == plan.NonHomeServiceId)
+        {
+            string previousDirectory = Path.Combine(MacHelperPaths.PrivateRoot, "generations", previous.GenerationId);
+            string before = System.Text.Encoding.UTF8.GetString(HostFiles.ReadOwned(native, Path.Combine(previousDirectory, "xray.json"), 0, 1024 * 1024));
+            string after = System.Text.Encoding.UTF8.GetString(HostFiles.ReadOwned(native, Path.Combine(directory, "xray.json"), 0, 1024 * 1024));
+            if (RuntimeRoutingUpdate.CanReplace(before, after))
+            {
+                _diagnostics.Record("routing.replace", "validated routing update; preserve core, TUN and DNS");
+                await RuntimeRoutingUpdate.ReplaceAsync(previousDirectory, directory, ReplaceRoutesAsync, cancellationToken).ConfigureAwait(false);
+                _active = plan; _failure = null;
+                _observer?.SetGeneration(plan.GenerationId); // Existing records retain their own generation and outbound labels.
+                return;
+            }
+        }
+        _diagnostics.Record("core.reconfigure", "validated listener, interface, DNS or outbound change requires core start");
+        await RestoreAsync(CancellationToken.None).ConfigureAwait(false);
         byte[] configBytes = HostFiles.ReadOwned(native, Path.Combine(directory, "xray.json"), 0, 1024 * 1024);
         using var config = JsonDocument.Parse(configBytes);
         var tun = config.RootElement.GetProperty("inbounds")[0].GetProperty("settings");
@@ -102,6 +122,12 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         try
         {
             _observer = new XrayConnectionObserver(plan.GenerationId);
+            _startup.Reset();
+            var runtime = JsonNode.Parse(configBytes)!.AsObject();
+            runtime["api"] = new JsonObject { ["tag"] = "egress-routing", ["listen"] = ControlSocket,
+                ["services"] = new JsonArray("RoutingService") };
+            HostFiles.AtomicWrite(native, Path.Combine(directory, "core.runtime.json"), System.Text.Encoding.UTF8.GetBytes(runtime.ToJsonString()));
+            if (File.Exists(ControlSocket)) File.Delete(ControlSocket);
             _core = StartCore(directory, testOnly: false, _observer);
             var identity = native.ReadProcess(_core.Id);
             HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns, _core.Id, identity.StartedAtMicroseconds), HelperHostJson.Default.RecoveryJournal));
@@ -109,7 +135,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(20));
             while (!native.IsTunTakeoverActive(_tunName, _tunCidr))
             {
-                if (_core.HasExited) throw new RuntimeFailureException("core.exited");
+                if (_core.HasExited) { _diagnostics.Record("core.start-exit", "exit=" + _core.ExitCode + "; code=" + _startup.Code); throw new RuntimeFailureException(_startup.Code); }
                 try { await Task.Delay(100, deadline.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 { throw new RuntimeFailureException("tun.timeout"); }
@@ -117,8 +143,9 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             // DNS only changes once the actual interface/address/IPv4+IPv6 route takeover exists.
             native.SetDns(snapshots, _tunCidr.Split('/')[0]);
         }
-        catch
+        catch (Exception error)
         {
+            _diagnostics.Failure("core.start", error);
             _failure = "core-or-tun-failure";
             await RestoreAsync(CancellationToken.None).ConfigureAwait(false); throw;
         }
@@ -174,7 +201,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     }
     public CoreConnectionSnapshot ReadConnections() => _observer?.Snapshot(DateTimeOffset.UtcNow)
         ?? CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow, "核心尚未运行，暂无连接观测。");
-    private static Process StartCore(string workingDirectory, bool testOnly, XrayConnectionObserver? observer = null)
+    private Process StartCore(string workingDirectory, bool testOnly, XrayConnectionObserver? observer = null)
     {
         var start = new ProcessStartInfo(MacHelperPaths.InstalledXray)
         {
@@ -185,12 +212,29 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             CreateNoWindow = true
         };
         start.ArgumentList.Add("run"); if (testOnly) start.ArgumentList.Add("-test");
-        start.ArgumentList.Add("-config"); start.ArgumentList.Add(Path.Combine(workingDirectory, "xray.json"));
+        start.ArgumentList.Add("-config"); start.ArgumentList.Add(Path.Combine(workingDirectory, testOnly ? "xray.json" : "core.runtime.json"));
         XrayProcessEnvironment.Configure(start, workingDirectory);
         var child = Process.Start(start) ?? throw new IOException("Xray did not start.");
-        _ = XrayConnectionOutputPump.DrainAsync(child.StandardOutput, observer);
-        _ = XrayConnectionOutputPump.DrainAsync(child.StandardError, observer);
+        _ = DrainCoreAsync(child.StandardOutput, observer);
+        _ = DrainCoreAsync(child.StandardError, observer);
         return child;
+    }
+    private Task DrainCoreAsync(StreamReader reader, XrayConnectionObserver? observer)
+        => XrayConnectionOutputPump.DrainAsync(reader, observer, _startup.Observe);
+    private static async Task ReplaceRoutesAsync(string directory, CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo(MacHelperPaths.InstalledXray) { WorkingDirectory = directory,
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        foreach (string argument in new[] { "api", "adrules", "--server=unix://" + ControlSocket, "--timeout=8", "--append=false", Path.Combine(directory, "xray.json") }) start.ArgumentList.Add(argument);
+        XrayProcessEnvironment.Configure(start, directory);
+        using var child = Process.Start(start) ?? throw new RuntimeFailureException("routing.update");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(12));
+        var stdout = XrayConnectionOutputPump.DrainAsync(child.StandardOutput, null);
+        var stderr = XrayConnectionOutputPump.DrainAsync(child.StandardError, null);
+        try { await child.WaitForExitAsync(deadline.Token).ConfigureAwait(false); }
+        finally { if (!child.HasExited) { child.Kill(); await child.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } }
+        await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
+        if (child.ExitCode != 0) throw new RuntimeFailureException("routing.update");
     }
     private static async Task StopOwnedCoreAsync(Process process)
     {

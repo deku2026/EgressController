@@ -32,6 +32,8 @@ public static partial class XrayConfigCompiler
                 return "blocked"; // No first-node substitute, direct fallback, or synthetic observation.
             diagnostics.AddRange(selected.Diagnostics);
             if (selected.NodeId is not { } nodeId) return null;
+            if (nodeId == GroupGraph.Direct) return "nonhome";
+            if (nodeId == GroupGraph.Reject) return "blocked";
             selections[id] = nodeId;
             var node = doc.Nodes.First(x => x.Id == nodeId); selectedNodes[nodeId] = node;
             if (node.DialerProxyId is { } dialer) _ = Resolve(dialer);
@@ -39,11 +41,24 @@ public static partial class XrayConfigCompiler
         }
         string? Outbound(ExitChoice via) => via.Kind switch { ExitKind.Home => "home", ExitKind.NonHome => "nonhome", _ => Resolve(via.TargetId ?? "") };
         var global = Outbound(doc.Defaults.Global);
+        string? resource = options.ResourceNodeId is { } resourceId && GroupGraph.Leaves(doc.Defaults.Global.TargetId ?? "", doc).Contains(resourceId)
+            && doc.Nodes.Any(node => node.Id == resourceId && node.IsSupported) ? Resolve(resourceId) : global;
+        if (resource is "nonhome" or "blocked")
+        {
+            resource = GroupGraph.ResourceNode(doc, options.Probes, options.Now) is { } available ? Resolve(available) : "blocked";
+        }
+        // Load valid subscription nodes once, so group changes only replace the routing table.
+        // Unselected unsupported items stay visible without blocking otherwise valid routes.
+        foreach (var candidate in doc.Nodes.Where(node => node.IsSupported))
+        {
+            var selection = GroupSelector.Resolve(candidate.Id, doc, options.Probes, options.Now, options.ProbeMaxAge);
+            if (selection.IsSuccess) _ = Resolve(candidate.Id);
+        }
         foreach (var app in doc.Applications.Where(x => x.Enabled && !options.ResourceBootstrap)) _ = Outbound(app.Via);
         foreach (var rule in doc.RuleSets.Where(x => x.Enabled && !options.ResourceBootstrap)) _ = Outbound(rule.Via);
         var rules = new JsonArray
         {
-            Rule("resources", global, ("inboundTag", Strings(["resources"]))),
+            Rule("resources", resource, ("inboundTag", Strings(["resources"]))),
             Rule("dns-upstream", "nonhome", ("inboundTag", Strings(["dns-query"])))
         };
         if (!options.ResourceBootstrap)

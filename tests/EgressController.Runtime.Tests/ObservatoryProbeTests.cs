@@ -48,7 +48,7 @@ public sealed class ObservatoryProbeTests
             TestUrl = "https://probe.example.invalid/check"
         });
         var result = await new ObservatoryProbes(fake).ProbeAsync(doc, ConfigurationTests.Options(), "/fixture/xray", TestContext.Current.CancellationToken);
-        Assert.Single(result); Assert.True(result[0].Available); Assert.Equal(125, result[0].LatencyMilliseconds);
+        Assert.Equal(2, result.Count); Assert.All(result, probe => { Assert.True(probe.Available); Assert.Equal(125, probe.LatencyMilliseconds); });
         Assert.NotNull(fake.Json);
         var json = JsonNode.Parse(fake.Json!)!;
         Assert.Empty(json["inbounds"]!.AsArray()); Assert.Null(json["api"]);

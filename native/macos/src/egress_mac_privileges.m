@@ -3,6 +3,7 @@
 #import <Security/Security.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #include "egress_mac.h"
+#include "process_identity.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <ifaddrs.h>
@@ -31,29 +32,29 @@ static int32_t json_copy(id object, uint8_t *output, size_t capacity, size_t *re
 }
 static NSDictionary *process_info(pid_t pid)
 {
-    struct proc_bsdinfo info = {0}; char path[PROC_PIDPATHINFO_MAXSIZE] = {0};
-    if (pid <= 0 || proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != sizeof(info)
-        || proc_pidpath(pid, path, sizeof(path)) <= 0) return nil;
-    return @{ @"UserId":@(info.pbi_uid), @"GroupId":@(info.pbi_gid), @"ProcessId":@(pid),
-        @"StartedAtMicroseconds":@(info.pbi_start_tvsec * UINT64_C(1000000) + info.pbi_start_tvusec),
-        @"ExecutablePath":[NSString stringWithUTF8String:path] };
+    struct egress_process_identity info;
+    if (egress_read_process_identity(pid, sysctl, proc_pidpath, &info) != 0) return nil;
+    return @{ @"UserId":@(info.uid), @"GroupId":@(info.gid), @"ProcessId":@(info.pid),
+        @"StartedAtMicroseconds":@(info.started_at), @"ExecutablePath":[NSString stringWithUTF8String:info.path] };
 }
 uint32_t egress_mac_uid(void) { return getuid(); }
 uint32_t egress_mac_gid(void) { return getgid(); }
 uint32_t egress_mac_euid(void) { return geteuid(); }
 int32_t egress_mac_copy_process_json(int32_t pid, uint8_t *output, size_t capacity, size_t *required)
 {
-    @autoreleasepool { if (denied()) return EGRESS_MAC_UNAVAILABLE; NSDictionary *info = process_info(pid);
+    @autoreleasepool { errno = 0; if (denied()) return EGRESS_MAC_UNAVAILABLE; NSDictionary *info = process_info(pid);
         return info == nil ? EGRESS_MAC_UNAVAILABLE : json_copy(info, output, capacity, required); }
 }
 int32_t egress_mac_copy_peer_json(int32_t descriptor, uint8_t *output, size_t capacity, size_t *required)
 {
     @autoreleasepool {
-        if (denied()) return EGRESS_MAC_UNAVAILABLE;
+        errno = 0; if (denied()) return EGRESS_MAC_UNAVAILABLE;
         uid_t uid; gid_t gid; pid_t pid = 0; socklen_t length = sizeof(pid);
         if (getpeereid(descriptor, &uid, &gid) != 0 || getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) != 0) return EGRESS_MAC_IO;
+        if (length != sizeof(pid) || pid <= 0) { errno = EINVAL; return EGRESS_MAC_UNAVAILABLE; }
         NSDictionary *info = process_info(pid);
-        if (info == nil || [info[@"UserId"] unsignedIntValue] != uid) return EGRESS_MAC_UNAVAILABLE;
+        if (info == nil) return EGRESS_MAC_UNAVAILABLE;
+        if ([info[@"UserId"] unsignedIntValue] != uid) { errno = EPERM; return EGRESS_MAC_UNAVAILABLE; }
         NSMutableDictionary *peer = [info mutableCopy]; peer[@"GroupId"] = @(gid);
         return json_copy(peer, output, capacity, required);
     }
@@ -61,19 +62,27 @@ int32_t egress_mac_copy_peer_json(int32_t descriptor, uint8_t *output, size_t ca
 static NSDictionary *stat_info(const struct stat *value)
 {
     return @{ @"UserId":@(value->st_uid), @"GroupId":@(value->st_gid), @"Mode":@(value->st_mode & 07777),
-        @"IsRegular":@(S_ISREG(value->st_mode)), @"IsDirectory":@(S_ISDIR(value->st_mode)),
-        @"IsSocket":@(S_ISSOCK(value->st_mode)), @"IsSymbolicLink":@(S_ISLNK(value->st_mode)), @"Size":@(value->st_size) };
+        // S_IS* are C int expressions. Boxing them directly emits JSON 0/1, which
+        // the AOT-generated managed bool contract correctly refuses to deserialize.
+        @"IsRegular":S_ISREG(value->st_mode) ? @YES : @NO, @"IsDirectory":S_ISDIR(value->st_mode) ? @YES : @NO,
+        @"IsSocket":S_ISSOCK(value->st_mode) ? @YES : @NO, @"IsSymbolicLink":S_ISLNK(value->st_mode) ? @YES : @NO, @"Size":@(value->st_size) };
+}
+int32_t egress_mac_file_info_fixture(uint32_t mode, uint8_t *output, size_t capacity, size_t *required)
+{
+    // Pure wire-contract probe: supplied mode only, no filesystem/identity access.
+    @autoreleasepool { struct stat value = {0}; value.st_mode = (mode_t)mode;
+        return json_copy(stat_info(&value), output, capacity, required); }
 }
 int32_t egress_mac_copy_file_info(const char *path, uint8_t *output, size_t capacity, size_t *required)
 {
-    @autoreleasepool { struct stat value;
+    @autoreleasepool { errno = 0; struct stat value;
         if (denied()) return EGRESS_MAC_UNAVAILABLE;
         if (!egress_mac_path_is_absolute(path) || lstat(path, &value) != 0) return EGRESS_MAC_IO;
         return json_copy(stat_info(&value), output, capacity, required); }
 }
 int32_t egress_mac_copy_fd_info(int32_t descriptor, uint8_t *output, size_t capacity, size_t *required)
 {
-    @autoreleasepool { struct stat value;
+    @autoreleasepool { errno = 0; struct stat value;
         if (denied()) return EGRESS_MAC_UNAVAILABLE;
         if (fstat(descriptor, &value) != 0) return EGRESS_MAC_IO;
         return json_copy(stat_info(&value), output, capacity, required); }

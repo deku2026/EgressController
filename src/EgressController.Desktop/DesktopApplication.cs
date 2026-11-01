@@ -69,7 +69,7 @@ public sealed class DesktopApplication : Application
             timer.Tick += async (_, _) =>
             {
                 if (polling || closing) return; polling = true;
-                try { await vm.RefreshStatusAsync(); } finally { polling = false; }
+                try { await vm.RefreshStatusAsync(); await vm.MaintainAutomaticGroupsAsync(); } finally { polling = false; }
             };
             window.Opened += async (_, _) =>
             {

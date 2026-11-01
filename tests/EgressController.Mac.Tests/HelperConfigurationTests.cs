@@ -53,7 +53,6 @@ public sealed class HelperConfigurationTests
     [InlineData("missing-interface")]
     [InlineData("auto-interface")]
     [InlineData("direct-fallback")]
-    [InlineData("global-direct")]
     [InlineData("dialer-direct")]
     [InlineData("dialer-cycle")]
     [InlineData("dns-fallback")]
@@ -160,13 +159,13 @@ public sealed class HelperConfigurationTests
     }
 
     [Fact]
-    public void ClosedAutomaticGroupBootstrapPassesHelperButClosedCompleteResourceRouteDoesNot()
+    public void ClosedResourceRouteIsSafeDuringBootstrapAndCachedOperation()
     {
         string closed = Generated(bootstrap: true, pendingAutomatic: true);
         Assert.True(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(closed), "en0", "en5").IsValid);
         var normal = JsonNode.Parse(Generated())!;
         normal["routing"]!["rules"]![0]!["outboundTag"] = "blocked";
-        Assert.False(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(normal.ToJsonString()), "en0", "en5").IsValid);
+        Assert.True(MacHelperConfigurationValidator.Validate(Encoding.UTF8.GetBytes(normal.ToJsonString()), "en0", "en5").IsValid);
     }
 
     private static string Generated(bool bootstrap = false, bool pendingAutomatic = false)

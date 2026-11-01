@@ -63,11 +63,15 @@ public static partial class PolicyValidator
         if (ancestors.Count >= 128) return [new("proxy.depth", "代理嵌套深度超过安全限制。", ObjectId: origin)];
         if (!ancestors.Add(target)) return [new("proxy.cycle", "代理节点或分组存在循环引用。", ObjectId: origin)];
         if (validated.Contains(target)) { ancestors.Remove(target); return []; }
-        if (target.StartsWith("builtin:", StringComparison.Ordinal)) errors.Add(new("proxy.direct-member", "代理出口不能选择 DIRECT 或 REJECT。", ObjectId: origin));
+        if (target is GroupGraph.Direct or GroupGraph.Reject) { }
         else if (doc.Nodes.FirstOrDefault(x => x.Id == target) is { } node)
         {
             errors.AddRange(node.Diagnostics); errors.AddRange(ValidateNode(node));
-            if (node.DialerProxyId is { } dialer) errors.AddRange(ValidateReachable(dialer, doc, ancestors, validated, origin));
+            if (node.DialerProxyId is { } dialer)
+            {
+                errors.AddRange(ValidateReachable(dialer, doc, ancestors, validated, origin));
+                if (GroupGraph.Leaves(dialer, doc).Any(id => id is GroupGraph.Direct or GroupGraph.Reject)) errors.Add(new("node.direct-dialer", "前置代理必须解析为节点，不能使用 DIRECT 或 REJECT。", ObjectId: node.Id));
+            }
         }
         else if (doc.Groups.FirstOrDefault(x => x.Id == target) is { } group)
         {
@@ -91,6 +95,9 @@ public static partial class PolicyValidator
     {
         var errors = new List<PolicyDiagnostic>();
         void Add(string code, string message) => errors.Add(new(code, message, ObjectId: node.Id));
+        if (node.Server.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || IPAddress.TryParse(node.Server, out var address) && IPAddress.IsLoopback(address))
+            Add("node.local-proxy", "节点不能引用本机代理中转；请选择订阅中的远端节点。");
         if (node.Protocol == NodeProtocol.Unsupported) Add("node.unsupported-protocol", "节点协议不受支持。");
         if (Uri.CheckHostName(node.Server) == UriHostNameType.Unknown || node.Port is < 1 or > 65535) Add("node.address", "节点地址或端口无效。");
         if (node.Protocol is NodeProtocol.Vless or NodeProtocol.Vmess && (string.IsNullOrWhiteSpace(node.UserId) || !Guid.TryParse(node.UserId, out _) && Encoding.UTF8.GetByteCount(node.UserId) >= 30)) Add("node.identity", "节点用户标识无效。");

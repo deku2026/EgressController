@@ -10,6 +10,7 @@ public enum CoreConnectionActivity { Unknown, Active, Closed }
 /// <summary>Observed facts only. Missing activity, identity and counters are never guessed from access logs.</summary>
 public sealed record CoreConnectionRecord(string Id, DateTimeOffset LastObservedAt)
 {
+    public string? GenerationId { get; init; }
     public string? SourceIp { get; init; }
     public int? SourcePort { get; init; }
     public string? Transport { get; init; }
@@ -48,7 +49,7 @@ public static class CoreConnectionSnapshots
         foreach (var row in value.Records)
             if (row is null || string.IsNullOrEmpty(row.Id) || !SafeText(row.Id, 160) || !ids.Add(row.Id)
                 || row.LastObservedAt > value.CapturedAt.AddSeconds(5) || row.LastObservedAt < DateTimeOffset.UnixEpoch
-                || !Enum.IsDefined(row.Activity) || row.Transport is not (null or "tcp" or "udp")
+                || !SafeText(row.GenerationId, 64) || !Enum.IsDefined(row.Activity) || row.Transport is not (null or "tcp" or "udp")
                 || !IpOrNull(row.SourceIp) || !IpOrNull(row.RemoteIp) || !PortOrNull(row.SourcePort) || !PortOrNull(row.RemotePort)
                 || !SafeText(row.Host, 253) || row.Host is { } host && Uri.CheckHostName(host) == UriHostNameType.Unknown
                 || !SafeTag(row.OutboundTag) || !SafeTag(row.MatchedRule) || row.ProcessId is <= 0
@@ -75,7 +76,7 @@ public sealed partial class XrayConnectionObserver
 {
     public const int MaximumLineCharacters = 4096;
     private readonly object _gate = new();
-    private readonly string _generation;
+    private string _generation;
     private readonly int _capacity;
     private readonly List<CoreConnectionRecord> _records = [];
     private readonly Dictionary<uint, string> _sessions = [];
@@ -89,6 +90,11 @@ public sealed partial class XrayConnectionObserver
         _capacity = Math.Clamp(capacity, 1, CoreConnectionSnapshots.MaximumRecords);
     }
 
+    public void SetGeneration(string generation)
+    {
+        if (generation.Length != 64 || !generation.All(char.IsAsciiHexDigit)) throw new ArgumentException("Invalid generation.");
+        lock (_gate) _generation = generation;
+    }
     public void ObserveLine(string? line, DateTimeOffset observedAt)
     {
         lock (_gate)
@@ -158,9 +164,9 @@ public sealed partial class XrayConnectionObserver
             foreach (uint key in _sessions.Where(pair => pair.Value == removed).Select(pair => pair.Key).ToArray()) _sessions.Remove(key);
             Drop();
         }
-        _records.Add(record);
+        _records.Add(record with { GenerationId = record.GenerationId ?? _generation });
     }
-    private void Replace(CoreConnectionRecord record) { int index = _records.FindIndex(row => row.Id == record.Id); if (index >= 0) _records[index] = record; }
+    private void Replace(CoreConnectionRecord record) { int index = _records.FindIndex(row => row.Id == record.Id); if (index >= 0) _records[index] = record with { GenerationId = record.GenerationId ?? _records[index].GenerationId }; }
     private void Drop() { if (_dropped < long.MaxValue) _dropped++; }
     private static DateTimeOffset Latest(DateTimeOffset left, DateTimeOffset right) => left > right ? left : right;
     private static CoreConnectionRecord FromEndpoints(string id, Endpoint source, Endpoint target, DateTimeOffset now) => new(id, now)

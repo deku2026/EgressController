@@ -32,6 +32,8 @@ EGRESS_MAC_API uint32_t egress_mac_gid(void);
 EGRESS_MAC_API uint32_t egress_mac_euid(void);
 EGRESS_MAC_API int32_t egress_mac_copy_peer_json(int32_t descriptor, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_process_json(int32_t pid, uint8_t *output, size_t capacity, size_t *required);
+/* Pure synthetic mode -> production file-info JSON contract; safe in mock mode. */
+EGRESS_MAC_API int32_t egress_mac_file_info_fixture(uint32_t mode, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_file_info(const char *path, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_copy_fd_info(int32_t descriptor, uint8_t *output, size_t capacity, size_t *required);
 EGRESS_MAC_API int32_t egress_mac_verify_process_code(int32_t pid, const char *expected_path);

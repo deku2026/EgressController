@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.GroupRetentionView" x:DataType="vm:ShellViewModel">
+ <StackPanel Spacing="12">
+  <TextBlock Text="{Binding GroupCountLabel}" Classes="caption"/>
+  <ListBox Name="RetainedGroupList" ItemsSource="{Binding AllGroups}" MaxHeight="270" ItemContainerTheme="{StaticResource QuietRow}">
+   <ListBox.ItemTemplate><DataTemplate x:DataType="vm:GroupRow">
+    <Grid ColumnDefinitions="30,36,*,Auto" ColumnSpacing="10" Margin="8,9">
+     <CheckBox IsChecked="{Binding Retained,Mode=TwoWay}" IsEnabled="{Binding CanRemove}" AutomationProperties.Name="{Binding Name}" ToolTip.Tip="正在使用的分组需要先更换应用或默认出口"/>
+     <ui:ProductAvatar Grid.Column="1" Product="{Binding Product}" Width="34" Height="34"/>
+     <StackPanel Grid.Column="2" Spacing="3"><TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Detail}" Classes="caption" FontSize="10" TextTrimming="CharacterEllipsis"/></StackPanel>
+     <TextBlock Grid.Column="3" Text="{Binding Kind}" Classes="caption" FontSize="10"/>
+    </Grid>
+   </DataTemplate></ListBox.ItemTemplate>
+  </ListBox>
+  <TextBlock Text="未保留的分组从日常列表隐藏；被其他分组引用的成员关系会继续保留。订阅更新不会覆盖你的保留选择。" Classes="caption" TextWrapping="Wrap" LineHeight="19"/>
+ </StackPanel>
+</UserControl>

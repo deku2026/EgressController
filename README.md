@@ -2,7 +2,7 @@
 
 Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内核。
 
-应用、域名集合和 IP 集合共用三个出口：**家宽直连 / 非家宽直连 / 指定代理分组**。中国大陆默认非家宽，其他流量必须使用全局代理；代理服务器也严格经非家宽连接，绑定失败不换网卡。
+应用、域名集合和 IP 集合共用三个出口：**家宽直连 / 非家宽直连 / 指定代理分组**。中国大陆默认非家宽，其他流量使用默认分组。分组可选择订阅节点、其他分组或 DIRECT（非家宽直连）；代理服务器严格经非家宽连接，绑定失败不换网卡。
 
 ![macOS 首次设置](docs/images/mac-production-onboarding.png)
 
@@ -10,7 +10,9 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 **双击打包后的 `Egress.app`，默认进入生产模式。** 打开界面会读取实际 App、网卡和保存的配置；不会仅因打开窗口而启动 TUN。
 
-首次使用：选择两张不同网卡 → 直接导入 Clash HTTPS 订阅 → 明确选择全局分组及成员 → 搜索并勾选应用 → 点击“应用并连接”。安装包自带固定版本 Xray；需要时出现 macOS 管理员授权框。连接默认启用 TUN，物理网卡离线不会拦截启动。先检查权限、TUN 和端口冲突并建立 TUN，再为自动分组测速和下载缺失规则，最后应用完整分流。网卡绑定在实际连接时执行，失败不换出口。停止、退出或准备失败时恢复连接前的网络状态。Rider 的生产运行和打包 `.app` 都进入完整 NativeAOT 客户端。
+首次使用：选择两张不同网卡 → 直接导入 Clash HTTPS 订阅 → 勾选保留的分组并选择默认组 → 搜索并勾选应用 → 点击“应用并连接”。安装包自带固定版本 Xray；需要时出现 macOS 管理员授权框。连接默认启用 TUN，物理网卡离线不会拦截启动。先检查权限、TUN 和端口冲突并建立 TUN，再为自动分组测速和下载缺失规则，最后热更新完整分流，无需为这一步重新建立 TUN。网卡绑定在实际连接时执行，失败不换出口。停止、退出或准备失败时恢复连接前的网络状态。Rider 的生产运行和打包 `.app` 都进入完整 NativeAOT 客户端。
+
+管理员密码只授权网络助手安装，Rider 和主界面保持普通用户权限，无需以管理员身份打开 Rider。失败时向导顶部直接显示错误，可点击“查看诊断”或“打开日志目录”；日志位于 `~/Library/Logs/EgressController/lifecycle.log`，包含安装阶段、系统退出码和连接恢复结果。
 
 `--preview` 才进入隔离 UI；示例 URL 和示例测速只出现在预览中：
 
@@ -22,11 +24,19 @@ dotnet run --project src/EgressController.Desktop -- --preview
 
 ![首次订阅直连（隔离验证）](docs/images/mac-direct-subscription.png)
 
-规则资源则先启动内置 Xray TUN，再经所选非家宽网卡和全局代理分组节点下载；优先使用已验证缓存。本地资源 SOCKS5 端口默认 `17890`，可在“设置 → 网络与 TUN”修改。SS 的 `obfs/http` 与 TFO 保留为 Xray 原生传输。
+规则资源优先使用已验证缓存。确需下载时，自动从默认分组中选择测速成功的非 DIRECT 节点，经内置 Xray 和非家宽网卡获取；没有可用代理时明确提示，不回退直连。无需单独配置下载节点。本地资源 SOCKS5 端口默认 `17890`，可在“设置 → 网络与 TUN”修改。SS 的 `obfs/http` 与 TFO 保留为 Xray 原生传输。
 
 ## 分组与连接活动
 
-应用、规则集合及全局代理都只选择分组；节点是组内成员。Clash 的 `ServiceProxies` 等 YAML 锚点按原成员顺序展开，手动组不会自动选第一个节点。旧配置中直接指向节点的出口保留并提示改选分组。启动只测速当前策略使用的自动组及其依赖，其他节点不会拖慢连接。
+订阅导入后立即显示分组、图标与成员数量，首次设置可勾选需要保留的分组；应用与规则只需选择分组。未保留的组仍保存为嵌套依赖，不会破坏已有引用。只有节点的订阅会生成默认自动组。
+
+“节点与分组”提供可展开卡片、组内成员选择、单组／全部延迟测速、自动优选和故障转移。新手动组采用订阅的 `default-selected` 或第一个声明成员；更新保留已有选择，缺失成员明确提示。每个组都可手动选择 DIRECT。测速地址、间隔和容差沿用配置，缺少地址时使用 `https://www.gstatic.com/generate_204`。
+
+普通分组切换、自动优选和规则路由更新即时作用于新连接，保留现有 TUN；已有连接和历史出口不重标。节点传输、网卡或 DNS 等运行配置变化仍需要重新配置内核。自动测速失败保留当前出口，不改变保护状态。
+
+![分组管理（隔离合成样本）](docs/images/mac-proxy-groups.png)
+
+![首次保留分组（隔离合成样本）](docs/images/mac-group-retention.png)
 
 总览中的“连接活动”提供应用筛选、搜索排序、最近/确认活跃、暂停显示及下方详情。列表更新保留选择、焦点和滚动位置。生产数据来自助手解析的实际 Xray 输出；访问记录无法证明连接仍存活，也不提供逐连接字节或完整 PID/路径，缺失字段显示未知，不读取请求内容。
 
@@ -47,7 +57,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 ```sh
 # 构建机获取固定发布归档；不会启动 Xray/TUN。
 gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
-python3 build/Verify-Mac.py --version 0.1.2
+python3 build/Verify-Mac.py --version 0.1.4
 ```
 
 **开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
@@ -65,15 +75,17 @@ dotnet run --project tools/EgressController.MacPreview -- --screenshots artifact
 强类型 YAML DSL 是唯一事实来源；Xray JSON/DAT 是生成产物。应用路由使用显式保存的 Bundle 内可执行路径，修改出口保留旧清单。Clash 只提供节点、分组和 provider，不导入其端口、DNS、TUN 或路由。
 
 - [DSL 与配置编译](docs/policy-dsl.md)
+- [订阅分组、自动测速与热切换](docs/mac-proxy-groups.md)
 - [生产运行、持久化与恢复](docs/mac-runtime.md)
 - [macOS C ABI 与特权助手](docs/macos-native.md)
+- [管理员授权、安装错误与日志](docs/mac-helper-install-diagnostics.md)
 - [实施和验收边界](docs/mac-implementation-plan.md)
 
 旧 Windows 代码隔离在 `EgressController.Windows.slnx`，不参与默认产品构建。
 
 ## Rider 运行与调试
 
-继续打开当前 `mac-xray-client` 工作树里的 `EgressController.slnx`。普通 Build 会通过 CMake 自动编译当前架构的原生桥接库，并将 `libEgressMacNative.dylib` 复制到 Desktop、助手及引用项目的输出目录；无需设置 `DYLD_LIBRARY_PATH` 或手工复制。首次构建需要上面的 CMake 与 Xcode Command Line Tools；从 Finder 打开的 Rider 也能发现 Homebrew 标准目录里的 CMake。
+继续打开项目内 `.worktree/mac-xray-client/EgressController` 中的 `EgressController.slnx`。普通 Build 会通过 CMake 自动编译当前架构的原生桥接库，并将 `libEgressMacNative.dylib` 复制到 Desktop、助手及引用项目的输出目录；无需设置 `DYLD_LIBRARY_PATH` 或手工复制。工作树迁移后会自动重建引用旧目录的 CMake 缓存。首次构建需要上面的 CMake 与 Xcode Command Line Tools；从 Finder 打开的 Rider 也能发现 Homebrew 标准目录里的 CMake。
 
 右键 `src/EgressController.Desktop/Properties/launchSettings.json` → **Generate Configurations**，选择生成的运行配置（[Rider 官方说明](https://www.jetbrains.com/help/rider/Running_LaunchSettings.html)）：
 

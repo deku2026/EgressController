@@ -43,13 +43,14 @@ internal static class Program
             {
                 vm.NextSetupCommand.Execute(null); vm.ImportSubscriptionAsync().GetAwaiter().GetResult(); Save(window, Path.Combine(directory, "setup-step-2.png"));
                 vm.NextSetupCommand.Execute(null); Save(window, Path.Combine(directory, "setup-step-3.png"));
-                vm.SelectedGlobalTarget = vm.GlobalChoices.Single(choice => choice.Name == "手动选择"); Flush(); Check(!Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled, "First-run manual group did not disable Continue until an explicit member choice."); Save(window, Path.Combine(directory, "setup-manual-selection-required.png"));
+                vm.SelectedGlobalTarget = vm.GlobalChoices.Single(choice => choice.Name == "手动选择"); Flush(); Check(Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled, "First-run manual group did not use its declared default member."); Save(window, Path.Combine(directory, "setup-manual-selection-required.png"));
                 vm.SelectedSetupGlobalMember = vm.SetupGlobalMemberChoices[1]; Flush(); Check(Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled, "Explicit manual group selection did not enable Continue."); Save(window, Path.Combine(directory, "setup-manual-selection-ready.png"));
                 vm.SelectedGlobalTarget = vm.GlobalChoices.First(); vm.NextSetupCommand.Execute(null); Save(window, Path.Combine(directory, "setup-step-4.png"));
                 vm.NextSetupCommand.Execute(null); Save(window, Path.Combine(directory, "setup-step-5.png"));
             }
             window.Close();
         }
+        GroupInteractions(directory);
         BootstrapSearchInteractions(directory);
         Interactions(directory);
         ProductionCompositionChecks.Run(directory);
@@ -57,6 +58,28 @@ internal static class Program
         log.Verify();
         Console.WriteLine("Mac preview: connection-attempt phases/cancel/retry/production wording, connection filtering/sorting, truthful sparse observations, virtualization and viewport preservation; 13 states at normal/compact sizes, five setup steps, pointer/keyboard interactions, route inventory, DSL/subscription/apply recovery, binding checks, injected production first-run/native-PNG/empty-telemetry/error-redaction checks passed. Live operations blocked.");
         return 0;
+    }
+    private static void GroupInteractions(string directory)
+    {
+        var vm = new ShellViewModel("nodes"); var window = new MainWindow { DataContext = vm, Width = 1260, Height = 860 }; window.Show(); Flush();
+        vm.ApplyPreviewAsync().GetAwaiter().GetResult();
+        var group = vm.AllGroups.Single(group => group.Name == "Claude"); group.Expanded = true; Flush();
+        var list = Find<ListBox>(window, "ProxyGroupList"); list.ScrollIntoView(group); Flush();
+        Save(window, Path.Combine(directory, "groups-expanded-normal.png"));
+        window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, "groups-expanded-compact.png"));
+        list.ScrollIntoView(group); Flush();
+        var direct = window.GetVisualDescendants().OfType<Button>().First(button => button.IsEffectivelyVisible && button.DataContext is GroupMemberRow { Id: GroupGraph.Direct });
+        direct.BringIntoView(); Flush();
+        int restarts = vm.Core.RestartCount; var point = Center(window, direct);
+        window.MouseMove(point); Save(window, Path.Combine(directory, "groups-member-hover.png"));
+        window.MouseDown(point, MouseButton.Left); Save(window, Path.Combine(directory, "groups-member-pressed.png")); window.MouseUp(point, MouseButton.Left); Flush();
+        Check(group.Model.SelectedMemberId == GroupGraph.Direct && vm.Core.RestartCount == restarts && !vm.HasChanges, "A group selection did not hot-apply independently of TUN restart: selected=" + group.Model.SelectedMemberId + ", restarts=" + vm.Core.RestartCount + "/" + restarts + ", dirty=" + vm.HasChanges);
+        var selected = window.GetVisualDescendants().OfType<Button>().First(button => button.IsEffectivelyVisible && button.DataContext is GroupMemberRow { Id: GroupGraph.Direct });
+        selected.Focus(NavigationMethod.Tab); Save(window, Path.Combine(directory, "groups-member-focused.png"));
+        selected.IsEnabled = false; Save(window, Path.Combine(directory, "groups-member-disabled.png")); selected.IsEnabled = true;
+        vm.OnboardingVisible = true; vm.SetupStep = 2; Save(window, Path.Combine(directory, "groups-retention-compact.png"));
+        window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "groups-retention-normal.png"));
+        window.Close();
     }
     private static void BootstrapSearchInteractions(string directory)
     {
@@ -66,7 +89,7 @@ internal static class Program
         Save(window, Path.Combine(directory, "nodes-search-normal.png")); window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, "nodes-search-compact.png"));
         search.Text = "no-match"; Flush(); Check(vm.NoNodesMatch, "Node search must show an explicit empty state."); Save(window, Path.Combine(directory, "nodes-search-empty.png"));
         search.Text = "";
-        var expander = window.GetVisualDescendants().OfType<Expander>().Single(control => control.IsEffectivelyVisible);
+        var expander = Find<Expander>(window, "SubscriptionExpander");
         expander.IsExpanded = true; Flush(); Save(window, Path.Combine(directory, "nodes-local-import-compact.png"));
         expander.IsExpanded = false; vm.PageIndex = 1; vm.AddAppsCommand.Execute(null); Flush();
         var catalogSearch = Find<TextBox>(window, "CatalogSearch"); catalogSearch.Focus(); window.KeyTextInput("Safari"); Flush();

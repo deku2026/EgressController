@@ -7,6 +7,7 @@
   <SolidColorBrush x:Key="ConnectionRail">#F8FAFD</SolidColorBrush>
   <SolidColorBrush x:Key="ConnectionHeader">#F7F9FC</SolidColorBrush>
   <SolidColorBrush x:Key="ConnectionSelection">#E9F0FC</SolidColorBrush>
+  <SolidColorBrush x:Key="GroupHover">#EDF2FC</SolidColorBrush><SolidColorBrush x:Key="GroupPressed">#DCE7FA</SolidColorBrush>
   <x:Double x:Key="ConnectionRowHeight">31</x:Double>
   <ControlTheme x:Key="ConnectionRow" TargetType="ListBoxItem">
    <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="{StaticResource ConnectionRowHeight}"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="FocusAdorner" Value="{x:Null}"/>
@@ -62,4 +63,14 @@
  <Style Selector="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="4"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/></Style>
  <Style Selector="CheckBox"><Setter Property="FontSize" Value="12"/><Setter Property="MinHeight" Value="28"/></Style>
  <Style Selector="TabItem"><Setter Property="FontSize" Value="12"/><Setter Property="Padding" Value="12,9"/></Style>
+ <Style Selector="Border.group-card"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="11"/></Style>
+ <Style Selector="Border.group-badge"><Setter Property="Background" Value="{StaticResource ConnectionSelection}"/><Setter Property="CornerRadius" Value="4"/><Setter Property="Padding" Value="6,2"/></Style>
+ <Style Selector="Button.group-header"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="10,12"/></Style>
+ <Style Selector="Button.group-header:pointerover"><Setter Property="Background" Value="{StaticResource Workspace}"/></Style>
+ <Style Selector="Button.group-member"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="{StaticResource Workspace}"/><Setter Property="Padding" Value="12,10"/></Style>
+ <Style Selector="Button.group-member.selected"><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/><Setter Property="Background" Value="{StaticResource ConnectionSelection}"/></Style>
+ <Style Selector="Button.group-member:pointerover"><Setter Property="Background" Value="{StaticResource GroupHover}"/><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/></Style>
+ <Style Selector="Button.group-member:pressed"><Setter Property="Background" Value="{StaticResource GroupPressed}"/><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/></Style>
+ <Style Selector="Button.group-member:focus-visible"><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/><Setter Property="BorderThickness" Value="2"/></Style>
+ <Style Selector="Button.group-member:disabled"><Setter Property="Opacity" Value="0.55"/></Style>
 </Styles>
