@@ -7,15 +7,17 @@ public sealed class ConfigurationResetTests
 {
     [Theory]
     [InlineData("stop")]
+    [InlineData("transport")]
     [InlineData("storage")]
     [InlineData("cancel")]
     [InlineData("")]
-    public async Task ResetRequiresRestorationBeforeStorageAndNeverMutatesTheCaller(string failure)
+    public async Task ResetBacksUpEvenWhenRecoveryIsUnavailableButNeverIgnoresStorageOrCancellation(string failure)
     {
         var document = ConfigurationTests.Policy(); string original = PolicyYaml.Write(document);
         var calls = new List<string>(); using var cancel = new CancellationTokenSource();
-        Task Reset() => ConfigurationReset.ExecuteAsync(document, _ =>
+        Task<ConfigurationResetResult> Reset() => ConfigurationReset.ExecuteAsync(document, _ =>
         {
+            if (failure == "transport") { calls.Add("stop"); throw new EndOfStreamException("Synthetic stale GUI identity rejection"); }
             calls.Add("stop"); if (failure == "cancel") cancel.Cancel(); return Task.FromResult(failure != "stop");
         }, (snapshot, _) =>
         {
@@ -23,9 +25,9 @@ public sealed class ConfigurationResetTests
             if (failure == "storage") throw new IOException("Synthetic write failure");
             return Task.CompletedTask;
         }, cancel.Token);
-        if (failure.Length == 0) await Reset();
-        else await Assert.ThrowsAnyAsync<Exception>(Reset);
-        Assert.Equal(failure is "stop" or "cancel" ? new[] { "stop" } : new[] { "stop", "backup-reset" }, calls);
+        if (failure is "storage" or "cancel") await Assert.ThrowsAnyAsync<Exception>(Reset);
+        else Assert.Equal(failure.Length == 0, (await Reset()).NetworkRestored);
+        Assert.Equal(failure == "cancel" ? new[] { "stop" } : new[] { "stop", "backup-reset" }, calls);
         Assert.Equal(original, PolicyYaml.Write(document));
     }
     [Fact]

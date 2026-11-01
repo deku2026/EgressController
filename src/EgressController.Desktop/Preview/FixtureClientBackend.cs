@@ -22,6 +22,9 @@ public sealed class FixtureClientBackend : IClientBackend
     public BoundedLifecycleLog Lifecycle { get; } = new();
     public string? SavedPath { get; private set; }
     public int RequestCount => _transport.RequestCount;
+    public bool SimulateHelperUnavailable { get; set; }
+    public bool SimulateRepairFailure { get; set; }
+    public int RepairCount { get; private set; }
     public FixtureClientBackend()
     {
         PreviewEnvironment.RequireIsolated();
@@ -116,17 +119,27 @@ public sealed class FixtureClientBackend : IClientBackend
     }
     public async Task<bool> StopAsync(CancellationToken cancellationToken = default)
     {
+        if (SimulateHelperUnavailable) return false;
         bool stopped = await _coordinator.StopAsync("用户停止隔离预览", cancellationToken);
         if (stopped) _running = false;
         return stopped;
     }
-    public Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new ClientRuntimeState(_running, true, true, _running ? "隔离模拟已就绪" : "模拟已手动停止"));
+    public Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(SimulateHelperUnavailable
+        ? new ClientRuntimeState(false, false, false, "模拟助手身份已过期，等待修复。")
+        : new ClientRuntimeState(_running, true, true, _running ? "隔离模拟已就绪" : "模拟已手动停止"));
+    public Task<bool> RepairNetworkAsync(CancellationToken cancellationToken = default)
+    {
+        RepairCount++;
+        if (SimulateRepairFailure) return Task.FromResult(false);
+        SimulateHelperUnavailable = false;
+        return StopAsync(cancellationToken);
+    }
     public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested(); SavedPath = PrivatePreviewFiles.WriteText("preview-policy.yaml", PolicyYaml.Write(document)); return Task.CompletedTask;
     }
     public string? ResetBackupPath { get; private set; }
-    public Task ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
+    public Task<ConfigurationResetResult> ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
         => ConfigurationReset.ExecuteAsync(current, StopAsync, async (snapshot, token) =>
         {
             ResetBackupPath = PrivatePreviewFiles.WriteText("preview-policy-before-reset.yaml", PolicyYaml.Write(snapshot));

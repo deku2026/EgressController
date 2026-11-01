@@ -64,7 +64,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public string SubscriptionDescription => IsPreview ? "隔离预览使用 example.invalid 示例 URL，读取内存响应；不会访问真实订阅。" : "订阅和节点提供器通过非家宽物理网卡直连，无需启动 Xray 或 TUN。直连失败时请检查订阅地址与网络后重试。";
     public string SubscriptionName => Document.Subscriptions.FirstOrDefault()?.Name ?? "节点订阅";
     public string CatalogDescription => IsPreview ? "先搜索，再明确选择。AI、开发、浏览器与日常应用均可添加。" : "从已安装的应用中搜索并选择，添加时读取完整的固定可执行清单。";
-    public string TunStatusText => PreviewRunning ? "TUN 已接管" : _state.HelperInstalled ? "后台服务已就绪" : "尚未安装后台服务";
+    public string TunStatusText => HasRecoveryIssue ? "后台状态待修复" : PreviewRunning ? "TUN 已接管" : _state.HelperInstalled ? "后台服务已就绪" : "尚未安装后台服务";
     public string TunDescription => IsPreview ? "当前是隔离预览，系统网络与管理员权限均未使用。" : "GUI 保持普通权限；启动时由授权后台服务管理 TUN、DNS 与网络恢复。";
     public string SourceStatusText => IsPreview ? "本地示例缓存" : _prepared.Assets.Count > 0 ? "资源已验证" : "等待准备";
     public string DnsDescription => IsPreview ? "系统 DNS 的备份与恢复属于特权服务；预览只编译 DNS 设置，不修改本机 DNS。" : "系统 DNS 的备份与恢复由授权后台服务处理；停止连接时恢复原设置。";
@@ -178,7 +178,8 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private void SetRuntimeUnavailable(bool value)
     {
         _runtimeUnavailable = value;
-        foreach (string property in new[] { nameof(StatusTitle), nameof(StatusDescription), nameof(TogglePreviewLabel), nameof(StatusIconBrush), nameof(StatusSurfaceBrush) }) Raise(property);
+        foreach (string property in new[] { nameof(StatusTitle), nameof(StatusDescription), nameof(TogglePreviewLabel), nameof(StatusIconBrush), nameof(StatusSurfaceBrush), nameof(HasRecoveryIssue), nameof(RecoveryMessage), nameof(TunStatusText) }) Raise(property);
+        RepairNetworkCommand?.Refresh();
     }
     public string HomeInterfaceName => SelectedHomeInterface?.Name ?? "尚未选择"; public string NonHomeInterfaceName => SelectedNonHomeInterface?.Name ?? "尚未选择"; public string GlobalTargetName => SelectedGlobalTarget?.Name ?? "必须选择一个代理";
     public string ProxyResolvedName => GroupSelector.Resolve(Document.Defaults.Global.TargetId ?? "", Document, _probes, _backend.Now).NodeId is { } id ? GroupGraph.Name(id, Document) : "待校验";
@@ -315,7 +316,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private void RefreshCommands()
     {
         ConfirmAppsCommand.Refresh(); RefreshSelectedInventoryCommand.Refresh(); NextSetupCommand.Refresh(); BackSetupCommand.Refresh();
-        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh();
+        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh(); RepairNetworkCommand.Refresh();
     }
     private void RecordFailure(string operation, Exception error)
     { try { _backend.RecordFailure(operation, error); } catch (Exception) { /* Diagnostics are observational. */ } }
@@ -563,7 +564,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
                 if (revision == _revision) HasChanges = false; CurrentIssue = ""; await RefreshStatusAsync();
                 Notice = result.Disposition == ApplyDisposition.Unchanged ? "配置已保存，运行内容未改变。" : IsPreview ? "配置已应用到模拟内核；未启动真实 TUN。" : "配置已应用，网络状态以后台服务实际报告为准。";
                 AddEvent("配置已应用", Notice, "configuration");
-                if (_state.Running && _state.Available) { ConnectionAttempt.Complete(IsPreview); if (SetupStep == 4) OnboardingVisible = false; }
+                if (_state.Running && _state.Available) { _resetRecoveryPending = false; SetRuntimeUnavailable(false); ConnectionAttempt.Complete(IsPreview); if (SetupStep == 4) OnboardingVisible = false; }
                 else ConnectionAttempt.Fail("配置已提交，但接管状态尚未获得确认。请查看诊断后重试。");
             }
             else { CurrentIssue = string.Join(" ", result.Diagnostics.Select(diagnostic => diagnostic.Message)); ConnectionAttempt.Fail(CurrentIssue); await RefreshStatusAsync(); }
@@ -610,7 +611,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private async Task ShowLogDirectoryAsync() { await _backend.OpenLogDirectoryAsync(ActionToken); Notice = IsPreview ? "预览日志目录：" + _backend.LogDirectory : "已打开日志目录。"; }
     public async Task RefreshStatusAsync()
     {
-        try { _state = await _backend.ReadStatusAsync(_lifetime.Token); PreviewRunning = _state.Running; SetRuntimeUnavailable(!_state.Available); if (_statusIssue is not null && CurrentIssue == _statusIssue) CurrentIssue = ""; _statusIssue = null; }
+        try { _state = await _backend.ReadStatusAsync(_lifetime.Token); if (_state.Available && !_state.Running) _resetRecoveryPending = false; PreviewRunning = _state.Running; SetRuntimeUnavailable(!_state.Available || _resetRecoveryPending); if (_statusIssue is not null && CurrentIssue == _statusIssue) CurrentIssue = ""; _statusIssue = null; }
         catch (Exception exception) when (IsExpectedFailure(exception)) { PreviewRunning = false; SetRuntimeUnavailable(true); _statusIssue = SafeFailure(exception, "无法读取后台服务状态；不显示过期的健康结果。"); CurrentIssue = _statusIssue; }
         Raise(nameof(RuntimeBadge)); Raise(nameof(TunStatusText)); Raise(nameof(StatusDescription)); Raise(nameof(ProxyResolvedName)); RefreshNodeLatencies();
         await RefreshConnectionsAsync();

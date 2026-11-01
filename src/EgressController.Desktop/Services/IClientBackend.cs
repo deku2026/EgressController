@@ -72,7 +72,8 @@ public interface IClientBackend : IAsyncDisposable
     Task<bool> StopAsync(CancellationToken cancellationToken = default);
     Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default);
     Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default);
-    Task ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
+    Task<ConfigurationResetResult> ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
         => throw new InvalidOperationException("This backend does not support configuration reset.");
+    Task<bool> RepairNetworkAsync(CancellationToken cancellationToken = default) => StopAsync(cancellationToken);
     Task OpenLogDirectoryAsync(CancellationToken cancellationToken = default);
 }

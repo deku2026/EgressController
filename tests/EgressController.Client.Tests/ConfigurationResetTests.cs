@@ -8,6 +8,34 @@ namespace EgressController.Client.Tests;
 
 public sealed class ConfigurationResetTests
 {
+    [Fact]
+    public async Task UnavailableHelperCannotVetoResetAndRepairDoesNotStartCoreOrOverwriteNewSettings()
+    {
+        PreviewEnvironment.Enter(); var backend = new FixtureClientBackend(); await using var shell = new ShellViewModel(backend);
+        await shell.InitializeAsync(); await shell.ApplyPreviewAsync();
+        int starts = backend.Core.RestartCount; string original = PolicyYaml.Write(shell.Document);
+        backend.SimulateHelperUnavailable = true; await shell.RefreshStatusAsync();
+        shell.RequestResetCommand.Execute(null); await shell.ConfirmResetCommand.ExecuteAsync();
+        Assert.False(shell.ResetRequested); Assert.False(shell.HasResetIssue); Assert.False(shell.HasIssue);
+        Assert.True(shell.OnboardingVisible); Assert.Equal(0, shell.SetupStep);
+        Assert.Equal(PolicyYaml.Write(new()), PolicyYaml.Write(shell.Document));
+        Assert.Equal(original, File.ReadAllText(backend.ResetBackupPath!));
+        Assert.Equal(PolicyYaml.Write(new()), File.ReadAllText(backend.SavedPath!));
+        Assert.True(shell.HasRecoveryIssue); Assert.False(shell.PreviewRunning);
+        Assert.Equal("后台状态待修复", shell.TunStatusText);
+        Assert.Equal(0, backend.RepairCount); Assert.Equal(starts, backend.Core.RestartCount);
+        shell.SelectedHomeInterface = shell.InterfaceChoices[0]; shell.SelectedNonHomeInterface = shell.InterfaceChoices[1];
+        await shell.NextSetupCommand.ExecuteAsync(); Assert.Equal(1, shell.SetupStep);
+        await shell.RefreshStatusAsync(); Assert.True(shell.HasRecoveryIssue);
+        string restarted = PolicyYaml.Write(shell.Document);
+        backend.SimulateRepairFailure = true; await shell.RepairNetworkCommand.ExecuteAsync();
+        Assert.True(shell.HasRecoveryIssue); Assert.True(shell.RepairNetworkCommand.CanExecute(null));
+        Assert.Equal(restarted, PolicyYaml.Write(shell.Document));
+        backend.SimulateRepairFailure = false; await shell.RepairNetworkCommand.ExecuteAsync();
+        Assert.False(shell.HasRecoveryIssue); Assert.False(shell.PreviewRunning);
+        Assert.Equal(2, backend.RepairCount); Assert.Equal(starts, backend.Core.RestartCount);
+        Assert.Equal(restarted, PolicyYaml.Write(shell.Document)); Assert.Equal(1, shell.SetupStep);
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -65,7 +93,7 @@ public sealed class ConfigurationResetTests
         public Task<ClientRuntimeState> ReadStatusAsync(CancellationToken token) => _inner.ReadStatusAsync(token);
         public Task SaveDraftAsync(MacPolicyDocument doc, CancellationToken token) => _inner.SaveDraftAsync(doc, token);
         public Task OpenLogDirectoryAsync(CancellationToken token) => _inner.OpenLogDirectoryAsync(token);
-        public Task ResetConfigurationAsync(MacPolicyDocument doc, CancellationToken token) => ConfigurationReset.ExecuteAsync(doc,
+        public Task<ConfigurationResetResult> ResetConfigurationAsync(MacPolicyDocument doc, CancellationToken token) => ConfigurationReset.ExecuteAsync(doc,
             cancellation => storageFailure ? _inner.StopAsync(cancellation) : Task.FromResult(false),
             (_, _) => throw new IOException("private fixture details"), token);
         public ValueTask DisposeAsync() => _inner.DisposeAsync();

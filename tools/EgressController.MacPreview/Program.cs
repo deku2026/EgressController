@@ -51,6 +51,7 @@ internal static class Program
             window.Close();
         }
         ResetInteractions(directory);
+        ResetWithoutHelper(directory);
         GroupInteractions(directory);
         GroupRenderingChecks.Run(directory);
         BootstrapSearchInteractions(directory);
@@ -88,6 +89,27 @@ internal static class Program
         Check(!vm.ConnectionAttempt.IsVisible && !vm.HasIssue && !vm.PreviewRunning, "Reset left stale progress or runtime status.");
         Save(window, Path.Combine(directory, "reset-first-step-compact.png"));
         window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "reset-first-step-normal.png")); window.Close();
+    }
+    private static void ResetWithoutHelper(string directory)
+    {
+        var backend = new FixtureClientBackend { SimulateHelperUnavailable = true };
+        var vm = new ShellViewModel(backend); vm.InitializeAsync().GetAwaiter().GetResult();
+        vm.RefreshStatusAsync().GetAwaiter().GetResult(); vm.PageIndex = 4;
+        var window = new MainWindow { DataContext = vm, Width = 980, Height = 700 }; window.Show(); Flush();
+        vm.RequestResetCommand.Execute(null); Flush();
+        Click(window, Find<Button>(window, "ConfirmResetButton"));
+        Check(!vm.ResetRequested && vm.OnboardingVisible && vm.SetupStep == 0 && vm.Document.Nodes.Count == 0
+            && vm.HasRecoveryIssue && backend.RepairCount == 0, "An unavailable helper vetoed local reset or triggered authorization automatically.");
+        Save(window, Path.Combine(directory, "reset-unavailable-helper-compact.png"));
+        window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "reset-unavailable-helper-normal.png"));
+        var repair = window.GetVisualDescendants().OfType<Button>().Last(button => button.Name == "RepairNetworkButton" && button.IsEffectivelyVisible);
+        Check(repair.IsEffectivelyEnabled, "Network repair is not reachable from reset onboarding.");
+        backend.SimulateRepairFailure = true; Click(window, repair);
+        Check(vm.HasRecoveryIssue && vm.SetupStep == 0 && !vm.IsBusy, "Failed repair hid pending recovery or blocked setup.");
+        backend.SimulateRepairFailure = false; Click(window, repair);
+        Check(!vm.HasRecoveryIssue && !vm.PreviewRunning && vm.SetupStep == 0 && backend.Core.RestartCount == 0,
+            "Repair started TUN, lost setup, or retained a stale warning.");
+        Save(window, Path.Combine(directory, "reset-repaired-normal.png")); window.Close();
     }
     private static void GroupInteractions(string directory)
     {

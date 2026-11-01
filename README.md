@@ -16,7 +16,7 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 勾选应用后点击“继续”会扫描并保存固定清单；日常修改自动保存草稿，网络策略仍需应用。退出前等待正在进行的操作结束，再确认网络恢复；恢复失败保留窗口和重试入口。
 
-**从头设置**：在“设置 → 网络与 TUN”或连接失败提示中点击“重置并重新设置”。确认后先停止接管、恢复网络，再备份当前配置并清空网卡、订阅、分组、应用和规则选择。缓存、日志及用量记录保留；不会自动连接。恢复或保存失败时保留当前配置并显示原因。
+**从头设置**：在“设置 → 网络与 TUN”或连接失败提示中点击“重置并重新设置”。确认后备份当前配置并清空网卡、订阅、分组、应用和规则选择。助手失联或版本不匹配也可以重置；网络恢复未确认时保留独立提示，可点击“修复助手并恢复网络”重新授权并恢复，不会自动连接。备份或保存失败才保留当前配置。缓存、日志及用量记录保留。
 
 ![重置确认（隔离预览）](docs/images/mac-reset-setup.png)
 
@@ -63,7 +63,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 ```sh
 # 构建机获取固定发布归档；不会启动 Xray/TUN。
 gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
-python3 build/Verify-Mac.py --version 0.1.6
+python3 build/Verify-Mac.py --version 0.1.7
 ```
 
 **开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、内置 Xray 命令行与模拟 Unix RPC 的规则资源回归检查、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。

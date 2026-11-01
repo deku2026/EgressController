@@ -1,0 +1,14 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" xmlns:ui="using:EgressController.Desktop.Presentation.Controls" x:Class="EgressController.Desktop.Views.NetworkRecoveryNotice" x:DataType="vm:ShellViewModel">
+ <Border Background="#FFF8EB" CornerRadius="10" Padding="14">
+  <Grid ColumnDefinitions="22,*" ColumnSpacing="10">
+   <ui:Glyph Kind="shield" Width="19" Height="19" Foreground="#A17E40" VerticalAlignment="Top"/>
+   <StackPanel Grid.Column="1" Spacing="9">
+    <TextBlock Text="{Binding RecoveryMessage}" FontSize="11" Foreground="#856A38" TextWrapping="Wrap" LineHeight="18"/>
+    <WrapPanel Orientation="Horizontal">
+     <Button Name="RepairNetworkButton" Content="修复助手并恢复网络" Command="{Binding RepairNetworkCommand}" FontSize="11" Margin="0,0,8,0"/>
+     <Button Content="打开日志目录" Command="{Binding ShowLogDirectoryCommand}" IsEnabled="{Binding CanEdit}" Classes="quiet" FontSize="11"/>
+    </WrapPanel>
+   </StackPanel>
+  </Grid>
+ </Border>
+</UserControl>

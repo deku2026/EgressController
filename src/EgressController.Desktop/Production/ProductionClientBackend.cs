@@ -273,30 +273,52 @@ public sealed class ProductionClientBackend : IClientBackend
         try
         {
             if (!File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath))
-                return new(false, true, false, "首次连接时请求安装特权助手；当前未接管系统网络。");
+                return _recoveryRequired || _coordinator.Applied is not null
+                    ? new(false, false, false, "后台助手丢失，原有接管恢复尚未确认。请修复助手并恢复网络。")
+                    : new(false, true, false, "首次连接时请求安装特权助手；当前未接管系统网络。");
             var state = await _helper.InspectAsync(cancellationToken).ConfigureAwait(false);
             if (MacRuntimeReadiness.RequiresExitRecovery(false, state)) _recoveryRequired = true;
-            bool healthy = state.Running && state.TunTakenOver && state.Failure is null;
+            bool healthy = state.Installed && state.Running && state.TunTakenOver && state.Failure is null;
+            bool restored = state.Installed && !state.Running && !state.TunTakenOver && state.DnsRestored && state.Failure is null;
             string observation = $"installed={state.Installed}; running={state.Running}; tun={state.TunTakenOver}; dns-restored={state.DnsRestored}; failure={state.Failure}";
             if (_lastRuntimeObservation != observation) { _lastRuntimeObservation = observation; _diagnostics.Record("helper.state", observation); }
-            return new(healthy, state.Installed && state.Failure is null, state.Installed,
-                healthy ? "Xray 与双栈 TUN 接管已确认。" : state.Failure is not null ? "当前接管未获确认，请查看诊断。" : state.Installed ? "已停止接管，系统 DNS 已恢复。" : "启动时将请求安装特权助手。");
+            return new(healthy, healthy || restored, state.Installed,
+                healthy ? "Xray 与双栈 TUN 接管已确认。" : restored ? "已停止接管，系统 DNS 已恢复。"
+                    : "后台助手或网络恢复尚未确认，可以修复助手后重试；本地设置仍可重置。");
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException)
-        { return new(false, false, false, "特权助手未安装或当前不可用；尚未接管系统网络。"); }
+        { return new(false, false, false, "后台助手不可用，无法确认当前网络状态。可以修复助手后重试。"); }
     }
-    public async Task ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
+    public async Task<ConfigurationResetResult> ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
     {
         await _apply.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await ConfigurationReset.ExecuteAsync(current, token =>
-                _coordinator.Applied is null && !File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath)
+            var result = await ConfigurationReset.ExecuteAsync(current, token =>
+                !_recoveryRequired && _coordinator.Applied is null && !File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath)
                     ? Task.FromResult(true)
+                    : !_helper.Status.Installed ? Task.FromResult(false)
                     : _coordinator.StopAsync("用户确认重置配置：停止接管并恢复网络", token), _drafts.ResetAsync, cancellationToken).ConfigureAwait(false);
-            _recoveryRequired = false; _launch = null; _savedResourcePort = new MacPolicyDocument().Defaults.ResourceProxyPort;
+            // Keep an owned session's recovery obligation and launch context until confirmed.
+            if (result.NetworkRestored) { _recoveryRequired = false; _launch = null; }
+            _savedResourcePort = new MacPolicyDocument().Defaults.ResourceProxyPort;
             _lastLoggedStage = null;
-            _diagnostics.Record("configuration.reset", "network restored; draft backed up; empty setup saved; caches retained");
+            _diagnostics.Record("configuration.reset", $"network-restored={result.NetworkRestored}; draft backed up; empty setup saved; caches and privileged recovery journal retained");
+            return result;
+        }
+        finally { _apply.Release(); }
+    }
+    public async Task<bool> RepairNetworkAsync(CancellationToken cancellationToken = default)
+    {
+        await _apply.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _diagnostics.Record("network.repair", "explicit user request: authorize current helper identity and restore; never start TUN");
+            var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
+            await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
+            bool restored = await _coordinator.StopAsync("用户修复后台助手并恢复系统网络", cancellationToken).ConfigureAwait(false);
+            if (restored) { _recoveryRequired = false; _launch = null; }
+            return restored;
         }
         finally { _apply.Release(); }
     }
