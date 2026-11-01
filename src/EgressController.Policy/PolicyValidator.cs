@@ -14,6 +14,7 @@ public static partial class PolicyValidator
         if (doc.Defaults.China != ExitChoice.NonHome || doc.Defaults.ProxyInterface != "nonhome") errors.Add(new("defaults.fixed", "中国大陆必须非家宽直连，代理服务器必须绑定非家宽。"));
         if (doc.Defaults.Global.Kind != ExitKind.Proxy) errors.Add(new("defaults.global", "全球默认出口必须是代理节点或分组。"));
         if (!IPAddress.TryParse(doc.Dns.UpstreamIp, out var dnsIp) || IPAddress.IsLoopback(dnsIp) || dnsIp.Equals(IPAddress.Any) || dnsIp.Equals(IPAddress.IPv6Any)) errors.Add(new("dns.server", "DNS 上游必须是明确的非回环 IP 地址，不能依赖 DNS 解析自身。"));
+        if (!DnsEndpoint.IsValid(doc.Dns.HttpsUrl)) errors.Add(new("dns.https", "加密 DNS 需要 HTTPS 上游地址，主机必须为公网 IP，不能包含凭据、查询或片段。"));
         if (doc.Defaults.ResourceProxyPort is < 1024 or > 65535) errors.Add(new("proxy.port", "Xray 本地 SOCKS5 端口必须在 1024–65535 之间。"));
         var tunCidr = doc.Tun.Ipv4Cidr.Split('/');
         if (!TunName().IsMatch(doc.Tun.Name) || doc.Tun.Mtu is < 1280 or > 9000 || tunCidr.Length != 2 || !IsCidr(doc.Tun.Ipv4Cidr) || !IPAddress.TryParse(tunCidr[0], out var tunIp) || tunIp.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || IPAddress.IsLoopback(tunIp) || tunIp.Equals(IPAddress.Any)) errors.Add(new("tun.settings", "TUN 需要明确的 utun 名称、IPv4 CIDR 以及 1280–9000 范围内的 MTU。"));

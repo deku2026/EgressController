@@ -49,12 +49,11 @@ public sealed partial class ShellViewModel
         : group.SelectedMemberId is { } selected && group.Kind == GroupKind.Select ? GroupGraph.Name(selected, Document) + " · 待检查" : "等待测速";
     public string MemberLatency(string id, string url)
     {
-        if (id == GroupGraph.Direct) return "直连";
         if (id == GroupGraph.Reject) return "拒绝";
         if (Document.Groups.Any(group => group.Id == id)) id = GroupSelector.Resolve(id, Document, _probes, _backend.Now).NodeId ?? id;
         var latest = _probes.Where(probe => probe.NodeId == id && probe.TestUrl == url && probe.ObservedAt <= _backend.Now).MaxBy(probe => probe.ObservedAt);
-        return latest is null ? "未测速" : _backend.Now - latest.ObservedAt > TimeSpan.FromMinutes(10) ? "已过期"
-            : !latest.Available ? "超时" : $"{latest.LatencyMilliseconds:0} ms";
+        return latest is null ? id == GroupGraph.Direct ? "直连" : "未测速" : _backend.Now - latest.ObservedAt > TimeSpan.FromMinutes(10) ? "已过期"
+            : !latest.Available ? EgressController.Runtime.NetworkFailure.Label(latest.FailureCode) : $"{latest.LatencyMilliseconds:0} ms";
     }
     public string GroupLatency(ProxyGroup group) => ResolveGroupMember(group) is { } id ? MemberLatency(id, group.TestUrl) : "未就绪";
     private void MergeProbes(IEnumerable<GroupProbe> observations)

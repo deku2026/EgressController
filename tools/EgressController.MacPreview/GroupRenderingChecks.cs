@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using EgressController.Desktop.ViewModels;
@@ -30,6 +31,21 @@ internal static class GroupRenderingChecks
         list.ScrollIntoView(group); Flush();
         var scroll = list.GetVisualDescendants().OfType<ScrollViewer>().First();
         scroll.Offset = new Vector(0, 330); Flush();
+        group.Expanded = false; Flush();
+        var google = vm.AllGroups.Single(row => row.Name == "Google");
+        var header = window.GetVisualDescendants().OfType<Button>().Single(button => button.DataContext == google && button.Classes.Contains("group-header"));
+        // Reproduce the user's bottom-of-list Google click, including focus and pointer handling.
+        scroll.Offset = new Vector(0, scroll.Extent.Height - scroll.Viewport.Height); Flush();
+        double headerY = header.TranslatePoint(default, window)!.Value.Y;
+        for (int repeat = 0; repeat < 3; repeat++)
+        {
+            var point = header.TranslatePoint(new Point(25, header.Bounds.Height / 2), window)!.Value;
+            window.MouseDown(point, MouseButton.Left); window.MouseUp(point, MouseButton.Left); Flush();
+            Check(google.Expanded == (repeat % 2 == 0), "Google header click did not toggle its own group.");
+            Check(Math.Abs(header.TranslatePoint(default, window)!.Value.Y - headerY) < 1, "Google header moved when expanding/collapsing at the end of the list.");
+        }
+        Save(window, Path.Combine(directory, "groups-google-anchored.png"));
+        google.Expanded = false; group.Expanded = true; Flush(); scroll.Offset = new Vector(0, 330); Flush();
         var offset = scroll.Offset; var groups = vm.VisibleGroups; var members = group.Members;
         var watch = Stopwatch.StartNew(); vm.TestGroupAsync(group.Id).GetAwaiter().GetResult(); Flush(); watch.Stop();
         Check(ReferenceEquals(groups, vm.VisibleGroups) && ReferenceEquals(members, group.Members), "Probe rebuilt row sources.");

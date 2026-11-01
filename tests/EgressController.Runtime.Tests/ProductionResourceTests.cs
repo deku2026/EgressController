@@ -53,13 +53,22 @@ public sealed class ProductionResourceTests
         exchange.WrongQuestion = true;
         await Assert.ThrowsAsync<IOException>(async () => await resolver.ResolveAsync("example.test", Binding, TestContext.Current.CancellationToken));
     }
+    [Theory]
+    [InlineData(1, "2001:db8::8")]
+    [InlineData(28, "192.0.2.8")]
+    public async Task OneBrokenDnsFamilyDoesNotDiscardTheHealthyFamily(int failed, string expected)
+    {
+        var resolver = new BoundDnsResolver(new DnsFixture { FailedType = (ushort)failed }, IPAddress.Parse("1.1.1.1"));
+        var result = await resolver.ResolveAsync("example.test", Binding, TestContext.Current.CancellationToken);
+        Assert.Equal(IPAddress.Parse(expected), Assert.Single(result));
+    }
     [Fact]
     public async Task Bound_dns_rejects_compression_cycles_and_does_not_call_default_dns()
     {
         var exchange = new DnsFixture { CompressionLoop = true }; var resolver = new BoundDnsResolver(exchange, IPAddress.Loopback);
         await Assert.ThrowsAsync<IOException>(async () => await resolver.ResolveAsync("example.test", Binding, TestContext.Current.CancellationToken));
         var literal = await resolver.ResolveAsync("192.0.2.1", Binding, TestContext.Current.CancellationToken);
-        Assert.Single(literal); Assert.Single(exchange.Calls);
+        Assert.Single(literal); Assert.Equal(2, exchange.Calls.Count);
     }
     [Fact]
     public async Task Private_cache_is_hashed_private_durable_and_detects_corruption()
@@ -226,10 +235,12 @@ public sealed class ProductionResourceTests
     }
     private sealed class DnsFixture : IBoundDnsExchange
     {
+        public ushort FailedType;
         public bool TruncateUdp; public bool WrongQuestion; public bool CompressionLoop;
         public List<(InterfaceBinding Binding, bool Tcp)> Calls { get; } = [];
         public ValueTask<byte[]> ExchangeAsync(byte[] query, IPAddress server, InterfaceBinding binding, bool tcp, CancellationToken token)
         {
+            if (BinaryPrimitives.ReadUInt16BigEndian(query.AsSpan(query.Length - 4)) == FailedType) throw new IOException("Fixture family failure");
             Calls.Add((binding, tcp)); byte[] header = query.ToArray(); header[2] = (byte)(TruncateUdp && !tcp ? 0x83 : 0x81); header[3] = 0x80; header[7] = 1;
             if (WrongQuestion) header[13] = (byte)'x';
             ushort type = BinaryPrimitives.ReadUInt16BigEndian(query.AsSpan(query.Length - 4)); byte[] ip = IPAddress.Parse(type == 1 ? "192.0.2.8" : "2001:db8::8").GetAddressBytes();

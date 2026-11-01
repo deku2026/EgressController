@@ -28,7 +28,7 @@ internal static class DslShapeValidator
         Mapping(root, ["version", "interfaces", "defaults", "dns", "tun", "applications", "rule_sets", "nodes", "groups", "providers", "subscriptions"], ["applications", "rule_sets", "nodes", "groups", "providers", "subscriptions"], ["interfaces", "defaults", "dns", "tun"], integers: ["version"]);
         Mapping(root.Map("interfaces"), ["home", "nonhome"]);
         Mapping(root.Map("defaults"), ["china", "global", "proxy_interface", "resource_proxy_port"], integers: ["resource_proxy_port"]);
-        Mapping(root.Map("dns"), ["upstream_ip"]);
+        Mapping(root.Map("dns"), ["upstream_ip", "https_url"]);
         Mapping(root.Map("tun"), ["name", "ipv4_cidr", "mtu"], integers: ["mtu"]);
         void Rows(string field, string[] allowed, string[]? sequences = null, string[]? booleans = null, string[]? integers = null)
         {

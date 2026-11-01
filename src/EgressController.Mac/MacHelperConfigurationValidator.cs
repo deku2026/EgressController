@@ -26,10 +26,9 @@ public static class MacHelperConfigurationValidator
             Need(Text(dns, "tag") == "dns-query" && Text(dns, "queryStrategy") == "UseIP" && dns.GetProperty("disableFallback").ValueKind == JsonValueKind.True,
                 "dns-fallback", "DNS fallback and implicit resolver selection are forbidden.");
             var servers = Array(dns.GetProperty("servers"));
-            Need(servers.GetArrayLength() > 0 && servers.EnumerateArray().All(server => server.ValueKind == JsonValueKind.String
-                && IPAddress.TryParse(server.GetString(), out var address) && !IPAddress.IsLoopback(address)
-                && !address.Equals(IPAddress.Any) && !address.Equals(IPAddress.IPv6Any)),
-                "dns-upstream", "Bootstrap DNS servers must be explicit IP addresses.");
+            Need(servers.GetArrayLength() == 1 && servers[0].ValueKind == JsonValueKind.String
+                && EgressController.Policy.DnsEndpoint.IsValid(servers[0].GetString()),
+                "dns-upstream", "DNS requires an explicit, certificate-verified HTTPS endpoint with a literal public IP.");
 
             JsonElement inbounds = Array(root.GetProperty("inbounds"));
             Need(inbounds.GetArrayLength() is 1 or 2, "inbound-count", "One TUN and at most one owned loopback resource listener are admitted.");
@@ -98,9 +97,13 @@ public static class MacHelperConfigurationValidator
                     Need(settings.GetProperty("port").TryGetInt32(out int port) && port is > 0 and <= 65535, "node-port", "Invalid remote node port.");
                 }
                 JsonElement stream = Object(outbound.GetProperty("streamSettings"), "sockopt", "network", "security", "tlsSettings", "realitySettings", "wsSettings", "grpcSettings", "httpupgradeSettings", "rawSettings");
-                JsonElement socket = Object(stream.GetProperty("sockopt"), "interface", "domainStrategy", "dialerProxy", "tcpFastOpen");
+                JsonElement socket = Object(stream.GetProperty("sockopt"), "interface", "domainStrategy", "dialerProxy", "tcpFastOpen", "happyEyeballs");
                 string expectedInterface = protocol == "freedom" && tag == "home" ? homeInterface : nonHomeInterface;
                 Need(Text(socket, "interface") == expectedInterface && Text(socket, "domainStrategy") == "ForceIP", "outbound-interface", "Every dialer must bind its assigned physical interface with no automatic fallback.");
+                var happy = Object(socket.GetProperty("happyEyeballs"), "prioritizeIPv6", "tryDelayMs", "interleave", "maxConcurrentTry");
+                Need(happy.GetProperty("prioritizeIPv6").ValueKind == JsonValueKind.False
+                    && happy.GetProperty("tryDelayMs").GetInt32() == 250 && happy.GetProperty("interleave").GetInt32() == 1
+                    && happy.GetProperty("maxConcurrentTry").GetInt32() == 2, "outbound-address-race", "Address attempts must remain bounded on the same physical interface.");
                 if (socket.TryGetProperty("dialerProxy", out var dialer))
                 {
                     Need(ProxyProtocols.Contains(protocol), "direct-dialer", "System/direct outbounds cannot inherit a proxy dialer.");

@@ -67,6 +67,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public string TunStatusText => HasRecoveryIssue ? "后台状态待修复" : PreviewRunning ? "TUN 已接管" : _state.HelperInstalled ? "后台服务已就绪" : "尚未安装后台服务";
     public string TunDescription => IsPreview ? "当前是隔离预览，系统网络与管理员权限均未使用。" : "GUI 保持普通权限；启动时由授权后台服务管理 TUN、DNS 与网络恢复。";
     public string SourceStatusText => IsPreview ? "本地示例缓存" : _prepared.Assets.Count > 0 ? "资源已验证" : "等待准备";
+    public string ClientBuildLabel => "Egress " + (typeof(ShellViewModel).Assembly.GetName().Version?.ToString(3) ?? "未知版本") + " · " + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture;
     public string DnsDescription => IsPreview ? "系统 DNS 的备份与恢复属于特权服务；预览只编译 DNS 设置，不修改本机 DNS。" : "系统 DNS 的备份与恢复由授权后台服务处理；停止连接时恢复原设置。";
     public IBrush ModeBrush => Brush.Parse(IsPreview ? "#B2925A" : "#8A99AE");
     public string UpdateDescription => IsPreview ? "本次预览不下载或执行真实内核，不检查远程发布源。" : "启动前自动验证内核与规则资源，使用可用缓存并保留失败前的正常文件。";
@@ -98,7 +99,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         ConnectionAttempt = new(() => ApplyCommand.Execute(null));
         _backend.SetProgressSink(new UiProgress(progress => ConnectionAttempt.Observe(progress)));
         ResetDslCommand = new(() => { DslText = PolicyYaml.Write(Document); Notice = "已从当前配置重新生成 DSL。"; }); TogglePreviewCommand = new(() => RunOperationAsync(TogglePreviewAsync));
-        InitializeResetCommands();
+        InitializeResetCommands(); InitializeHomeCheck();
         BeginSetupCommand = new(() => { SetupStep = 0; OnboardingVisible = true; }); CloseSetupCommand = new(() => OnboardingVisible = false); NextSetupCommand = new(() => RunOperationAsync(NextSetupAsync), () => CanAdvanceSetup && !IsBusy); BackSetupCommand = new(() => SetupStep = Math.Max(0, SetupStep - 1), () => SetupStep > 0 && !IsBusy);
     }
     public IReadOnlyList<Choice> InterfaceChoices { get; private set; } = [];
@@ -159,7 +160,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public string CustomRuleName { get => _customName; set => Set(ref _customName, value); }
     public string CustomRuleEntries { get => _customEntries; set => Set(ref _customEntries, value); }
     public bool CustomRuleIsIp { get => _customIp; set => Set(ref _customIp, value); }
-    public string DnsServer { get => Document.Dns.UpstreamIp; set { if (Document.Dns.UpstreamIp == value) return; Document.Dns.UpstreamIp = value; Raise(); StateChanged(); } }
+    public string DnsServer { get => Document.Dns.HttpsUrl; set { if (Document.Dns.HttpsUrl == value) return; Document.Dns.HttpsUrl = value; Raise(); StateChanged(); } }
     public string DslText { get => _dsl; set => Set(ref _dsl, value); }
     public string GeneratedConfig { get => _generated; private set => Set(ref _generated, value); }
     public string Notice { get => _notice; private set => Set(ref _notice, value); }
@@ -228,7 +229,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     }
     public bool CanAdvanceSetup => SetupStep switch
     {
-        0 => SelectedHomeInterface is not null && SelectedNonHomeInterface is not null && SelectedHomeInterface.Id != SelectedNonHomeInterface.Id,
+        0 => SelectedHomeInterface is not null && SelectedNonHomeInterface is not null && SelectedHomeInterface.Id != SelectedNonHomeInterface.Id && HomeCheckReady,
         1 => _subscriptionReady,
         2 => SelectedGlobalTarget is not null && (!SetupGlobalManual || SetupGlobalGroup is { } group && group.SelectedMemberId is { } member && group.MemberIds.Contains(member, StringComparer.Ordinal)),
         _ => true
@@ -316,7 +317,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private void RefreshCommands()
     {
         ConfirmAppsCommand.Refresh(); RefreshSelectedInventoryCommand.Refresh(); NextSetupCommand.Refresh(); BackSetupCommand.Refresh();
-        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh(); RepairNetworkCommand.Refresh();
+        RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh(); RepairNetworkCommand.Refresh(); CheckHomeCommand.Refresh();
     }
     private void RecordFailure(string operation, Exception error)
     { try { _backend.RecordFailure(operation, error); } catch (Exception) { /* Diagnostics are observational. */ } }
@@ -387,7 +388,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     }
     private void StateChanged()
     {
-        _revision++; _needsValidation = true; Raise(nameof(ValidationLabel)); HasChanges = true; DslText = PolicyYaml.Write(Document); ScheduleDraftSave(); Notice = "更改等待应用，配置草稿自动保存。"; CurrentIssue = ""; Raise(nameof(ProxyResolvedName)); NextSetupCommand.Refresh();
+        InvalidateHomeCheck(); _revision++; _needsValidation = true; Raise(nameof(ValidationLabel)); HasChanges = true; DslText = PolicyYaml.Write(Document); ScheduleDraftSave(); Notice = "更改等待应用，配置草稿自动保存。"; CurrentIssue = ""; Raise(nameof(ProxyResolvedName)); NextSetupCommand.Refresh();
     }
     private async Task ShowApplicationCatalogAsync()
     {
@@ -614,6 +615,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         try { _state = await _backend.ReadStatusAsync(_lifetime.Token); if (_state.Available && !_state.Running) _resetRecoveryPending = false; PreviewRunning = _state.Running; SetRuntimeUnavailable(!_state.Available || _resetRecoveryPending); if (_statusIssue is not null && CurrentIssue == _statusIssue) CurrentIssue = ""; _statusIssue = null; }
         catch (Exception exception) when (IsExpectedFailure(exception)) { PreviewRunning = false; SetRuntimeUnavailable(true); _statusIssue = SafeFailure(exception, "无法读取后台服务状态；不显示过期的健康结果。"); CurrentIssue = _statusIssue; }
         Raise(nameof(RuntimeBadge)); Raise(nameof(TunStatusText)); Raise(nameof(StatusDescription)); Raise(nameof(ProxyResolvedName)); RefreshNodeLatencies();
+        NextSetupCommand.Refresh();
         await RefreshConnectionsAsync();
     }
     private async Task RefreshConnectionsAsync()
@@ -625,6 +627,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private async Task NextSetupAsync()
     {
         if (SetupStep == 0 && (SelectedHomeInterface is null || SelectedNonHomeInterface is null || SelectedHomeInterface.Id == SelectedNonHomeInterface.Id)) { CurrentIssue = "请选择两张不同的物理网卡。"; return; }
+        if (SetupStep == 0 && !HomeCheckReady) { _homeCheckStatus = "请先通过家宽直连检测，再继续。"; Raise(nameof(HomeCheckStatus)); return; }
         if (SetupStep == 1 && !_subscriptionReady) { CurrentIssue = IsPreview ? "请先导入示例订阅。" : "请先导入节点订阅。"; return; }
         if (SetupStep == 2 && SelectedGlobalTarget is null) { CurrentIssue = "必须明确选择一个全局代理代理分组。"; return; }
         if (SetupStep == 2 && !CanAdvanceSetup) { CurrentIssue = "手动分组需要明确选择一个节点。"; return; }

@@ -29,12 +29,12 @@ public sealed class GroupWorkspaceTests
     {
         PreviewEnvironment.Enter(); var backend = new ClockBackend(); await using var shell = new ShellViewModel(backend);
         await shell.InitializeAsync(); await shell.ApplyPreviewAsync(); int starts = backend.Inner.Core.RestartCount; int initialTests = backend.GroupTests;
-        string appliedDns = shell.Document.Dns.UpstreamIp; backend.PreferTokyo = true;
-        shell.DnsServer = "9.9.9.9"; backend.Advance(299); await shell.MaintainAutomaticGroupsAsync(); Assert.Equal(initialTests, backend.GroupTests);
+        string appliedDns = shell.Document.Dns.HttpsUrl; backend.PreferTokyo = true;
+        shell.DnsServer = "https://9.9.9.9/dns-query"; backend.Advance(299); await shell.MaintainAutomaticGroupsAsync(); Assert.Equal(initialTests, backend.GroupTests);
         backend.Advance(1); await shell.MaintainAutomaticGroupsAsync(); Assert.Equal(initialTests + 1, backend.GroupTests);
         Assert.Equal(starts, backend.Inner.Core.RestartCount); Assert.True(backend.Inner.Core.RouteUpdateCount > 0);
-        Assert.Equal("9.9.9.9", shell.Document.Dns.UpstreamIp); Assert.True(shell.HasChanges);
-        Assert.Equal(appliedDns, PolicyYaml.Read(backend.Inner.Core.Current!.PolicyYaml).Document!.Dns.UpstreamIp);
+        Assert.Equal("https://9.9.9.9/dns-query", shell.Document.Dns.HttpsUrl); Assert.True(shell.HasChanges);
+        Assert.Equal(appliedDns, PolicyYaml.Read(backend.Inner.Core.Current!.PolicyYaml).Document!.Dns.HttpsUrl);
         int applies = backend.Inner.Core.ApplyCount; backend.FailProbes = true; backend.Advance(300); await shell.MaintainAutomaticGroupsAsync();
         Assert.Equal(applies, backend.Inner.Core.ApplyCount); Assert.True(shell.PreviewRunning); Assert.False(shell.HasIssue);
     }

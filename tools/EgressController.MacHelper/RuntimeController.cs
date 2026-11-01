@@ -8,6 +8,7 @@ public interface IPrivilegedRuntimeEnvironment
     Task ValidateAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken);
     Task ApplyAsync(MacHelperApplyPlan plan, CancellationToken cancellationToken);
     Task RestoreAsync(CancellationToken cancellationToken);
+    Task ResetAsync(CancellationToken cancellationToken) => RestoreAsync(cancellationToken);
     MacHelperStatus Inspect();
     CoreConnectionSnapshot ReadConnections() => CoreConnectionSnapshots.Unavailable(DateTimeOffset.UtcNow);
 }
@@ -28,6 +29,7 @@ public sealed class RuntimeController(IPrivilegedRuntimeEnvironment environment)
                 await environment.ValidateAsync(request.Apply, cancellationToken).ConfigureAwait(false);
                 if (request.Command == MacHelperCommand.Apply) { mutationStarted = true; await environment.ApplyAsync(request.Apply, cancellationToken).ConfigureAwait(false); }
             }
+            else if (request.Command == MacHelperCommand.ResetAndRestore) await environment.ResetAsync(CancellationToken.None).ConfigureAwait(false);
             else if (request.Command == MacHelperCommand.StopAndRestore) await environment.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
             else if (request.Command is not (MacHelperCommand.Inspect or MacHelperCommand.Heartbeat)) throw new InvalidDataException("Unsupported helper command.");
             return new(request.SessionId, request.Sequence, true, "ok", "", SafeInspect(), SafeConnections());

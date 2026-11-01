@@ -6,18 +6,22 @@ using EgressController.Policy;
 
 namespace EgressController.Runtime;
 
-public sealed record ObservatoryResult(bool Available, double LatencyMilliseconds);
+public sealed record ObservatoryResult(bool Available, double LatencyMilliseconds, string? FailureCode = null);
 public interface IObservatoryProcess
 {
     Task<ObservatoryResult> RunAsync(string executable, string json, string outboundTag, CancellationToken cancellationToken);
 }
 
 /// <summary>Real outbound health, using the pinned Xray observatory without an inbound, TUN or API listener.</summary>
-public sealed class ObservatoryProbes(IObservatoryProcess process)
+public sealed class ObservatoryProbes(IObservatoryProcess process, ILifecycleLog? log = null)
 {
     public async Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, XrayCompileOptions options,
         string executable, CancellationToken cancellationToken = default, bool requiredOnly = false, IReadOnlyList<RequiredGroupProbe>? requested = null, IProgress<GroupProbe>? progress = null)
     {
+        var diagnostics = new OperationDiagnostics(log);
+        string run = Guid.NewGuid().ToString("N")[..12];
+        var binding = options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId);
+        diagnostics.Record("probe.begin", $"run={run}; interface={binding.BsdName}; service={binding.StableId}; node-and-DNS-egress=nonhome; system-proxy=false; tun=false");
         var results = new List<GroupProbe>();
         var observations = options.Probes.ToList();
         var working = new XrayCompileOptions { Interfaces = options.Interfaces.ToList(), Probes = observations,
@@ -38,10 +42,11 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                 await throttle.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
+                    var elapsed = Stopwatch.StartNew();
                     string outbound = item.NodeId == GroupGraph.Direct ? "nonhome" : item.NodeId == GroupGraph.Reject ? "blocked" : item.NodeId;
                     var draft = ProbeDocument(document, item.NodeId);
                     var compiled = XrayConfigCompiler.Compile(draft, working);
-                    ObservatoryResult measured = new(false, 0);
+                    ObservatoryResult measured = new(false, 0, "compile.failed");
                     if (compiled.IsSuccess)
                     {
                         var root = JsonNode.Parse(compiled.Json!)!.AsObject();
@@ -59,17 +64,24 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                         };
                         measured = await process.RunAsync(executable, root.ToJsonString(), outbound, cancellationToken).ConfigureAwait(false);
                     }
-                    var observation = new GroupProbe(item.NodeId, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.TestUrl);
+                    var observation = new GroupProbe(item.NodeId, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.TestUrl, measured.FailureCode);
+                    diagnostics.Record("probe.result", $"run={run}; node={item.NodeId}; protocol={draft.Nodes.FirstOrDefault(node => node.Id == item.NodeId)?.Protocol.ToString() ?? "direct"}; interface={binding.BsdName}; target-host={new Uri(item.TestUrl).Host}; available={measured.Available}; latency-ms={measured.LatencyMilliseconds:F0}; elapsed-ms={elapsed.Elapsed.TotalMilliseconds:F0}; code={measured.FailureCode ?? "ok"}");
                     lock (results) results.Add(observation);
                     progress?.Report(observation);
                 }
                 finally { throttle.Release(); }
             });
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (Exception error)
+            {
+                diagnostics.Record("probe.end", $"run={run}; completed={results.Count}; state={(cancellationToken.IsCancellationRequested ? "canceled" : "failed")}; code={NetworkFailure.Code(error)}");
+                throw;
+            }
             observations.Clear(); observations.AddRange(options.Probes); observations.AddRange(results);
             if (results.Count > 0 && results.Max(result => result.ObservedAt) > working.Now) working.Now = results.Max(result => result.ObservedAt);
         } while (requiredOnly);
         // Required-only callers can atomically replace their probe snapshot without dropping fresh cached observations.
+        diagnostics.Record("probe.end", $"run={run}; completed={results.Count}; available={results.Count(item => item.Available)}");
         return requiredOnly ? observations : results;
     }
 
@@ -110,7 +122,7 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
         if (message.StartsWith(alive, StringComparison.Ordinal) && double.TryParse(message.AsSpan(alive.Length).Trim(), NumberStyles.Float,
             CultureInfo.InvariantCulture, out double seconds) && double.IsFinite(seconds) && seconds is >= 0 and < 60)
             return new(true, seconds * 1000);
-        return message.StartsWith("the outbound " + tag + " is dead: GET request failed:", StringComparison.Ordinal) ? new(false, 0) : null;
+        return message.StartsWith("the outbound " + tag + " is dead: GET request failed:", StringComparison.Ordinal) ? new(false, 0, NetworkFailure.Classify(message)) : null;
     }
 }
 
@@ -126,7 +138,8 @@ public sealed class XrayObservatoryProcess(Action requireProduction, string priv
         DurableFiles.CreatePrivateDirectory(privateRoot);
         string session = Path.Combine(privateRoot, Guid.NewGuid().ToString("N"));
         DurableFiles.CreatePrivateDirectory(session);
-        Process? child = null;
+        Process? child = null; Task stdout = Task.CompletedTask, stderr = Task.CompletedTask;
+        string failureCode = "timeout";
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
         try
@@ -146,22 +159,25 @@ public sealed class XrayObservatoryProcess(Action requireProduction, string priv
             start.Environment["NO_COLOR"] = "1";
             child = Process.Start(start) ?? throw new IOException("The outbound probe process did not start.");
             var answer = new TaskCompletionSource<ObservatoryResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Task stdout = ReadAsync(child.StandardOutput), stderr = ReadAsync(child.StandardError);
+            stdout = ReadAsync(child.StandardOutput); stderr = ReadAsync(child.StandardError);
             Task exited = child.WaitForExitAsync(timeout.Token);
             Task first = await Task.WhenAny(answer.Task, exited).WaitAsync(timeout.Token).ConfigureAwait(false);
-            return first == answer.Task ? await answer.Task.ConfigureAwait(false) : new(false, 0);
+            if (first == answer.Task) return await answer.Task.ConfigureAwait(false);
+            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
+            return answer.Task.IsCompletedSuccessfully ? answer.Task.Result : new(false, 0, failureCode == "timeout" ? "core.exit" : failureCode);
 
-            async Task ReadAsync(StreamReader reader)
+            Task ReadAsync(StreamReader reader) => XrayConnectionOutputPump.DrainAsync(reader, diagnostic: line =>
             {
-                try
+                if (line.Contains("failed", StringComparison.OrdinalIgnoreCase) || line.Contains("error", StringComparison.OrdinalIgnoreCase))
                 {
-                    while (await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false) is { } line)
-                        if (ObservatoryProbes.ParseLine(line, outboundTag) is { } result) answer.TrySetResult(result);
+                    string code = NetworkFailure.Classify(line);
+                    if (code != "connection.failed" && (code != "timeout" || Volatile.Read(ref failureCode) == "timeout")) Volatile.Write(ref failureCode, code);
                 }
-                catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException) { }
-            }
+                if (ObservatoryProbes.ParseLine(line, outboundTag) is { } result)
+                    answer.TrySetResult(result.Available ? result : result with { FailureCode = Volatile.Read(ref failureCode) });
+            });
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(false, 0); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(false, 0, Volatile.Read(ref failureCode)); }
         finally
         {
             timeout.Cancel();
@@ -169,6 +185,7 @@ public sealed class XrayObservatoryProcess(Action requireProduction, string priv
             {
                 try { if (!child.HasExited) child.Kill(entireProcessTree: true); await child.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); }
                 catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
                 child.Dispose();
             }
             if (Directory.Exists(session)) Directory.Delete(session, recursive: true);

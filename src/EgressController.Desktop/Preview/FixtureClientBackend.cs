@@ -22,6 +22,10 @@ public sealed class FixtureClientBackend : IClientBackend
     public BoundedLifecycleLog Lifecycle { get; } = new();
     public string? SavedPath { get; private set; }
     public int RequestCount => _transport.RequestCount;
+    public bool SimulateHomeFailure { get; set; }
+    public int HomeChecks { get; private set; }
+    public Task<InterfaceConnectivityResult> CheckHomeConnectivityAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
+    { HomeChecks++; return Task.FromResult(new InterfaceConnectivityResult(!SimulateHomeFailure, document.Interfaces.HomeId, "en5", "cloudflare-204", SimulateHomeFailure ? "timeout" : "", 42)); }
     public bool SimulateHelperUnavailable { get; set; }
     public bool SimulateRepairFailure { get; set; }
     public int RepairCount { get; private set; }

@@ -25,6 +25,7 @@ public sealed class ConfigurationResetTests
         Assert.Equal("后台状态待修复", shell.TunStatusText);
         Assert.Equal(0, backend.RepairCount); Assert.Equal(starts, backend.Core.RestartCount);
         shell.SelectedHomeInterface = shell.InterfaceChoices[0]; shell.SelectedNonHomeInterface = shell.InterfaceChoices[1];
+        await shell.CheckHomeCommand.ExecuteAsync();
         await shell.NextSetupCommand.ExecuteAsync(); Assert.Equal(1, shell.SetupStep);
         await shell.RefreshStatusAsync(); Assert.True(shell.HasRecoveryIssue);
         string restarted = PolicyYaml.Write(shell.Document);
@@ -70,6 +71,7 @@ public sealed class ConfigurationResetTests
         Assert.False(shell.HasIssue); Assert.False(shell.HasChanges); Assert.False(shell.ConfigValid);
         Assert.Equal(PolicyYaml.Write(new()), File.ReadAllText(backend.SavedPath!));
         shell.SelectedHomeInterface = shell.InterfaceChoices[0]; shell.SelectedNonHomeInterface = shell.InterfaceChoices[1];
+        await shell.CheckHomeCommand.ExecuteAsync();
         await shell.NextSetupCommand.ExecuteAsync(); Assert.Equal(1, shell.SetupStep);
         shell.SubscriptionUrl = PreviewFixtures.SubscriptionUrl; await shell.ImportSubscriptionCommand.ExecuteAsync();
         Assert.NotEmpty(shell.Document.Groups); Assert.Equal(starts, backend.Core.RestartCount);

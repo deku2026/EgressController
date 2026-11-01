@@ -18,6 +18,7 @@ public sealed class MacHelperClient : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Guid _session = Guid.NewGuid();
     private readonly TimeSpan _heartbeatInterval;
+    private readonly TimeSpan _requestTimeout;
     private long _sequence;
     private Task? _heartbeat;
     private int _disposed;
@@ -32,8 +33,10 @@ public sealed class MacHelperClient : IAsyncDisposable
     public MacHelperClient(LiveOperationGate gate, MacHelperEndpoint? endpoint = null, ILifecycleLog? log = null)
         : this(new UnixMacHelperConnection(gate, endpoint ?? MacHelperEndpoint.Installed), log: log) { }
     /// <summary>Injected connections are reserved for isolated tests; no native adapters are created.</summary>
-    public MacHelperClient(IMacHelperConnection connection, TimeSpan? heartbeatInterval = null, ILifecycleLog? log = null)
+    public MacHelperClient(IMacHelperConnection connection, TimeSpan? heartbeatInterval = null, ILifecycleLog? log = null, TimeSpan? requestTimeout = null)
     {
+        _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(90);
+        if (_requestTimeout <= TimeSpan.Zero || _requestTimeout > TimeSpan.FromSeconds(90)) throw new ArgumentOutOfRangeException(nameof(requestTimeout));
         _diagnostics = new(log);
         _connection = connection; _heartbeatInterval = heartbeatInterval ?? TimeSpan.FromSeconds(2);
         if (_heartbeatInterval < TimeSpan.FromMilliseconds(10) || _heartbeatInterval > TimeSpan.FromSeconds(5))
@@ -51,11 +54,12 @@ public sealed class MacHelperClient : IAsyncDisposable
         if (reply.Succeeded && (_heartbeat is null || _heartbeat.IsCompleted)) _heartbeat = HeartbeatLoopAsync();
         return reply;
     }
+    public Task<MacHelperWireReply> ResetAndRestoreAsync(CancellationToken cancellationToken = default) => SendAsync(MacHelperCommand.ResetAndRestore, null, cancellationToken);
     public Task<MacHelperWireReply> StopAndRestoreAsync(CancellationToken cancellationToken = default) => SendAsync(MacHelperCommand.StopAndRestore, null, cancellationToken);
     private async Task<MacHelperWireReply> SendAsync(MacHelperCommand command, MacHelperApplyPlan? plan, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(90));
+        timeout.CancelAfter(_requestTimeout);
         bool locked = false;
         try
         {
@@ -73,17 +77,20 @@ public sealed class MacHelperClient : IAsyncDisposable
         }
         catch (Exception error)
         {
-            if (error is not OperationCanceledException)
+            bool internalTimeout = error is OperationCanceledException && !cancellationToken.IsCancellationRequested && !_lifetime.IsCancellationRequested;
+            Exception diagnosis = internalTimeout ? new RuntimeFailureException("helper.timeout", "command=" + command + "; timeout-ms=" + _requestTimeout.TotalMilliseconds) : error;
+            if (error is not OperationCanceledException || internalTimeout)
                 Volatile.Write(ref _transportFailureCode, error is RuntimeFailureException known ? known.Code
                     : error is UnauthorizedAccessException ? "helper.identity" : "helper.timeout");
             try
             {
-                string failure = OperationDiagnostics.Describe(error);
+                string failure = OperationDiagnostics.Describe(diagnosis);
                 if (_lastFailure != failure) { _lastFailure = failure; _diagnostics.Record("helper.transport.failed", "command=" + command + "; " + failure); }
             }
             catch (Exception) { /* Logging cannot preserve stale health or change recovery. */ }
             Volatile.Write(ref _status, new MacHelperStatus(false, false, false, false, 0, null, "特权服务状态读取失败，当前接管未获确认。", DateTimeOffset.UtcNow));
             if (locked) { try { await _connection.DisposeAsync().ConfigureAwait(false); } catch (Exception) { } }
+            if (internalTimeout) throw diagnosis;
             throw;
         }
         finally { if (locked) _requests.Release(); }

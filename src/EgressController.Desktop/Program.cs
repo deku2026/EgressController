@@ -23,7 +23,13 @@ public static class Program
             try { return ProductionHostLauncher.ReplaceWithNativeProduct(AppContext.BaseDirectory); }
             catch (IOException error) { Console.Error.WriteLine(error.Message); return 3; }
         }
-        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        EgressController.Runtime.WorkspaceLease? lease = null;
+        if (Mode == StartupMode.Production)
+        {
+            try { lease = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "EgressController")); }
+            catch (IOException) { Console.Error.WriteLine("Egress 已在运行。请先退出已有实例，再启动新版本；不会让两个版本同时覆盖配置。"); return 4; }
+        }
+        using (lease) return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
     public static AppBuilder BuildAvaloniaApp()
     {

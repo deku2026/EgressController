@@ -4,7 +4,7 @@ using EgressController.Runtime;
 
 namespace EgressController.Mac;
 
-public enum MacHelperCommand { Inspect, Validate, Apply, StopAndRestore, Heartbeat }
+public enum MacHelperCommand { Inspect, Validate, Apply, StopAndRestore, Heartbeat, ResetAndRestore }
 public sealed record MacHelperEndpoint(string SocketPath, string ExpectedHelperPath)
 {
     public static MacHelperEndpoint Installed { get; } = new("/var/run/egresscontroller/helper.sock", "/Library/PrivilegedHelperTools/app.egresscontroller.mac.helper");

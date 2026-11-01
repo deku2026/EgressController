@@ -56,6 +56,11 @@ public sealed class HelperConfigurationTests
     [InlineData("dialer-direct")]
     [InlineData("dialer-cycle")]
     [InlineData("dns-fallback")]
+    [InlineData("dns-plaintext")]
+    [InlineData("dns-local")]
+    [InlineData("dns-loopback")]
+    [InlineData("dns-hostname")]
+    [InlineData("address-race-unbounded")]
     [InlineData("dns-on-home")]
     [InlineData("process-directory")]
     [InlineData("log-file")]
@@ -78,6 +83,11 @@ public sealed class HelperConfigurationTests
             case "global-direct": config["routing"]!["rules"]!.AsArray().Last()!["outboundTag"] = "home"; break;
             case "dialer-direct": node["streamSettings"]!["sockopt"]!["dialerProxy"] = "nonhome"; break;
             case "dialer-cycle": node["streamSettings"]!["sockopt"]!["dialerProxy"] = "node-1"; break;
+            case "dns-plaintext": config["dns"]!["servers"] = new JsonArray("1.1.1.1"); break;
+            case "dns-local": config["dns"]!["servers"] = new JsonArray("https+local://1.1.1.1/dns-query"); break;
+            case "dns-loopback": config["dns"]!["servers"] = new JsonArray("https://127.0.0.1/dns-query"); break;
+            case "dns-hostname": config["dns"]!["servers"] = new JsonArray("https://dns.example.invalid/dns-query"); break;
+            case "address-race-unbounded": node["streamSettings"]!["sockopt"]!["happyEyeballs"]!["maxConcurrentTry"] = 100; break;
             case "dns-fallback": config["dns"]!["disableFallback"] = false; break;
             case "dns-on-home": outbounds.Single(item => item!["tag"]!.GetValue<string>() == "dns")!["streamSettings"]!["sockopt"]!["interface"] = "en0"; break;
             case "process-directory": config["routing"]!["rules"]!.AsArray().Single(item => item!["ruleTag"]!.GetValue<string>() == "app-app-1")!["process"] = new JsonArray("/Applications/Example.app/"); break;

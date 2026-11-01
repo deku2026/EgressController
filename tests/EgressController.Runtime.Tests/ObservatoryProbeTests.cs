@@ -10,7 +10,7 @@ public sealed class ObservatoryProbeTests
     [InlineData("[Info] app/observatory: the outbound node-1 is dead: GET request failed: redacted", false, 0)]
     public void ParsesPinnedObserverResults(string text, bool available, double milliseconds)
     {
-        Assert.Equal(new ObservatoryResult(available, milliseconds), ObservatoryProbes.ParseLine(text, "node-1"));
+        Assert.Equal(new ObservatoryResult(available, milliseconds, available ? null : "connection.failed"), ObservatoryProbes.ParseLine(text, "node-1"));
         Assert.Null(ObservatoryProbes.ParseLine(text, "other-node"));
     }
     [Theory]

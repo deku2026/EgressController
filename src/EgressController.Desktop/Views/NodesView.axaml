@@ -26,6 +26,7 @@
   </Grid>
   <Grid Grid.Row="3">
    <ListBox Name="ProxyGroupList" ItemsSource="{Binding VisibleGroups}" ItemContainerTheme="{StaticResource GroupRowContainer}" Padding="0" AutoScrollToSelectedItem="False">
+    <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
     <ListBox.ItemTemplate><DataTemplate x:DataType="vm:GroupRow">
      <Border Classes="group-card" Margin="0,0,0,8"><StackPanel>
       <Grid ColumnDefinitions="*,Auto,32,32" ColumnSpacing="6" Margin="10,8">

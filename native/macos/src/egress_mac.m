@@ -109,11 +109,15 @@ int32_t egress_mac_copy_interfaces_json(uint8_t *output, size_t capacity, size_t
                     NSString *key = [NSString stringWithFormat:@"State:/Network/Interface/%@/%@", bsd, protocol];
                     NSDictionary *value = CFBridgingRelease(SCDynamicStoreCopyValue(store, (__bridge CFStringRef)key));
                     if ([value[@"Addresses"] isKindOfClass:[NSArray class]]) [addresses addObjectsFromArray:value[@"Addresses"]];
+                    NSString *serviceKey = [NSString stringWithFormat:@"State:/Network/Service/%@/%@", string_or_empty(SCNetworkServiceGetServiceID(service)), protocol];
+                    NSDictionary *serviceState = CFBridgingRelease(SCDynamicStoreCopyValue(store, (__bridge CFStringRef)serviceKey));
+                    if ([serviceState[@"Addresses"] isKindOfClass:[NSArray class]])
+                        for (NSString *address in serviceState[@"Addresses"]) if (![addresses containsObject:address]) [addresses addObject:address];
                 }
             }
             [result addObject:@{ @"serviceId":string_or_empty(SCNetworkServiceGetServiceID(service)), @"bsdName":bsd,
                 @"displayName":string_or_empty(SCNetworkServiceGetName(service)), @"interfaceType":string_or_empty(SCNetworkInterfaceGetInterfaceType(interface)),
-                @"hardwareAddress":string_or_empty(SCNetworkInterfaceGetHardwareAddressString(interface)), @"isActive":@(active), @"addresses":addresses }];
+                @"hardwareAddress":string_or_empty(SCNetworkInterfaceGetHardwareAddressString(interface)), @"isActive":@(active || addresses.count > 0), @"addresses":addresses }];
         }
         if (store != NULL) CFRelease(store);
         CFRelease(services);

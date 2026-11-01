@@ -46,17 +46,29 @@ public sealed class BoundDnsResolver(IBoundDnsExchange exchange, IPAddress upstr
         catch (ArgumentException) { throw new IOException("Bound DNS hostname is invalid."); }
         if (ascii.Length is < 1 or > 253 || ascii.Split('.').Any(label => label.Length is < 1 or > 63 || !label.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-')))
             throw new IOException("Bound DNS hostname is invalid.");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        var addresses = new List<IPAddress>();
-        foreach (ushort type in new ushort[] { 1, 28 })
+        var answers = await Task.WhenAll(QueryFamilyAsync(1), QueryFamilyAsync(28)).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var addresses = answers.SelectMany(answer => answer.Addresses).Distinct().Take(64).ToArray();
+        if (addresses.Length == 0 && answers.FirstOrDefault(answer => answer.Error is not null).Error is { } error)
+            throw new IOException("Bound DNS resolution failed.", error);
+        return addresses;
+
+        async Task<(IReadOnlyList<IPAddress> Addresses, Exception? Error)> QueryFamilyAsync(ushort type)
         {
-            ushort id = (ushort)RandomNumberGenerator.GetInt32(65536); byte[] query = Query(ascii, type, id);
-            var response = await exchange.ExchangeAsync(query, upstreamIp, binding, false, timeout.Token).ConfigureAwait(false);
-            CheckHeader(response, id);
-            if ((response[2] & 2) != 0) response = await exchange.ExchangeAsync(query, upstreamIp, binding, true, timeout.Token).ConfigureAwait(false);
-            addresses.AddRange(Parse(response, ascii, type, id));
+            // One broken address family must neither discard the other answer nor consume the entire HTTP deadline.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            try
+            {
+                ushort id = (ushort)RandomNumberGenerator.GetInt32(65536); byte[] query = Query(ascii, type, id);
+                var response = await exchange.ExchangeAsync(query, upstreamIp, binding, false, timeout.Token).ConfigureAwait(false);
+                CheckHeader(response, id);
+                if ((response[2] & 2) != 0) response = await exchange.ExchangeAsync(query, upstreamIp, binding, true, timeout.Token).ConfigureAwait(false);
+                return (Parse(response, ascii, type, id), null);
+            }
+            catch (Exception error) when (error is IOException or HttpRequestException or SocketException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            { return (Array.Empty<IPAddress>(), error); }
         }
-        return addresses.Distinct().Take(64).ToArray();
     }
     private static byte[] Query(string host, ushort type, ushort id)
     {

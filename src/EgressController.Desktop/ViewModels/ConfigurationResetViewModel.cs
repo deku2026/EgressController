@@ -69,7 +69,7 @@ public sealed partial class ShellViewModel
         _backend.SetProgressSink(null); _appliedGroups = null; _lastGroupTests.Clear(); _probes.Clear();
         _prepared = new([], new Dictionary<string, byte[]>(), new Dictionary<string, GeoRuleSet>());
         _ruleCatalog = []; _catalog.Clear(); // Discard checkboxes without rescanning/enrolling any executable.
-        Document = new(); _subscriptionReady = false; _needsValidation = true; ConfigValid = false; HasChanges = false;
+        Document = new(); InvalidateHomeCheck(true); _subscriptionReady = false; _needsValidation = true; ConfigValid = false; HasChanges = false;
         SubscriptionUrl = ""; LocalSubscriptionYaml = ""; AppQuery = ""; CatalogQuery = ""; RuleQuery = ""; NodeQuery = "";
         CustomRuleName = ""; CustomRuleEntries = ""; CustomRuleIsIp = false;
         AddingApps = false; AddingRules = false; CreatingCustomRule = false; ManagingGroups = false;
@@ -78,7 +78,7 @@ public sealed partial class ShellViewModel
         _resetRecoveryPending = !result.NetworkRestored;
         _recoveryFailure = "";
         _state = new(false, result.NetworkRestored, _state.HelperInstalled,
-            result.NetworkRestored ? "已重置配置，等待重新设置。已验证的资源缓存与日志继续保留。" : RecoveryMessage);
+            result.NetworkRestored ? "已重置配置，等待重新设置。旧订阅缓存与生成配置已清理，日志和独立备份保留。" : RecoveryMessage);
         PreviewRunning = false; SetRuntimeUnavailable(!result.NetworkRestored);
         if (Connections.IsPaused) Connections.TogglePauseCommand.Execute(null);
         Connections.Reconcile(new([], _backend.Now, true, "完成设置并连接后开始观测。"));
@@ -87,7 +87,7 @@ public sealed partial class ShellViewModel
         foreach (string property in new[] { nameof(ConfigValid), nameof(ValidationLabel), nameof(SetupSubscriptionStatus), nameof(SourceStatusText), nameof(ProxyResolvedName), nameof(TunStatusText) }) Raise(property);
         Notice = "已备份原配置并重置。从选择两张网卡开始重新设置。";
         AddEvent("重置并重新设置", result.NetworkRestored
-            ? "已确认停止接管，备份原配置并保存空白设置；缓存与历史日志保留。"
+            ? "已确认停止接管，备份原配置并保存空白设置；旧缓存和生成配置清理，历史日志保留。"
             : "已备份原配置并保存空白设置；网络恢复尚未确认，后台恢复记录保留，可单独修复。", "lifecycle");
     }
 }

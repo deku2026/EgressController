@@ -72,13 +72,13 @@ public sealed class PolicyTests
     [Fact]
     public void DnsTunAndProviderDefinitionsRoundTripAndDriveGeneratedConfiguration()
     {
-        var doc = Document(); doc.Dns.UpstreamIp = "9.9.9.9"; doc.Tun.Name = "utun42"; doc.Tun.Ipv4Cidr = "10.123.0.1/30"; doc.Tun.Mtu = 1400;
+        var doc = Document(); doc.Dns.UpstreamIp = "9.9.9.9"; doc.Dns.HttpsUrl = "https://9.9.9.9/dns-query"; doc.Tun.Name = "utun42"; doc.Tun.Ipv4Cidr = "10.123.0.1/30"; doc.Tun.Mtu = 1400;
         doc.Providers.Add(new() { Id = "provider-test", Name = "Fixture provider", SourceId = "source", Url = "https://provider.example.test/nodes.yaml", Diagnostics = [new("provider.pending", "等待显式获取。")] });
         var yaml = PolicyYaml.Write(doc); var parsed = PolicyYaml.Read(yaml); Assert.True(parsed.IsSuccess);
         Assert.Equal(yaml, PolicyYaml.Write(parsed.Document!)); Assert.Equal("9.9.9.9", parsed.Document!.Dns.UpstreamIp); Assert.Equal("utun42", parsed.Document.Tun.Name); Assert.Equal(1400, parsed.Document.Tun.Mtu);
         var provider = Assert.Single(parsed.Document.Providers); Assert.Equal("source", provider.SourceId); Assert.Equal("https://provider.example.test/nodes.yaml", provider.Url); Assert.Contains(provider.Diagnostics, x => x.Code == "provider.pending");
         var generated = XrayConfigCompiler.Compile(parsed.Document, Options()); Assert.True(generated.IsSuccess);
-        using var json = JsonDocument.Parse(generated.Json!); Assert.Equal("9.9.9.9", json.RootElement.GetProperty("dns").GetProperty("servers")[0].GetString());
+        using var json = JsonDocument.Parse(generated.Json!); Assert.Equal("https://9.9.9.9/dns-query", json.RootElement.GetProperty("dns").GetProperty("servers")[0].GetString());
         var tun = json.RootElement.GetProperty("inbounds")[0].GetProperty("settings"); Assert.Equal("utun42", tun.GetProperty("name").GetString()); Assert.Equal(1400, tun.GetProperty("mtu").GetInt32()); Assert.Equal("10.123.0.1/30", tun.GetProperty("gateway")[0].GetString());
     }
     [Fact]

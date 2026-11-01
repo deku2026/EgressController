@@ -69,6 +69,8 @@ public interface IClientBackend : IAsyncDisposable
         IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default);
     Task<ApplyResult> UpdateGroupsAsync(MacPolicyDocument document, XrayCompileOptions options,
         IReadOnlyDictionary<string, byte[]> assets, CancellationToken cancellationToken = default) => ApplyAsync(document, options, assets, cancellationToken);
+    Task<InterfaceConnectivityResult> CheckHomeConnectivityAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
+        => Task.FromResult(new InterfaceConnectivityResult(false, document.Interfaces.HomeId, "", "", "unsupported", 0));
     Task<bool> StopAsync(CancellationToken cancellationToken = default);
     Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default);
     Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default);

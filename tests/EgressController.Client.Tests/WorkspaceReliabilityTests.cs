@@ -70,9 +70,9 @@ public sealed class WorkspaceReliabilityTests
     {
         PreviewEnvironment.Enter(); var backend = new Backend();
         await using var shell = new ShellViewModel(backend); await shell.InitializeAsync();
-        backend.PauseProbes = true; var probe = shell.RunProbesAsync(); shell.DnsServer = "9.9.9.9";
+        backend.PauseProbes = true; var probe = shell.RunProbesAsync(); shell.DnsServer = "https://9.9.9.9/dns-query";
         backend.Release.TrySetResult(); await probe;
-        Assert.Equal("9.9.9.9", shell.Document.Dns.UpstreamIp); Assert.Equal(0, backend.Applies);
+        Assert.Equal("https://9.9.9.9/dns-query", shell.Document.Dns.HttpsUrl); Assert.Equal(0, backend.Applies);
     }
     [Fact]
     public async Task RemovedItemsAreHiddenButSelectedMissingTargetRemainsVisibleForRepair()

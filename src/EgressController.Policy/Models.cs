@@ -32,6 +32,7 @@ public sealed class MacPolicyDocument
 public sealed class DnsPolicy
 {
     public string UpstreamIp { get; set; } = "1.1.1.1";
+    public string HttpsUrl { get; set; } = "https://1.1.1.1/dns-query";
 }
 public sealed class TunPolicy
 {
@@ -156,7 +157,7 @@ public sealed record ClashImportResult(IReadOnlyList<ProxyNode> Nodes, IReadOnly
 }
 public sealed record InterfaceBinding(string StableId, string BsdName);
 public sealed record RuleSourceBinding(string Source, string Tag, string? DomainFile = null, string? IpFile = null);
-public sealed record GroupProbe(string NodeId, bool Available, double LatencyMilliseconds, DateTimeOffset ObservedAt, string? TestUrl = null);
+public sealed record GroupProbe(string NodeId, bool Available, double LatencyMilliseconds, DateTimeOffset ObservedAt, string? TestUrl = null, string? FailureCode = null);
 public sealed record GroupSelectionResult(string? NodeId, IReadOnlyList<PolicyDiagnostic> Diagnostics)
 {
     public bool IsSuccess => NodeId is not null && !Diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error);

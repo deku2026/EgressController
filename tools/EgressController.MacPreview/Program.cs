@@ -41,6 +41,8 @@ internal static class Program
             window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, scenario + "-compact.png"));
             if (scenario == "onboarding")
             {
+                vm.CheckHomeCommand.ExecuteAsync().GetAwaiter().GetResult();
+                Save(window, Path.Combine(directory, "home-check-passed.png"));
                 vm.NextSetupCommand.Execute(null); vm.ImportSubscriptionAsync().GetAwaiter().GetResult(); Save(window, Path.Combine(directory, "setup-step-2.png"));
                 vm.NextSetupCommand.Execute(null); Save(window, Path.Combine(directory, "setup-step-3.png"));
                 vm.SelectedGlobalTarget = vm.GlobalChoices.Single(choice => choice.Name == "手动选择"); Flush(); Check(Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled, "First-run manual group did not use its declared default member."); Save(window, Path.Combine(directory, "setup-manual-selection-required.png"));

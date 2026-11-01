@@ -15,8 +15,12 @@ The caller must store the DSL with private permissions: it contains subscription
 URLs and node credentials. Parser diagnostics never echo source excerpts.
 
 DNS and TUN preferences are typed document state, never compiler-option overrides:
-`dns.upstream_ip` (`DnsPolicy.UpstreamIp`) stores the explicit non-loopback bootstrap
-IP; `tun.name`, `tun.ipv4_cidr` and `tun.mtu` (`TunPolicy.Name/Ipv4Cidr/Mtu`) store
+`dns.https_url` (`DnsPolicy.HttpsUrl`) stores the certificate-verified DoH endpoint,
+default `https://1.1.1.1/dns-query`, with a literal public IP, port 443 and no redirect,
+credentials, query or fragment. `dns.upstream_ip` remains readable for legacy version-1
+drafts but no longer emits plaintext DNS. Older drafts acquire the secure default.
+All runtime DNS dispatches through non-home; the isolated home check binds its own
+DoH queries to home. `tun.name`, `tun.ipv4_cidr` and `tun.mtu` (`TunPolicy.Name/Ipv4Cidr/Mtu`) store
 the TUN plan. Defaults are `1.1.1.1`, `utun10`, `198.18.0.1/30` and 1500.
 MTU must be 1280–9000 for the dual-stack plan. Older version-1 DSL without these
 sections receives the typed defaults, then writes them explicitly on save.

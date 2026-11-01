@@ -72,7 +72,7 @@ public sealed class DraftPolicyStore(string directory)
 }
 
 /// <summary>Only bounded lifecycle causes are written, never core connection streams or subscription contents.</summary>
-public sealed class PrivateLifecycleFileLog(string directory, int maximumBytes = 256 * 1024) : ILifecycleLog
+public sealed class PrivateLifecycleFileLog(string directory, int maximumBytes = 256 * 1024, string fileName = "lifecycle.log") : ILifecycleLog
 {
     private readonly object _sync = new();
     public void Append(LifecycleEvent entry)
@@ -80,7 +80,8 @@ public sealed class PrivateLifecycleFileLog(string directory, int maximumBytes =
         lock (_sync)
         {
             DurableFiles.CreatePrivateDirectory(directory);
-            string path = Path.Combine(directory, "lifecycle.log");
+            if (Path.GetFileName(fileName) != fileName) throw new ArgumentException("A log filename is required.");
+            string path = Path.Combine(directory, fileName);
             string previous = File.Exists(path) && new FileInfo(path).Length <= maximumBytes * 2L ? File.ReadAllText(path) : "";
             string line = $"{entry.Time:O} [{Clean(entry.Kind)}] {Clean(entry.Cause)} {Clean(entry.GenerationId ?? "")}\n";
             string text = previous + line;

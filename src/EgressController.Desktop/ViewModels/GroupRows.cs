@@ -62,8 +62,8 @@ public sealed class GroupMemberRow(ShellViewModel owner, GroupRow parent, string
     public bool Supported => Node?.IsSupported == true || Nested?.IsSupported == true || Id is GroupGraph.Direct or GroupGraph.Reject;
     public string Detail => Id == GroupGraph.Direct ? "DIRECT · 非家宽" : Id == GroupGraph.Reject ? "REJECT" : Nested is { } nested ? "分组 · " + owner.ResolveGroupLabel(nested) : Node?.IsSupported == true ? Node.Protocol.ToString().ToUpperInvariant() : "订阅已移除或不支持";
     public string Latency => Supported ? owner.MemberLatency(Id, parent.Model.TestUrl) : "不可用";
-    public string LatencyColor => !Supported || Latency == "超时" ? "#BF565C" : Latency.EndsWith("ms", StringComparison.Ordinal) ? "#26917C" : "#8A91A0";
-    public bool CanSelect => owner.CanEdit && Supported && Latency != "超时";
+    public string LatencyColor => !Supported || Latency is "超时" or "绑定失败" or "解析失败" or "握手失败" or "无路由" or "拒绝连接" or "内核退出" or "配置无效" or "连接失败" ? "#BF565C" : Latency.EndsWith("ms", StringComparison.Ordinal) ? "#26917C" : "#8A91A0";
+    public bool CanSelect => owner.CanEdit && Supported;
     public AsyncUiCommand SelectCommand { get; } = new(() => owner.SelectGroupMemberAsync(parent.Id, id));
     public void Refresh()
     {

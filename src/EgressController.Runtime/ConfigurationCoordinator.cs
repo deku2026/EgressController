@@ -37,6 +37,13 @@ public sealed partial class ConfigurationCoordinator(ICoreRuntime core, IRuntime
     // Keep desired executable inventories even when applying the new configuration fails.
     public string? DesiredPolicyYaml { get; private set; }
 
+    public async Task ForgetConfigurationAsync(CancellationToken token = default)
+    {
+        await _applyLock.WaitAsync(token).ConfigureAwait(false);
+        try { await store.RestoreAsync(null, token).ConfigureAwait(false); }
+        finally { Applied = null; DesiredPolicyYaml = null; _bootstrapActive = false; _beforeBootstrap = null; _applyLock.Release(); }
+    }
+
     public async Task<bool> StopAsync(string reason, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);

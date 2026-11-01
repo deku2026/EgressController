@@ -101,8 +101,8 @@ public static partial class XrayConfigCompiler
         var config = new JsonObject
         {
             ["log"] = new JsonObject { ["loglevel"] = "info" },
-            ["dns"] = new JsonObject { ["tag"] = "dns-query", ["queryStrategy"] = "UseIP", ["disableFallback"] = true, ["servers"] = Strings([doc.Dns.UpstreamIp]) },
-            ["inbounds"] = new JsonArray(new JsonObject { ["tag"] = "tun", ["protocol"] = "tun", ["settings"] = new JsonObject { ["name"] = doc.Tun.Name, ["mtu"] = doc.Tun.Mtu, ["gateway"] = Strings([doc.Tun.Ipv4Cidr]), ["autoSystemRoutingTable"] = Strings(["0.0.0.0/0", "::/0"]), ["autoOutboundsInterface"] = "" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = Strings(["http", "tls", "quic"]), ["routeOnly"] = true } }),
+            ["dns"] = new JsonObject { ["tag"] = "dns-query", ["queryStrategy"] = "UseIP", ["disableFallback"] = true, ["servers"] = Strings([doc.Dns.HttpsUrl]) },
+            ["inbounds"] = new JsonArray(new JsonObject { ["tag"] = "tun", ["protocol"] = "tun", ["settings"] = new JsonObject { ["name"] = doc.Tun.Name, ["mtu"] = doc.Tun.Mtu, ["gateway"] = Strings([doc.Tun.Ipv4Cidr]), ["autoSystemRoutingTable"] = Strings(["0.0.0.0/0", "::/0"]), ["autoOutboundsInterface"] = "" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = Strings(["http", "tls", "quic"]), ["routeOnly"] = false } }),
             // IPOnDemand is required: an explicit final catch-all defeats IPIfNonMatch's second pass.
             ["routing"] = new JsonObject { ["domainStrategy"] = "IPOnDemand", ["rules"] = rules },
             ["outbounds"] = outbounds
@@ -159,7 +159,7 @@ public static partial class XrayConfigCompiler
         if (node.Network == "httpupgrade") stream["httpupgradeSettings"] = new JsonObject { ["path"] = node.TransportPath, ["host"] = node.TransportHost };
         return new JsonObject() { ["tag"] = node.Id, ["protocol"] = protocol, ["settings"] = settings, ["streamSettings"] = stream };
     }
-    private static JsonObject Stream(string iface) => new() { ["sockopt"] = new JsonObject { ["interface"] = iface, ["domainStrategy"] = "ForceIP" } };
+    private static JsonObject Stream(string iface) => new() { ["sockopt"] = new JsonObject { ["interface"] = iface, ["domainStrategy"] = "ForceIP", ["happyEyeballs"] = new JsonObject { ["prioritizeIPv6"] = false, ["tryDelayMs"] = 250, ["interleave"] = 1, ["maxConcurrentTry"] = 2 } } };
     private static JsonNode Direct(string tag, string iface) => new JsonObject() { ["tag"] = tag, ["protocol"] = "freedom", ["settings"] = new JsonObject(), ["streamSettings"] = Stream(iface) };
     private static JsonArray Strings(IEnumerable<string> values) => new(values.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray());
     private static JsonNode Rule(string name, string? outbound, params (string Key, JsonNode? Value)[] values)

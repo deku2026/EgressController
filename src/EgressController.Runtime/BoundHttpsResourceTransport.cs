@@ -72,6 +72,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
         if (string.IsNullOrWhiteSpace(binding.StableId) || string.IsNullOrWhiteSpace(binding.BsdName)) throw new IOException("A physical interface snapshot is required.");
         var addresses = IPAddress.TryParse(endpoint.Host, out var literal) ? [literal] : await resolver.ResolveAsync(endpoint.Host, binding, token).ConfigureAwait(false);
         if (addresses.Count == 0 || addresses.Count > 64) throw new IOException("Bound DNS returned no usable addresses.");
+        Exception? failure = null;
         foreach (var address in addresses.Distinct())
         {
             token.ThrowIfCancellationRequested();
@@ -83,13 +84,15 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
             catch { socket.Dispose(); throw new IOException("Binding the physical interface failed."); }
             try
             {
-                await socket.ConnectAsync(new IPEndPoint(address, endpoint.Port), token).ConfigureAwait(false);
+                using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token); attempt.CancelAfter(TimeSpan.FromSeconds(2));
+                await socket.ConnectAsync(new IPEndPoint(address, endpoint.Port), attempt.Token).ConfigureAwait(false);
                 return new NetworkStream(socket, ownsSocket: true);
             }
-            catch (SocketException) { socket.Dispose(); }
+            catch (SocketException error) { failure = error; socket.Dispose(); }
+            catch (OperationCanceledException error) when (!token.IsCancellationRequested) { failure = new TimeoutException("Connection timeout.", error); socket.Dispose(); }
             catch { socket.Dispose(); throw; }
         }
-        throw new IOException("All connections through the selected physical interface failed.");
+        throw new IOException("All connections through the selected physical interface failed.", failure);
     }
 
     private static void Validate(ResourceDescriptor resource)

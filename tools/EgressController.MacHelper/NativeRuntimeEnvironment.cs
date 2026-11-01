@@ -20,6 +20,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
     private bool _dnsRestored = true;
     private XrayConnectionObserver? _observer;
     private readonly OperationDiagnostics _diagnostics = new(new HelperServiceLog(native));
+    private readonly CoreNetworkDiagnostics _networkDiagnostics = new(new HelperServiceLog(native, networkDetails: true));
     private readonly CoreStartupDiagnosis _startup = new();
     private static string ControlSocket => Path.Combine(MacHelperPaths.PrivateRoot, "routing.sock");
     private static string AssetDirectory => Path.Combine(MacHelperPaths.PrivateRoot, "assets");
@@ -51,6 +52,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         }
         var interfaces = new NativeMacPlatform(LiveOperationGate.ForExplicitLiveUse()).ReadInterfaces();
         var selected = MacRuntimeInterfaces.Resolve(interfaces, plan.HomeServiceId, plan.NonHomeServiceId);
+        _diagnostics.Record("core.bindings", $"generation={plan.GenerationId}; home={selected.Home}; nonhome={selected.NonHome}; proxy-and-encrypted-DNS=nonhome; address-race=same-interface");
         var validation = MacHelperConfigurationValidator.Validate(content["xray.json"], selected.Home, selected.NonHome);
         if (!validation.IsValid || RuntimeAssetValidator.Validate(System.Text.Encoding.UTF8.GetString(content["xray.json"]), content)
             .Any(diagnostic => diagnostic.Severity == EgressController.Policy.DiagnosticSeverity.Error)) throw new InvalidDataException("Runtime configuration failed the privilege allow-list.");
@@ -202,6 +204,19 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         _tunName = null; _tunCidr = null; _failure = null;
     }
 
+    public async Task ResetAsync(CancellationToken cancellationToken)
+    {
+        await RestoreAsync(cancellationToken).ConfigureAwait(false);
+        // Privileged recovery must finish before deleting any runtime files. Never touch installation identity or the journal on failure.
+        foreach (string name in new[] { "generations", "assets" })
+        {
+            string path = Path.Combine(MacHelperPaths.PrivateRoot, name);
+            if (Directory.Exists(path)) { HostFiles.PrivateDirectory(native, path); Directory.Delete(path, recursive: true); }
+        }
+        HostFiles.SyncDirectory(MacHelperPaths.PrivateRoot);
+        _diagnostics.Record("configuration.reset", "owned core stopped; DNS/routes restored; generated configurations and rule assets removed");
+    }
+
     public MacHelperStatus Inspect()
     {
         bool running = _core is not null && !_core.HasExited;
@@ -230,7 +245,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         return child;
     }
     private Task DrainCoreAsync(StreamReader reader, XrayConnectionObserver? observer)
-        => XrayConnectionOutputPump.DrainAsync(reader, observer, _startup.Observe);
+        => XrayConnectionOutputPump.DrainAsync(reader, observer, line => { _startup.Observe(line); _networkDiagnostics.Observe(line); });
     private string PrepareRuntimeAssets(string directory)
     {
         var manifest = JsonSerializer.Deserialize(HostFiles.ReadOwned(native, Path.Combine(directory, "runtime-manifest.json"), 0, 1024 * 1024), MacHelperWireJson.Default.MacRuntimeManifest)

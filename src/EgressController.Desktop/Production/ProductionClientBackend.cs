@@ -20,10 +20,14 @@ public sealed class ProductionClientBackend : IClientBackend
     private readonly MacHelperClient _helper;
     private readonly IValidatedResourceCache _cache;
     private readonly DraftPolicyStore _drafts;
+    private readonly WorkspaceResetMaintenance _resetMaintenance;
+    private bool _resetCleanupPending;
+    private bool ResetCleanupPending => _resetCleanupPending || _resetMaintenance.Pending;
     private readonly ConfigurationCoordinator _coordinator;
     private readonly SemaphoreSlim _apply = new(1, 1);
     private readonly string _root, _staging;
     private readonly ILifecycleLog _log;
+    private readonly ILifecycleLog _networkLog;
     private readonly OperationDiagnostics _diagnostics;
     private ConnectionAttemptStage? _lastLoggedStage;
     private string? _lastRuntimeObservation;
@@ -62,11 +66,12 @@ public sealed class ProductionClientBackend : IClientBackend
         _root = Path.Combine(home, "Library", "Application Support", "EgressController");
         _staging = Path.Combine(_root, "helper-staging");
         LogDirectory = Path.Combine(home, "Library", "Logs", "EgressController");
+        _networkLog = new PrivateLifecycleFileLog(LogDirectory, 512 * 1024, "network-diagnostics.log");
         _log = new PrivateLifecycleFileLog(LogDirectory); _diagnostics = new(_log);
         _diagnostics.Record("client.start", $"version={typeof(ProductionClientBackend).Assembly.GetName().Version}; architecture={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
         _catalog = new(new PhysicalMacCatalogFileSystem(_gate, _platform), _platform, MacApplicationCatalog.StandardRoots(home));
         _icons = new(_platform); _helper = new(_gate, log: _log); _cache = new PrivateDiskResourceCache(Path.Combine(_root, "resource-cache"));
-        _drafts = new(Path.Combine(_root, "configuration"));
+        _drafts = new(Path.Combine(_root, "configuration")); _resetMaintenance = new(_root);
         var runtime = new MacXrayCoreRuntime(_helper, _staging, _ => Task.FromResult(_launch ?? throw new InvalidOperationException("No validated runtime launch is prepared.")));
         _coordinator = new(runtime, new AtomicGenerationStore(Path.Combine(_root, "runtime")), _log);
     }
@@ -120,14 +125,14 @@ public sealed class ProductionClientBackend : IClientBackend
             ?? (current.Subscriptions.Count == 1 ? current.Subscriptions[0].Id : "subscription-" + Digest(url.AbsoluteUri)[..24]);
         var source = new SubscriptionSource { Id = sourceId, Name = "节点订阅", Url = url.AbsoluteUri };
         // Capture subscription-only direct egress before awaiting. No helper/core/port readiness is consulted.
-        string interfaceId = current.Interfaces.NonHomeId, dnsIp = current.Dns.UpstreamIp;
+        string interfaceId = current.Interfaces.NonHomeId;
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         var selected = interfaces.SingleOrDefault(item => item.ServiceId == interfaceId && item.IsActive && Physical(item))
             ?? throw new RuntimeFailureException("subscription.interface");
-        if (!IPAddress.TryParse(dnsIp, out var upstream) || IPAddress.IsLoopback(upstream) || upstream.Equals(IPAddress.Any) || upstream.Equals(IPAddress.IPv6Any))
+        if (!DnsEndpoint.IsValid(current.Dns.HttpsUrl))
             throw new RuntimeFailureException("subscription.dns");
         var binder = new MacPhysicalSocketBinder(_native);
-        var imported = await new DirectSubscriptionResources(binder, new BoundDnsResolver(binder, upstream), _cache,
+        var imported = await new DirectSubscriptionResources(binder, new BoundDohResolver(binder, current.Dns.HttpsUrl), _cache,
             new(interfaceId, selected.BsdName), ResourceProgress()).FetchAsync(source, cancellationToken).ConfigureAwait(false);
         if (!imported.IsSuccess) throw new InvalidDataException("订阅结构无效，保留原有节点与选择。");
         var merged = SubscriptionReconciler.Merge(current, sourceId, imported);
@@ -146,7 +151,7 @@ public sealed class ProductionClientBackend : IClientBackend
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         var options = new XrayCompileOptions { Interfaces = interfaces.Where(Physical).Select(item => new InterfaceBinding(item.ServiceId, item.BsdName)).ToList() };
-        return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("run isolated outbound probe without TUN"), Path.Combine(_root, "probes")))
+        return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("run isolated outbound probe without TUN"), Path.Combine(_root, "probes")), _networkLog)
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<GroupProbe>> ProbeMembersAsync(MacPolicyDocument document, XrayCompileOptions options,
@@ -154,7 +159,7 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         await CheckInterfaceIdentityAsync(options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken).ConfigureAwait(false);
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
-        return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe explicit group members without TUN"), Path.Combine(_root, "probes")))
+        return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe explicit group members without TUN"), Path.Combine(_root, "probes")), _networkLog)
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requested: requests).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<GroupProbe>> ProbeMembersWithProgressAsync(MacPolicyDocument document, XrayCompileOptions options,
@@ -162,7 +167,7 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         await CheckInterfaceIdentityAsync(options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken).ConfigureAwait(false);
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
-        return await Task.Run(() => new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe explicit group members without TUN"), Path.Combine(_root, "probes")))
+        return await Task.Run(() => new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe explicit group members without TUN"), Path.Combine(_root, "probes")), _networkLog)
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requested: requests, progress: progress), cancellationToken).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
@@ -173,7 +178,7 @@ public sealed class ProductionClientBackend : IClientBackend
         _preparationStage = ConnectionAttemptStage.Resources;
         Report(ConnectionAttemptStage.Resources, "TUN 已建立，正在检查所选自动分组；出口绑定失败只影响该连接，不会自动换卡。");
         var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
-        return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe required outbound groups without TUN"), Path.Combine(_root, "probes")))
+        return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe required outbound groups without TUN"), Path.Combine(_root, "probes")), _networkLog)
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requiredOnly: true).ConfigureAwait(false);
     }
     public async Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
@@ -186,6 +191,7 @@ public sealed class ProductionClientBackend : IClientBackend
         // configured service identities; Xray binds each outbound only when it opens a socket.
         _launch = new(core.ExecutablePath, core.Sha256, document.Interfaces.HomeId, document.Interfaces.NonHomeId);
         await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
+        if (ResetCleanupPending && !await FinishResetCleanupAsync(cancellationToken).ConfigureAwait(false)) throw new RuntimeFailureException("recovery.failed");
         var current = await _helper.InspectAsync(cancellationToken).ConfigureAwait(false);
         if (MacRuntimeReadiness.RequiresRecovery(current, _coordinator.Applied is not null)
             && !await _coordinator.StopAsync("用户重试连接：助手已确认核心或 TUN 不可用", cancellationToken).ConfigureAwait(false))
@@ -236,6 +242,7 @@ public sealed class ProductionClientBackend : IClientBackend
             var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
             _launch = new(core.ExecutablePath, core.Sha256, snapshot.Interfaces.HomeId, snapshot.Interfaces.NonHomeId);
             await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
+            if (ResetCleanupPending && !await FinishResetCleanupAsync(cancellationToken).ConfigureAwait(false)) throw new RuntimeFailureException("recovery.failed");
             await _drafts.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
             Report(ConnectionAttemptStage.Connecting, "校验助手配置，等待 Xray、实际 TUN 路由和 DNS 接管确认。");
             _recoveryRequired = true;
@@ -265,13 +272,27 @@ public sealed class ProductionClientBackend : IClientBackend
     public async Task<bool> StopAsync(CancellationToken cancellationToken = default)
     {
         bool restored = await _coordinator.StopAsync("用户停止网络接管", cancellationToken).ConfigureAwait(false);
+        if (restored && ResetCleanupPending) restored = await FinishResetCleanupAsync(cancellationToken).ConfigureAwait(false);
         if (restored) _recoveryRequired = false;
         return restored;
+    }
+    public async Task<InterfaceConnectivityResult> CheckHomeConnectivityAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
+    {
+        var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
+        var home = interfaces.SingleOrDefault(item => Physical(item) && item.ServiceId == document.Interfaces.HomeId);
+        if (home is null) return new(false, document.Interfaces.HomeId, "", "", "interface.bind", 0);
+        var binding = new InterfaceBinding(home.ServiceId, home.BsdName);
+        _diagnostics.Record("home.check.begin", $"service={binding.StableId}; interface={binding.BsdName}; addresses={home.Addresses.Length}; direct=true; tun=false");
+        var binder = new MacPhysicalSocketBinder(_native);
+        var result = await new InterfaceConnectivity(binder, new BoundDohResolver(binder, document.Dns.HttpsUrl)).CheckAsync(binding, cancellationToken).ConfigureAwait(false);
+        _diagnostics.Record("home.check.end", $"service={result.InterfaceId}; interface={result.BsdName}; endpoint={result.Endpoint}; available={result.Available}; code={result.FailureCode}; ms={result.Milliseconds:F0}");
+        return result;
     }
     public async Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default)
     {
         try
         {
+            if (ResetCleanupPending) return new(false, false, _helper.Status.Installed, "旧配置清理尚未完成。修复助手并恢复网络后将完成后台清理。");
             if (!File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath))
                 return _recoveryRequired || _coordinator.Applied is not null
                     ? new(false, false, false, "后台助手丢失，原有接管恢复尚未确认。请修复助手并恢复网络。")
@@ -298,12 +319,25 @@ public sealed class ProductionClientBackend : IClientBackend
                 !_recoveryRequired && _coordinator.Applied is null && !File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath)
                     ? Task.FromResult(true)
                     : !_helper.Status.Installed ? Task.FromResult(false)
-                    : _coordinator.StopAsync("用户确认重置配置：停止接管并恢复网络", token), _drafts.ResetAsync, cancellationToken).ConfigureAwait(false);
+                    : _coordinator.StopAsync("用户确认重置配置：停止接管并恢复网络", token), async (snapshot, token) =>
+                    {
+                        await _drafts.ResetAsync(snapshot, token).ConfigureAwait(false);
+                    }, cancellationToken).ConfigureAwait(false);
+            // The empty draft is committed. Cleanup failures must not make the UI resurrect the old draft.
+            _resetCleanupPending = true;
+            try
+            {
+                await Task.Run(_resetMaintenance.Begin, CancellationToken.None).ConfigureAwait(false);
+                await _coordinator.ForgetConfigurationAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { _diagnostics.Failure("configuration.local-cleanup", error); result = new(false); }
+            if (result.NetworkRestored) result = new(await FinishResetCleanupAsync(CancellationToken.None).ConfigureAwait(false));
             // Keep an owned session's recovery obligation and launch context until confirmed.
             if (result.NetworkRestored) { _recoveryRequired = false; _launch = null; }
             _savedResourcePort = new MacPolicyDocument().Defaults.ResourceProxyPort;
             _lastLoggedStage = null;
-            _diagnostics.Record("configuration.reset", $"network-restored={result.NetworkRestored}; draft backed up; empty setup saved; caches and privileged recovery journal retained");
+            _diagnostics.Record("configuration.reset", $"network-restored={result.NetworkRestored}; draft backed up; empty setup saved; generated local cleanup pending={ResetCleanupPending}; privileged recovery journal retained until restoration");
             return result;
         }
         finally { _apply.Release(); }
@@ -317,10 +351,30 @@ public sealed class ProductionClientBackend : IClientBackend
             var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
             await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
             bool restored = await _coordinator.StopAsync("用户修复后台助手并恢复系统网络", cancellationToken).ConfigureAwait(false);
+            if (restored && ResetCleanupPending) restored = await FinishResetCleanupAsync(cancellationToken).ConfigureAwait(false);
             if (restored) { _recoveryRequired = false; _launch = null; }
             return restored;
         }
         finally { _apply.Release(); }
+    }
+    private async Task<bool> FinishResetCleanupAsync(CancellationToken token)
+    {
+        try
+        {
+            if (File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath) || File.Exists(MacHelperPaths.Installation))
+            {
+                var reply = await _helper.ResetAndRestoreAsync(token).ConfigureAwait(false);
+                if (!reply.Succeeded || reply.Status.Running || reply.Status.TunTakenOver || !reply.Status.DnsRestored) return false;
+            }
+            await Task.Run(_resetMaintenance.Begin, token).ConfigureAwait(false);
+            await _coordinator.ForgetConfigurationAsync(token).ConfigureAwait(false);
+            await Task.Run(_resetMaintenance.Complete, token).ConfigureAwait(false);
+            _resetCleanupPending = false;
+            _diagnostics.Record("configuration.reset-cleanup", "old workspace generations and privileged generated data cleared; backup and logs retained");
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException)
+        { _diagnostics.Failure("configuration.reset-cleanup", error); return false; }
     }
     public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default) => Task.Run(() => _drafts.SaveAsync(document, cancellationToken), cancellationToken);
     public Task<ConnectionWorkspaceSnapshot> ReadConnectionsAsync(CancellationToken cancellationToken = default)
@@ -334,22 +388,24 @@ public sealed class ProductionClientBackend : IClientBackend
         _gate.Require("open lifecycle log directory"); cancellationToken.ThrowIfCancellationRequested();
         if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException();
         Directory.CreateDirectory(LogDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        try
+        foreach (var source in new[] { (MacHelperPaths.ServiceLog, "helper-service.log"), (Path.Combine(MacHelperPaths.ServiceLogDirectory, "network-errors.log"), "network-errors.log") })
         {
-            // Capture the bounded, root-owned service log beside the GUI log for diagnosis.
-            using var handle = _native.OpenOwnedRead(MacHelperPaths.ServiceLog, 0, 256 * 1024);
-            using var stream = new FileStream(handle, FileAccess.Read);
-            string temporary = Path.Combine(LogDirectory, ".helper-log-" + Guid.NewGuid().ToString("N"));
             try
             {
-                using (var copy = new FileStream(temporary, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write,
-                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite })) stream.CopyTo(copy);
-                File.Move(temporary, Path.Combine(LogDirectory, "helper-service.log"), overwrite: true);
+                using var handle = _native.OpenOwnedRead(source.Item1, 0, 256 * 1024);
+                using var stream = new FileStream(handle, FileAccess.Read);
+                string temporary = Path.Combine(LogDirectory, ".helper-log-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    using (var copy = new FileStream(temporary, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write,
+                        UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite })) stream.CopyTo(copy);
+                    File.Move(temporary, Path.Combine(LogDirectory, source.Item2), overwrite: true);
+                }
+                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                _diagnostics.Record("helper.service-log.copied", source.Item2);
             }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
-            _diagnostics.Record("helper.service-log.copied", "root-owned bounded helper log snapshot");
+            catch (Exception error) { _diagnostics.Failure("helper.service-log", error); }
         }
-        catch (Exception error) { _diagnostics.Failure("helper.service-log", error); }
         var start = new ProcessStartInfo("/usr/bin/open") { UseShellExecute = false }; start.ArgumentList.Add(LogDirectory);
         using var child = Process.Start(start); return Task.CompletedTask;
     }
