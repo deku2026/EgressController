@@ -19,8 +19,8 @@ public sealed class ProductAvatar : Control
         if (Cache.TryGetValue(product, out var value)) return value;
         if(string.IsNullOrEmpty(product)||product.Length>64||!product.All(character=>char.IsAsciiLetterOrDigit(character)||character is '-' or '_'))return null;
         var uri = new Uri($"avares://EgressController.Desktop.Presentation/Assets/{product}.png");
-        try { value = AssetLoader.Exists(uri) ? new Bitmap(AssetLoader.Open(uri)) : null; } catch { value = null; }
-        if(value is not null)Cache[product] = value; return value;
+        try { if (AssetLoader.Exists(uri)) { using var stream = AssetLoader.Open(uri); value = new Bitmap(stream); } } catch { value = null; }
+        Cache[product] = value; return value;
     }
     public override void Render(DrawingContext context)
     {

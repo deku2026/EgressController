@@ -38,6 +38,8 @@ public sealed class Glyph : Control
             case "search": context.DrawEllipse(null, pen, new Point(10, 10), 6, 6); context.DrawLine(pen, new(15, 15), new(21, 21)); break;
             case "logs": context.DrawRectangle(null, pen, new Rect(5, 3, 14, 18), 2, 2); DrawPath(context, pen, "M9 8 L15 8 M9 12 L15 12 M9 16 L13 16"); break;
             case "plus": DrawPath(context, pen, "M5 12 L19 12 M12 5 L12 19"); break;
+            case "gauge": DrawPath(context, pen, "M4 19 A10 10 0 1 1 20 19 M12 12 L17 7 M5 14 L6 14 M12 4 L12 5 M18 14 L19 14"); context.DrawEllipse(Foreground, null, new Point(12, 12), 1.8, 1.8); break;
+            case "sliders": DrawPath(context, pen, "M3 7 L7 7 M11 7 L21 7 M3 17 L13 17 M17 17 L21 17"); context.DrawEllipse(null, pen, new Point(9,7), 2,2); context.DrawEllipse(null,pen,new Point(15,17),2,2); break;
             case "refresh": DrawPath(context, pen, "M20 9 A8 8 0 1 0 20 16 M20 3 L20 9 L14 9"); break;
             case "chevron-down": DrawPath(context, pen, "M5 9 L12 16 L19 9"); break;
             case "chevron-up": DrawPath(context, pen, "M5 15 L12 8 L19 15"); break;
@@ -46,5 +48,10 @@ public sealed class Glyph : Control
             default: context.DrawRectangle(null, pen, new Rect(4, 4, 16, 16), 4, 4); break;
         }
     }
-    private static void DrawPath(DrawingContext context, IPen pen, string data) => context.DrawGeometry(null, pen, Geometry.Parse(data));
+    private static readonly Dictionary<string, Geometry> Paths = new(StringComparer.Ordinal);
+    private static void DrawPath(DrawingContext context, IPen pen, string data)
+    {
+        if (!Paths.TryGetValue(data, out var geometry)) Paths[data] = geometry = Geometry.Parse(data);
+        context.DrawGeometry(null, pen, geometry);
+    }
 }

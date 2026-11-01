@@ -80,7 +80,8 @@ public sealed class DesktopApplication : Application
             {
                 if (closed) return; args.Cancel = true; if (closing) return; closing = true; timer.Stop();
                 try { await vm.DisposeAsync(); }
-                finally { closed = true; window.Close(); }
+                catch (Exception) { closing = false; vm.ReportShutdownFailure(); return; }
+                closed = true; window.Close();
             };
         }
         base.OnFrameworkInitializationCompleted();

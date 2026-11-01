@@ -42,10 +42,22 @@ internal static class ProductionCompositionChecks
 
         var loadedBackend=new InjectedBackend(true);var vm=new ShellViewModel(loadedBackend);Complete(vm.InitializeAsync());vm.PageIndex=1;
         var window=new MainWindow{DataContext=vm,Width=1260,Height=860};window.Show();Flush();
-        Complete(vm.RequestIconsAsync(vm.VisibleApps.Select(row=>row.BundlePath)));Flush();
+        var iconDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (vm.VisibleApps.Any(row => row.Icon is null) && DateTime.UtcNow < iconDeadline) { Flush(); Thread.Sleep(1); }
+        Flush();
         Check(loadedBackend.IconRequests>0&&vm.VisibleApps.All(row=>row.Icon is not null),"Production application artwork did not load through injected native-PNG service.");
         Check(window.GetVisualDescendants().OfType<ProductAvatar>().Any(avatar=>avatar.IsEffectivelyVisible&&avatar.Source is not null),"Native PNG artwork was not bound to the shared backing control.");
         Save(window,Path.Combine(directory,"production-apps-native-png.png"));AssertNoPreviewText(window);
+        vm.PageIndex = 3; loadedBackend.ProbePause = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slowProbe = vm.RunProbesAsync(); Flush();
+        Check(vm.IsProbing && !vm.IsBusy && vm.CanEdit, "A slow probe disabled navigation or editing.");
+        var appsNav = window.FindControl<Button>("AppsNav")!;
+        var navPoint = appsNav.TranslatePoint(new Point(appsNav.Bounds.Width / 2, appsNav.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(navPoint, Avalonia.Input.MouseButton.Left); window.MouseUp(navPoint, Avalonia.Input.MouseButton.Left); Flush();
+        Check(vm.AppsVisible, "Pointer navigation was blocked while probing.");
+        vm.PageIndex = 3; Save(window, Path.Combine(directory, "probe-running-interactive.png"));
+        vm.CancelProbeCommand.Execute(null); Complete(slowProbe);
+        Check(!vm.IsProbing && vm.CanProbe, "Cancel left probing controls busy."); loadedBackend.ProbePause = null;
         vm.PageIndex=0;Save(window,Path.Combine(directory,"production-no-observations.png"));AssertNoPreviewText(window);
 
         foreach(Exception failure in new Exception[]{new InvalidDataException("credential-marker parser excerpt"),new IOException("https://credential-marker.example.invalid/?token=private")})
@@ -109,6 +121,7 @@ internal static class ProductionCompositionChecks
         public int RuntimeMutationCalls { get; private set; }
         public bool Offline { get; init; }
         public bool AllowApply { get; init; }
+        public TaskCompletionSource<IReadOnlyList<GroupProbe>>? ProbePause { get; set; }
         public TaskCompletionSource<ClientPreparedResources>? ResourcePause { get; set; }
         private IProgress<ClientOperationProgress>? _progress;
         public void SetProgressSink(IProgress<ClientOperationProgress>? progress) => _progress = progress;
@@ -135,7 +148,7 @@ internal static class ProductionCompositionChecks
             return Task.FromResult(SubscriptionReconciler.Merge(current, "direct-first", ClashSubscriptionImporter.Import(yaml, "direct-first")));
         }
         public Task<ClientPreparedResources> PrepareResourcesAsync(MacPolicyDocument document,CancellationToken cancellationToken=default)=> ResourcePause?.Task ?? (PreparationFailure is {} failure?Task.FromException<ClientPreparedResources>(failure):_fixtures.PrepareResourcesAsync(document,cancellationToken));
-        public Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document,InterfaceBinding binding,CancellationToken cancellationToken=default)=>Task.FromResult<IReadOnlyList<GroupProbe>>([]);
+        public Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document,InterfaceBinding binding,CancellationToken cancellationToken=default)=>ProbePause?.Task.WaitAsync(cancellationToken) ?? Task.FromResult<IReadOnlyList<GroupProbe>>([]);
         public Task BeginConnectionAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default) {
             RuntimeMutationCalls++;
             if (Offline) Check(options.Interfaces.Count == 2, "Offline interface identities were removed before TUN compilation.");

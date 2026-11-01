@@ -25,7 +25,12 @@ internal static class ApplicationArtworkRequests
                 .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
             _ = vm.RequestIconsAsync(bundles);
         }
-        void Schedule() => Dispatcher.UIThread.Post(Request, DispatcherPriority.Loaded);
+        bool scheduled = false;
+        void Schedule()
+        {
+            if (scheduled) return; scheduled = true;
+            Dispatcher.UIThread.Post(() => { scheduled = false; Request(); }, DispatcherPriority.Loaded);
+        }
         view.AttachedToVisualTree += (_, _) => Schedule();
         view.PropertyChanged += (_, change) => { if (change.Property == Visual.IsVisibleProperty) Schedule(); };
         view.AddHandler(ScrollViewer.ScrollChangedEvent, (_, _) => Schedule(), RoutingStrategies.Bubble);

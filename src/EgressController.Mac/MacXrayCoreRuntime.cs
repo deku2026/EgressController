@@ -51,7 +51,7 @@ public sealed class MacXrayCoreRuntime : ICoreRuntime
         { await ValidateAsync(generation, cancellationToken).ConfigureAwait(false); await ApplyAsync(generation, cancellationToken).ConfigureAwait(false); return; }
         var reply = await _client.StopAndRestoreAsync(cancellationToken).ConfigureAwait(false);
         _prepared = null;
-        if (!reply.Succeeded || !reply.Status.DnsRestored || reply.Status.Running) throw new IOException("Network restoration was not confirmed: " + reply.Code);
+        if (!reply.Succeeded || !reply.Status.DnsRestored || reply.Status.Running || reply.Status.TunTakenOver) throw new IOException("Network restoration was not confirmed: " + reply.Code);
     }
 }
 

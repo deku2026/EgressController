@@ -42,8 +42,10 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public ConnectionAttemptViewModel ConnectionAttempt { get; }
     public bool IsLoading { get; private set; }
     public bool IsBusy => _busy > 0;
-    public bool CanEdit => !IsBusy && !IsLoading;
+    public bool CanEdit => !_closing && !IsBusy && !IsLoading;
     private CancellationTokenSource? _operation;
+    private TaskCompletionSource? _operationCompletion;
+    private bool _closing;
     private CancellationToken ActionToken => _operation?.Token ?? _lifetime.Token;
     public UiCommand CancelOperationCommand { get; }
     public string ImportLabel => IsPreview ? "导入示例订阅" : "导入订阅";
@@ -91,7 +93,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         AddRulesCommand = new(() => RunOperationAsync(ShowRuleCatalogAsync)); CloseRulesCommand = new(() => AddingRules = false);
         ShowCustomRuleCommand = new(() => { CreatingCustomRule = true; AddingRules = false; }); CancelCustomRuleCommand = new(() => CreatingCustomRule = false); CreateCustomRuleCommand = new(CreateCustomRule);
         ImportLocalSubscriptionCommand = new(ImportLocalSubscription);
-        ImportSubscriptionCommand = new(() => RunOperationAsync(ImportSubscriptionAsync)); RunProbesCommand = new(() => RunOperationAsync(RunProbesAsync)); CompileCommand = new(() => RunOperationAsync(CompileDraftAsync));
+        ImportSubscriptionCommand = new(() => RunOperationAsync(ImportSubscriptionAsync)); RunProbesCommand = new(async () => await RunProbesAsync()); CompileCommand = new(() => RunOperationAsync(CompileDraftAsync));
         ApplyCommand = new(() => RunOperationAsync(ApplyPreviewAsync)); SaveCommand = new(() => RunOperationAsync(SaveDraftAsync)); ApplyDslCommand = new(() => RunOperationAsync(ApplyDslAsync));
         ConnectionAttempt = new(() => ApplyCommand.Execute(null));
         _backend.SetProgressSink(new UiProgress(progress => ConnectionAttempt.Observe(progress)));
@@ -142,8 +144,8 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public bool NoAppsMatch => !AppsEmpty && VisibleApps.Count == 0; public bool NoCatalogMatch => VisibleCatalog.Count == 0; public bool NoRulesMatch => !RulesEmpty && VisibleRules.Count == 0;
     public int ApplicationCount => Document.Applications.Count; public int RuleCount => Document.RuleSets.Count;
     public string ApplicationCountLabel => $"{ApplicationCount} 个已管理应用"; public string RuleCountLabel => $"{RuleCount} 个用户集合";
-    public string NodeCountLabel => $"{Document.Nodes.Count(x => x.IsSupported)} 个可用节点 · {Document.Nodes.Count(x => !x.IsSupported)} 项不支持";
-    public bool AddingApps { get => _addingApps; set => Set(ref _addingApps, value); }
+    public string NodeCountLabel => $"{Document.Nodes.Count(x => x.IsSupported)} 个受支持节点 · {Document.Nodes.Count(x => !x.IsSupported)} 项不支持";
+    public bool AddingApps { get => _addingApps; set { if (Set(ref _addingApps, value) && value) _ = LoadVisibleIconsAsync(); } }
     public bool AddingRules { get => _addingRules; set => Set(ref _addingRules, value); }
     public bool CreatingCustomRule { get => _customRule; set => Set(ref _customRule, value); }
     public int SelectedCatalogCount => _catalog.Count(x => x.IsSelected); public string AddSelectedLabel => $"添加所选应用{(SelectedCatalogCount > 0 ? $" · {SelectedCatalogCount}" : "")}";
@@ -212,7 +214,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public AsyncUiCommand NextSetupCommand { get; }
     public UiCommand BackSetupCommand { get; }
     public bool OnboardingVisible { get => _onboarding; set => Set(ref _onboarding, value); }
-    public int SetupStep { get => _step; set { if (Set(ref _step, value)) { foreach (string name in new[] { nameof(SetupTitle), nameof(SetupDescription), nameof(SetupProgress), nameof(SetupInterfaces), nameof(SetupSubscription), nameof(SetupGlobal), nameof(SetupApplications), nameof(SetupReview), nameof(NextSetupLabel) }) Raise(name); BackSetupCommand?.Refresh(); NextSetupCommand?.Refresh(); } } }
+    public int SetupStep { get => _step; set { if (Set(ref _step, value)) { foreach (string name in new[] { nameof(SetupTitle), nameof(SetupDescription), nameof(SetupProgress), nameof(SetupInterfaces), nameof(SetupSubscription), nameof(SetupGlobal), nameof(SetupApplications), nameof(SetupReview), nameof(NextSetupLabel) }) Raise(name); BackSetupCommand?.Refresh(); NextSetupCommand?.Refresh(); if (SetupStep == 3) _ = LoadVisibleIconsAsync(); } } }
     public string SetupTitle => SetupStep switch { 0 => "先认识你的两条网络", 1 => "接入你的节点订阅", 2 => "保留你需要的分组", 3 => "让常用应用先行", _ => "检查并启动连接" };
     public string SetupDescription => SetupStep switch { 0 => "家宽与非家宽需要绑定两张不同的物理网卡。", 1 => "仅导入节点与分组，DNS 与分流由 Egress 统一管理。", 2 => "应用只需选择分组；节点、DIRECT 和自动测速在分组内管理。", 3 => "选择需要单独分流的应用；以后也可以随时添加。", _ => IsPreview ? "先校验配置，再应用到隔离的模拟运行环境。" : "先请求管理员授权并启动内置 Xray TUN，再通过所选非家宽分组节点下载规则；失败时可以重试。" };
     private ProxyGroup? SetupGlobalGroup => Document.Groups.FirstOrDefault(group => group.Id == SelectedGlobalTarget?.Id);
@@ -295,18 +297,20 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private static string SafeFailure(Exception exception, string fallback) => exception is OperationCanceledException ? "操作已取消；原有配置已保留。" : exception is ResourcePreparationException or RuntimeFailureException ? exception.Message : fallback;
     private async Task RunOperationAsync(Func<Task> operation)
     {
-        if (_disposed || IsBusy) return;
+        if (_disposed || _closing || IsBusy) return;
+        if (IsProbing) { _probeCancellation?.Cancel(); if (_probeCompletion is { } probe) await probe.Task; }
         if (_maintainingGroups)
         {
             _groupMaintenanceCancellation?.Cancel();
             if (_groupMaintenanceCompletion is { } pending) await pending.Task;
-            if (_disposed || IsBusy) return;
+            if (_disposed || _closing || IsBusy) return;
         }
         using var owned = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); _operation = owned;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); _operationCompletion = completion;
         _busy++; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands();
         try { await operation(); }
         catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("client.operation", exception); CurrentIssue = SafeFailure(exception, "操作未能完成，请检查配置与日志后重试。"); AddEvent("操作未完成", CurrentIssue, "diagnostic"); }
-        finally { if (ReferenceEquals(_operation, owned)) _operation = null; _busy--; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands(); }
+        finally { if (ReferenceEquals(_operation, owned)) _operation = null; _busy--; Raise(nameof(IsBusy)); Raise(nameof(CanEdit)); RefreshCommands(); completion.TrySetResult(); }
     }
     private void RefreshCommands()
     {
@@ -382,11 +386,11 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     }
     private void StateChanged()
     {
-        _revision++; _needsValidation = true; Raise(nameof(ValidationLabel)); HasChanges = true; DslText = PolicyYaml.Write(Document); Notice = IsPreview ? "更改已保存在草稿中，校验后可应用到模拟环境。" : "更改已保存在草稿中，校验后可应用。"; CurrentIssue = ""; Raise(nameof(ProxyResolvedName)); NextSetupCommand.Refresh();
+        _revision++; _needsValidation = true; Raise(nameof(ValidationLabel)); HasChanges = true; DslText = PolicyYaml.Write(Document); ScheduleDraftSave(); Notice = "更改等待应用，配置草稿自动保存。"; CurrentIssue = ""; Raise(nameof(ProxyResolvedName)); NextSetupCommand.Refresh();
     }
     private async Task ShowApplicationCatalogAsync()
     {
-        AddingApps = true; CatalogQuery = ""; Notice = "正在读取已安装应用目录…";
+        _missingIcons.Clear(); AddingApps = true; CatalogQuery = ""; Notice = "正在读取已安装应用目录…";
         var discovered = await _backend.DiscoverApplicationsAsync(ActionToken);
         var byPath = discovered.ToDictionary(app => app.BundlePath, StringComparer.Ordinal); var oldPaths = _applications.Select(app => app.BundlePath).ToHashSet(StringComparer.Ordinal);
         _applications = _applications.Where(app => byPath.ContainsKey(app.BundlePath)).Select(app => byPath[app.BundlePath]).Concat(discovered.Where(app => !oldPaths.Contains(app.BundlePath))).ToList(); RebuildProjection(); Notice = "搜索后勾选需要加入的应用。"; await LoadVisibleIconsAsync();
@@ -408,7 +412,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
             Document.Applications.Add(new() { Id = StableObjectId("app-", app.Id), Name = app.Name, BundlePath = app.BundlePath, BundleIdentifier = app.BundleIdentifier, PrimaryExecutable = app.PrimaryExecutable, ExecutablePaths = app.ExecutablePaths.Distinct(StringComparer.Ordinal).ToList(), Via = ExitChoice.NonHome });
             int index = _applications.FindIndex(existing => existing.Id == app.Id); if (index >= 0) _applications[index] = app;
         }
-        RebuildProjection(); StateChanged(); AddingApps = false; Notice = $"已添加 {inventories.Count} 个应用，固定可执行清单已保存。"; await LoadVisibleIconsAsync();
+        RebuildProjection(); StateChanged(); await PersistDraftAsync(); AddingApps = false; Notice = $"已添加 {inventories.Count} 个应用，固定可执行清单已保存。"; await LoadVisibleIconsAsync();
     }
     private async Task RefreshSelectedInventoryAsync()
     {
@@ -479,7 +483,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("subscription.import", exception); Notice = exception is OperationCanceledException ? "订阅导入已取消；原有节点与缓存已保留。" : "订阅直连未完成；原有节点与缓存已保留，可以重试。"; CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
     }
     public void RunProbes() { if (!IsPreview) throw new InvalidOperationException("Use asynchronous real probing."); RunProbesAsync().GetAwaiter().GetResult(); }
-    public Task RunProbesAsync() => MeasureGroupsAsync(applyAutomatic: true);
+    public Task RunProbesAsync() => RunGroupProbeAsync(null);
     private async Task MeasureGroupsAsync(bool applyAutomatic)
     {
         CurrentIssue = ""; Notice = IsPreview ? "正在执行示例测速…" : "正在通过指定非家宽出口测速…";
@@ -624,6 +628,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         if (SetupStep == 2 && SelectedGlobalTarget is null) { CurrentIssue = "必须明确选择一个全局代理代理分组。"; return; }
         if (SetupStep == 2 && !CanAdvanceSetup) { CurrentIssue = "手动分组需要明确选择一个节点。"; return; }
         CurrentIssue = "";
+        if (SetupStep == 3 && SelectedCatalogCount > 0) { await AddSelectedApplicationsAsync(); if (HasIssue) return; }
         if (SetupStep == 4) { await ApplyPreviewAsync(); if (!HasIssue && PreviewRunning) OnboardingVisible = false; return; }
         SetupStep++;
     }
@@ -631,14 +636,17 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     private readonly Queue<string> _pendingIcons = new();
     private readonly HashSet<string> _queuedIcons = new(StringComparer.Ordinal);
     private Task? _iconPump;
-    public Task LoadVisibleIconsAsync() => RequestIconsAsync(OverviewVisible ? OverviewApps.Select(row => row.BundlePath) : []);
+    private readonly HashSet<string> _missingIcons = new(StringComparer.Ordinal);
+    public Task LoadVisibleIconsAsync() => RequestIconsAsync(AddingApps || OnboardingVisible && SetupStep == 3
+        ? VisibleCatalog.Take(24).Select(row => row.Model.BundlePath)
+        : AppsVisible ? VisibleApps.Take(24).Select(row => row.BundlePath) : OverviewVisible ? OverviewApps.Select(row => row.BundlePath) : []);
     public Task RequestIconsAsync(IEnumerable<string> bundles)
     {
         if (IsPreview || !_initialized || _disposed) return Task.CompletedTask;
         foreach (string bundle in bundles.Distinct(StringComparer.Ordinal))
         {
             if (_icons.TryGetValue(bundle, out var cached)) { AssignIcon(bundle, cached); continue; }
-            if (_queuedIcons.Add(bundle)) _pendingIcons.Enqueue(bundle);
+            if (!_missingIcons.Contains(bundle) && _queuedIcons.Add(bundle)) _pendingIcons.Enqueue(bundle);
         }
         while (_pendingIcons.Count > 128) { string stale = _pendingIcons.Dequeue(); _queuedIcons.Remove(stale); }
         if (_iconPump is null || _iconPump.IsCompleted) _iconPump = PumpIconsAsync();
@@ -646,14 +654,14 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     }
     private async Task PumpIconsAsync()
     {
-        while (_pendingIcons.Count > 0 && !_disposed)
+        while (_pendingIcons.Count > 0 && !_disposed && !_closing)
         {
             string bundle = _pendingIcons.Dequeue(); _queuedIcons.Remove(bundle);
             if (_icons.ContainsKey(bundle)) continue;
             try
             {
                 byte[]? bytes = AppMetadata(bundle)?.IconPng ?? await _backend.LoadIconAsync(bundle, _lifetime.Token);
-                if (bytes is null || bytes.Length == 0) continue;
+                if (bytes is null || bytes.Length == 0) { _missingIcons.Add(bundle); continue; }
                 Bitmap bitmap = await Task.Run(() => { using var stream = new MemoryStream(bytes, false); return new Bitmap(stream); }, _lifetime.Token);
                 if (_disposed) { bitmap.Dispose(); break; }
                 _icons[bundle] = bitmap; _iconOrder.Enqueue(bundle); AssignIcon(bundle, bitmap);
@@ -673,7 +681,18 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return; _disposed = true; _lifetime.Cancel(); if (_groupMaintenanceCompletion is { } maintenance) await maintenance.Task; if (_iconPump is not null) await _iconPump; await _backend.DisposeAsync();
+        if (_disposed) return; _closing = true; Raise(nameof(CanEdit));
+        Notice = "正在恢复网络并保存配置，完成后退出…";
+        _operation?.Cancel(); _probeCancellation?.Cancel(); _groupMaintenanceCancellation?.Cancel(); _draftDelay?.Cancel();
+        if (_operationCompletion is { } operation) await operation.Task;
+        if (_probeCompletion is { } probe) await probe.Task;
+        if (_groupMaintenanceCompletion is { } maintenance) await maintenance.Task;
+        // A failed draft write must never bypass network restoration. A failed restore keeps the window open for retry.
+        try { await PersistDraftAsync(CancellationToken.None); }
+        catch (Exception error) { RecordFailure("shutdown.save", error); }
+        await _backend.DisposeAsync();
+        _disposed = true; _lifetime.Cancel();
+        if (_iconPump is not null) await _iconPump;
         foreach (var icon in _icons.Values) icon.Dispose(); _icons.Clear(); _lifetime.Dispose();
     }
 }

@@ -23,6 +23,8 @@ public sealed partial class ShellViewModel
     private async Task ResetConfigurationAsync()
     {
         ResetIssue = "";
+        _draftDelay?.Cancel();
+        await _draftWriter.WaitAsync(ActionToken);
         try { await _backend.ResetConfigurationAsync(Document, ActionToken); }
         catch (Exception error) when (IsExpectedFailure(error))
         {
@@ -32,7 +34,8 @@ public sealed partial class ShellViewModel
             await RefreshStatusAsync();
             return;
         }
-        ++_revision; ++_attemptRevision;
+        finally { _draftWriter.Release(); }
+        ++_revision; _savedDraftRevision = _revision; ++_attemptRevision;
         _backend.SetProgressSink(null); _appliedGroups = null; _lastGroupTests.Clear(); _probes.Clear();
         _prepared = new([], new Dictionary<string, byte[]>(), new Dictionary<string, GeoRuleSet>());
         _ruleCatalog = []; _catalog.Clear(); // Discard checkboxes without rescanning/enrolling any executable.

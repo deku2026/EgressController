@@ -52,14 +52,14 @@ public abstract class RouteRow(Func<string> global, Func<IReadOnlyList<Choice>> 
 public sealed class AppRow : RouteRow
 {
     private readonly Func<string, ClientApplication?> _metadata;
-    private readonly bool _preview;
+
     private IImage? _icon;
     public IImage? Icon { get => _icon; private set => Set(ref _icon, value); }
     public void SetIcon(IImage? image) => Icon = image;
     public ManagedApplication Model { get; private set; }
     protected override ExitChoice Exit { get => Model.Via; set => Model.Via = value; }
     public string Name => Model.Name;
-    public string Product => _preview ? _metadata(Model.BundlePath)?.Product ?? "app" : "app";
+    public string Product => _metadata(Model.BundlePath)?.Product ?? "app";
     public string Category => _metadata(Model.BundlePath)?.Category ?? "已管理应用";
     public string Subtitle => $"{Category} · {Model.ExecutablePaths.Count} 个固定可执行文件";
     public string BundlePath => Model.BundlePath;
@@ -67,7 +67,7 @@ public sealed class AppRow : RouteRow
     public UiCommand RemoveCommand { get; }
     public AppRow(ManagedApplication model, Func<string> global, Func<IReadOnlyList<Choice>> choices, Action changed, Action<AppRow> remove, Func<string, ClientApplication?> metadata, bool preview) : base(global, choices, changed)
     {
-        Model = model; _metadata = metadata; _preview = preview; RemoveCommand = new(() => remove(this));
+        Model = model; _metadata = metadata; RemoveCommand = new(() => remove(this));
     }
     public bool UpdateModel(ManagedApplication model)
     {
@@ -85,15 +85,15 @@ public sealed class CatalogRow : Bindable
     private bool _selected;
     private readonly Action _changed;
     public ClientApplication Model { get; private set; }
-    private readonly bool _preview; private IImage? _icon; public IImage? Icon { get => _icon; private set => Set(ref _icon, value); }
+    private IImage? _icon; public IImage? Icon { get => _icon; private set => Set(ref _icon, value); }
     public void SetIcon(IImage? image) => Icon = image;
     public string Name => Model.Name;
-    public string Product => _preview ? Model.Product : "app";
+    public string Product => Model.Product;
     public string Subtitle => $"{Model.Category} · {Model.BundlePath}";
     public bool IsManaged { get; private set; }
     public bool CanSelect => !IsManaged;
     public bool IsSelected { get => _selected; set { if (!IsManaged && Set(ref _selected, value)) _changed(); } }
-    public CatalogRow(ClientApplication model, Action changed, bool isManaged, bool preview) { Model = model; _changed = changed; IsManaged = isManaged; _preview = preview; }
+    public CatalogRow(ClientApplication model, Action changed, bool isManaged, bool preview) { Model = model; _changed = changed; IsManaged = isManaged; }
     public void UpdateModel(ClientApplication model, bool managed) { Model = model; IsManaged = managed; if (managed) _selected = false; Raise(nameof(Name)); Raise(nameof(Product)); Raise(nameof(Subtitle)); Raise(nameof(IsManaged)); Raise(nameof(CanSelect)); Raise(nameof(IsSelected)); }
 }
 

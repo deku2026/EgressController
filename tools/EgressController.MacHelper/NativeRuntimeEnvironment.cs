@@ -8,7 +8,7 @@ using EgressController.Runtime;
 
 namespace EgressController.MacHelper;
 
-public sealed record RecoveryJournal(MacDnsRecoverySnapshot Dns, int CorePid = 0, long CoreStartedAtMicroseconds = 0);
+public sealed record RecoveryJournal(MacDnsRecoverySnapshot Dns, int CorePid = 0, long CoreStartedAtMicroseconds = 0, string? TunName = null, string? TunCidr = null);
 [JsonSerializable(typeof(RecoveryJournal))]
 internal partial class HelperHostJson : JsonSerializerContext;
 
@@ -119,7 +119,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         var snapshots = native.ReadDnsSnapshots().Where(snapshot => snapshot.ServiceId == plan.HomeServiceId || snapshot.ServiceId == plan.NonHomeServiceId).ToArray();
         if (snapshots.Length != 2) throw new RuntimeFailureException("dns.snapshot");
         var dns = new MacDnsRecoverySnapshot(1, Guid.NewGuid(), DateTimeOffset.UtcNow, snapshots); dns.Validate();
-        HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns), HelperHostJson.Default.RecoveryJournal));
+        HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns, TunName: _tunName, TunCidr: _tunCidr), HelperHostJson.Default.RecoveryJournal));
         _dnsRestored = false; _failure = null;
         try
         {
@@ -132,7 +132,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             if (File.Exists(ControlSocket)) File.Delete(ControlSocket);
             _core = StartCore(directory, testOnly: false, _observer);
             var identity = native.ReadProcess(_core.Id);
-            HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns, _core.Id, identity.StartedAtMicroseconds), HelperHostJson.Default.RecoveryJournal));
+            HostFiles.AtomicWrite(native, JournalPath, JsonSerializer.SerializeToUtf8Bytes(new RecoveryJournal(dns, _core.Id, identity.StartedAtMicroseconds, _tunName, _tunCidr), HelperHostJson.Default.RecoveryJournal));
             _active = plan;
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(20));
             while (!native.IsTunTakeoverActive(_tunName, _tunCidr))
@@ -183,6 +183,13 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
             if (journal is not null) { journal.Dns.Validate(); native.RestoreDns(journal.Dns.Services); }
             return Task.CompletedTask;
         }).ConfigureAwait(false);
+        string? previousTun = journal?.TunName ?? _tunName, previousCidr = journal?.TunCidr ?? _tunCidr;
+        if (outcome.CoreStopped && previousTun is not null && previousCidr is not null)
+        {
+            // Never delete recovery evidence while this session's takeover still exists.
+            bool released = await RecoverySteps.WaitForReleaseAsync(() => !native.IsTunTakeoverActive(previousTun, previousCidr)).ConfigureAwait(false);
+            if (!released) outcome = outcome with { CoreStopped = false };
+        }
         _dnsRestored = outcome.DnsRestored;
         if (outcome.CoreStopped) _observer?.MarkUnavailable();
         if (outcome.CoreStopped) _active = null;
@@ -192,6 +199,7 @@ internal sealed class NativeRuntimeEnvironment(NativeMacPrivileges native, MacHe
         {
             File.Delete(JournalPath); HostFiles.SyncDirectory(MacHelperPaths.PrivateRoot);
         }
+        _tunName = null; _tunCidr = null; _failure = null;
     }
 
     public MacHelperStatus Inspect()

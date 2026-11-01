@@ -48,7 +48,7 @@ public sealed class ConnectionAttemptViewModel(Action retry) : Bindable
     }
     public void Complete(bool preview = false)
     {
-        IsRunning = false; HasFailed = false; Title = preview ? "模拟连接已完成" : "连接已确认"; Detail = preview ? "隔离内存适配器已完成流程；未启动真实 TUN。" : "后台服务已确认 Xray 与实际 TUN 接管。";
+        IsVisible = false; IsRunning = false; HasFailed = false; Title = preview ? "模拟连接已完成" : "连接已确认"; Detail = preview ? "隔离内存适配器已完成流程；未启动真实 TUN。" : "后台服务已确认 Xray 与实际 TUN 接管。";
         foreach (var step in Steps) step.Update("完成");
     }
     public void Fail(string detail, bool canceled = false)

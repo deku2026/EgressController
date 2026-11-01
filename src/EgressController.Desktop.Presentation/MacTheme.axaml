@@ -1,7 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="EgressController.Desktop.Presentation.MacTheme">
  <Styles.Resources>
-  <SolidColorBrush x:Key="Ink">#242D40</SolidColorBrush><SolidColorBrush x:Key="SecondaryInk">#657187</SolidColorBrush><SolidColorBrush x:Key="MutedInk">#8D97A9</SolidColorBrush>
-  <SolidColorBrush x:Key="Surface">#FFFFFF</SolidColorBrush><SolidColorBrush x:Key="Workspace">#F8F9FC</SolidColorBrush><SolidColorBrush x:Key="Sidebar">#F1F3F8</SolidColorBrush><SolidColorBrush x:Key="Line">#E9ECF2</SolidColorBrush>
+  <SolidColorBrush x:Key="Ink">#252A35</SolidColorBrush><SolidColorBrush x:Key="SecondaryInk">#6A7280</SolidColorBrush><SolidColorBrush x:Key="MutedInk">#8D97A9</SolidColorBrush>
+  <SolidColorBrush x:Key="Surface">#FFFFFF</SolidColorBrush><SolidColorBrush x:Key="Workspace">#F5F6F8</SolidColorBrush><SolidColorBrush x:Key="Sidebar">#ECEEF2</SolidColorBrush><SolidColorBrush x:Key="Line">#E7E9ED</SolidColorBrush>
   <SolidColorBrush x:Key="Accent">#4476DC</SolidColorBrush><SolidColorBrush x:Key="Home">#8763CD</SolidColorBrush><SolidColorBrush x:Key="NonHome">#218F9C</SolidColorBrush><SolidColorBrush x:Key="Proxy">#4178D7</SolidColorBrush>
   <SolidColorBrush x:Key="Success">#238467</SolidColorBrush><SolidColorBrush x:Key="Warning">#A46D25</SolidColorBrush><SolidColorBrush x:Key="Danger">#BE5261</SolidColorBrush>
   <SolidColorBrush x:Key="ConnectionRail">#F8FAFD</SolidColorBrush>
@@ -17,14 +17,18 @@
    <Style Selector="^:focus-visible"><Setter Property="BorderBrush" Value="#6993E2"/></Style>
   </ControlTheme>
   <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
-   <Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="BorderBrush" Value="#DDE2EC"/><Setter Property="BorderThickness" Value="1"/>
-   <Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="12,7"/><Setter Property="MinHeight" Value="32"/><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="Medium"/>
+   <Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="BorderBrush" Value="#E6E8EE"/><Setter Property="BorderThickness" Value="1"/>
+   <Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="12,6"/><Setter Property="MinHeight" Value="32"/><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="Medium"/>
    <Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="FocusAdorner" Value="{x:Null}"/>
    <Setter Property="Template"><ControlTemplate><Border Name="ButtonSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/></Border></ControlTemplate></Setter>
    <Style Selector="^:pointerover"><Setter Property="Background" Value="#F0F3FA"/><Setter Property="BorderBrush" Value="#CCD5E7"/></Style>
    <Style Selector="^:pressed"><Setter Property="Background" Value="#E2E9F7"/><Setter Property="BorderBrush" Value="#ACBDDF"/></Style>
    <Style Selector="^:focus-visible"><Setter Property="BorderBrush" Value="#4178D7"/><Setter Property="BorderThickness" Value="2"/></Style>
    <Style Selector="^:disabled"><Setter Property="Foreground" Value="#929BAA"/><Setter Property="Background" Value="#F3F5F8"/><Setter Property="BorderBrush" Value="#E7EAF0"/></Style>
+  </ControlTheme>
+  <ControlTheme x:Key="GroupRowContainer" TargetType="ListBoxItem">
+   <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Focusable" Value="False"/>
+   <Setter Property="Template"><ControlTemplate><ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" HorizontalContentAlignment="Stretch"/></ControlTemplate></Setter>
   </ControlTheme>
   <ControlTheme x:Key="QuietRow" TargetType="ListBoxItem">
    <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="FocusAdorner" Value="{x:Null}"/>
@@ -34,7 +38,7 @@
  </Styles.Resources>
  <Style Selector="Window"><Setter Property="FontFamily" Value="fonts:Inter#Inter"/><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="Background" Value="{StaticResource Workspace}"/></Style>
  <Style Selector="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/></Style>
- <Style Selector="TextBlock.title"><Setter Property="FontSize" Value="25"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="LetterSpacing" Value="-0.7"/></Style>
+ <Style Selector="TextBlock.title"><Setter Property="FontSize" Value="21"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="LetterSpacing" Value="-0.7"/></Style>
  <Style Selector="TextBlock.section"><Setter Property="FontSize" Value="14"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
  <Style Selector="TextBlock.caption"><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="{StaticResource SecondaryInk}"/></Style>
  <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="{StaticResource SecondaryInk}"/><Setter Property="FontSize" Value="12"/></Style>
@@ -42,16 +46,16 @@
  <Style Selector="TextBlock.numeric"><Setter Property="FontFamily" Value="fonts:Inter#Inter"/></Style>
  <Style Selector="Border.card"><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="11"/><Setter Property="Padding" Value="20"/></Style>
  <Style Selector="Border.inset"><Setter Property="Background" Value="#F6F8FC"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="12"/></Style>
- <Style Selector="Border.tableheader"><Setter Property="Background" Value="#F8F9FC"/><Setter Property="BorderBrush" Value="#EBEEF3"/><Setter Property="BorderThickness" Value="0,1"/><Setter Property="Padding" Value="16,10"/></Style>
+ <Style Selector="Border.tableheader"><Setter Property="Background" Value="#F5F6F8"/><Setter Property="BorderBrush" Value="#EBEEF3"/><Setter Property="BorderThickness" Value="0,1"/><Setter Property="Padding" Value="16,10"/></Style>
  <Style Selector="Button.primary"><Setter Property="Background" Value="#4476DC"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderBrush" Value="#4476DC"/></Style>
  <Style Selector="Button.primary:pointerover"><Setter Property="Background" Value="#3567CC"/><Setter Property="BorderBrush" Value="#3567CC"/></Style>
  <Style Selector="Button.primary:pressed"><Setter Property="Background" Value="#2758B6"/></Style>
  <Style Selector="Button.primary:disabled"><Setter Property="Background" Value="#CDD8EE"/><Setter Property="BorderBrush" Value="#CDD8EE"/><Setter Property="Foreground" Value="#F8FAFF"/></Style>
  <Style Selector="Button.quiet"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#6B7890"/></Style>
  <Style Selector="Button.link"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#4476DC"/><Setter Property="Padding" Value="3,2"/><Setter Property="MinHeight" Value="24"/></Style>
- <Style Selector="Button.navigation"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="13,11"/><Setter Property="Foreground" Value="#657187"/><Setter Property="FontSize" Value="13"/></Style>
+ <Style Selector="Button.navigation"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="11,9"/><Setter Property="Foreground" Value="#6A7280"/><Setter Property="FontSize" Value="13"/></Style>
  <Style Selector="Button.navigation:pointerover"><Setter Property="Background" Value="#E6EBF5"/></Style>
- <Style Selector="Button.navigation.active"><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#E3E8F2"/><Setter Property="Foreground" Value="#386DD2"/></Style>
+ <Style Selector="Button.navigation.active"><Setter Property="Background" Value="#DBE4F7"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#386DD2"/></Style>
  <Style Selector="Button.route"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="8,5"/><Setter Property="MinHeight" Value="28"/><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="#788298"/><Setter Property="CornerRadius" Value="5"/></Style>
  <Style Selector="Button.route.active"><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#E1E5ED"/></Style>
  <Style Selector="Button.route.home.active"><Setter Property="Foreground" Value="#7952C1"/></Style><Style Selector="Button.route.nonhome.active"><Setter Property="Foreground" Value="#18848F"/></Style><Style Selector="Button.route.proxy.active"><Setter Property="Foreground" Value="#386DCE"/></Style>
@@ -65,12 +69,18 @@
  <Style Selector="TabItem"><Setter Property="FontSize" Value="12"/><Setter Property="Padding" Value="12,9"/></Style>
  <Style Selector="Border.group-card"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="11"/></Style>
  <Style Selector="Border.group-badge"><Setter Property="Background" Value="{StaticResource ConnectionSelection}"/><Setter Property="CornerRadius" Value="4"/><Setter Property="Padding" Value="6,2"/></Style>
- <Style Selector="Button.group-header"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="10,12"/></Style>
+ <Style Selector="Button.group-header"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Padding" Value="3,4"/></Style>
  <Style Selector="Button.group-header:pointerover"><Setter Property="Background" Value="{StaticResource Workspace}"/></Style>
- <Style Selector="Button.group-member"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="{StaticResource Workspace}"/><Setter Property="Padding" Value="12,10"/></Style>
+ <Style Selector="Button.group-member"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="{StaticResource Workspace}"/><Setter Property="Padding" Value="10,8"/></Style>
  <Style Selector="Button.group-member.selected"><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/><Setter Property="Background" Value="{StaticResource ConnectionSelection}"/></Style>
  <Style Selector="Button.group-member:pointerover"><Setter Property="Background" Value="{StaticResource GroupHover}"/><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/></Style>
  <Style Selector="Button.group-member:pressed"><Setter Property="Background" Value="{StaticResource GroupPressed}"/><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/></Style>
  <Style Selector="Button.group-member:focus-visible"><Setter Property="BorderBrush" Value="{StaticResource Proxy}"/><Setter Property="BorderThickness" Value="2"/></Style>
  <Style Selector="Button.group-member:disabled"><Setter Property="Opacity" Value="0.55"/></Style>
+ <Style Selector="Button.soft"><Setter Property="Background" Value="#EDF2FB"/><Setter Property="Foreground" Value="{StaticResource Proxy}"/><Setter Property="BorderBrush" Value="Transparent"/></Style>
+ <Style Selector="Button.icon"><Setter Property="Width" Value="30"/><Setter Property="Height" Value="30"/><Setter Property="Padding" Value="6"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="CornerRadius" Value="8"/></Style>
+ <Style Selector="Button.icon:pointerover"><Setter Property="Background" Value="#EAF0FB"/></Style>
+ <Style Selector="Button.icon:pressed"><Setter Property="Background" Value="#DAE5F7"/></Style>
+ <Style Selector="Button.icon:disabled"><Setter Property="Opacity" Value="0.45"/></Style>
+ <Style Selector="Border.count-pill"><Setter Property="Background" Value="#EFF2F7"/><Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="7,3"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
 </Styles>

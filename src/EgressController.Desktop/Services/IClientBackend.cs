@@ -47,6 +47,13 @@ public interface IClientBackend : IAsyncDisposable
         var probes = await ProbeAsync(document, options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);
         return probes.Where(probe => requests.Any(request => request.NodeId == probe.NodeId && request.TestUrl == probe.TestUrl)).ToArray();
     }
+    async Task<IReadOnlyList<GroupProbe>> ProbeMembersWithProgressAsync(MacPolicyDocument document, XrayCompileOptions options,
+        IReadOnlyList<RequiredGroupProbe> requests, IProgress<GroupProbe> progress, CancellationToken cancellationToken = default)
+    {
+        var results = await ProbeMembersAsync(document, options, requests, cancellationToken);
+        foreach (var result in results) progress.Report(result);
+        return results;
+    }
     Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options,
         CancellationToken cancellationToken = default) => ProbeAsync(document,
             options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken);

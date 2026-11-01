@@ -31,6 +31,7 @@ public sealed class ProductionClientBackend : IClientBackend
     public void RecordFailure(string operation, Exception error) => _diagnostics.Failure(operation, error);
     private MacRuntimeLaunch? _launch;
     private bool _disposed;
+    private bool _recoveryRequired;
     private int _savedResourcePort = 17890;
     private readonly ConnectionObservationMapper _observations = new();
     private IProgress<ClientOperationProgress>? _progress;
@@ -156,6 +157,14 @@ public sealed class ProductionClientBackend : IClientBackend
         return await new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe explicit group members without TUN"), Path.Combine(_root, "probes")))
             .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requested: requests).ConfigureAwait(false);
     }
+    public async Task<IReadOnlyList<GroupProbe>> ProbeMembersWithProgressAsync(MacPolicyDocument document, XrayCompileOptions options,
+        IReadOnlyList<RequiredGroupProbe> requests, IProgress<GroupProbe> progress, CancellationToken cancellationToken = default)
+    {
+        await CheckInterfaceIdentityAsync(options.Interfaces.Single(item => item.StableId == document.Interfaces.NonHomeId), cancellationToken).ConfigureAwait(false);
+        var core = await PrepareCoreAsync(cancellationToken).ConfigureAwait(false);
+        return await Task.Run(() => new ObservatoryProbes(new XrayObservatoryProcess(() => _gate.Require("probe explicit group members without TUN"), Path.Combine(_root, "probes")))
+            .ProbeAsync(document, options, core.ExecutablePath, cancellationToken, requested: requests, progress: progress), cancellationToken).ConfigureAwait(false);
+    }
     public async Task<IReadOnlyList<GroupProbe>> PrepareRequiredProbesAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
     {
         if (!RequiredGroupProbes.NeedsProbes(document, options)) return options.Probes.ToArray();
@@ -182,6 +191,7 @@ public sealed class ProductionClientBackend : IClientBackend
             && !await _coordinator.StopAsync("用户重试连接：助手已确认核心或 TUN 不可用", cancellationToken).ConfigureAwait(false))
             throw new RuntimeFailureException("recovery.failed");
         Report(ConnectionAttemptStage.Bootstrap, $"建立 TUN 与 Xray SOCKS5 127.0.0.1:{document.Defaults.ResourceProxyPort}；规则未就绪前暂停普通流量。");
+        _recoveryRequired = true;
         await _coordinator.BeginResourceBootstrapAsync(document, options, cancellationToken).ConfigureAwait(false);
     }
     public Task PrepareResourceProxyAsync(MacPolicyDocument document, XrayCompileOptions options, CancellationToken cancellationToken = default)
@@ -228,6 +238,7 @@ public sealed class ProductionClientBackend : IClientBackend
             await EnsureHelperAsync(core, cancellationToken).ConfigureAwait(false);
             await _drafts.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
             Report(ConnectionAttemptStage.Connecting, "校验助手配置，等待 Xray、实际 TUN 路由和 DNS 接管确认。");
+            _recoveryRequired = true;
             var result = await _coordinator.ApplyAsync(snapshot, options, assets, "用户应用生产策略", cancellationToken).ConfigureAwait(false);
             if (result.Succeeded) _savedResourcePort = snapshot.Defaults.ResourceProxyPort;
             if (result.Succeeded && result.GenerationId is { } appliedGeneration)
@@ -245,13 +256,18 @@ public sealed class ProductionClientBackend : IClientBackend
         try
         {
             if (_coordinator.Applied is null) return new(ApplyDisposition.Rejected, null, [new("routing.stopped", "连接已停止，分组选择保留在草稿中。")]);
-            var result = await _coordinator.ApplyAsync(document, options, assets, "已应用分组策略的定时测速更新", cancellationToken).ConfigureAwait(false);
+            var result = await _coordinator.ApplyAsync(document, options, assets, "分组成员或自动选择策略更新", cancellationToken).ConfigureAwait(false);
             if (result.Succeeded && result.GenerationId is { } generation) _observations.RememberApplied(generation, document);
             return result;
         }
         finally { _apply.Release(); }
     }
-    public Task<bool> StopAsync(CancellationToken cancellationToken = default) => _coordinator.StopAsync("用户停止网络接管", cancellationToken);
+    public async Task<bool> StopAsync(CancellationToken cancellationToken = default)
+    {
+        bool restored = await _coordinator.StopAsync("用户停止网络接管", cancellationToken).ConfigureAwait(false);
+        if (restored) _recoveryRequired = false;
+        return restored;
+    }
     public async Task<ClientRuntimeState> ReadStatusAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -259,6 +275,7 @@ public sealed class ProductionClientBackend : IClientBackend
             if (!File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath))
                 return new(false, true, false, "首次连接时请求安装特权助手；当前未接管系统网络。");
             var state = await _helper.InspectAsync(cancellationToken).ConfigureAwait(false);
+            if (MacRuntimeReadiness.RequiresExitRecovery(false, state)) _recoveryRequired = true;
             bool healthy = state.Running && state.TunTakenOver && state.Failure is null;
             string observation = $"installed={state.Installed}; running={state.Running}; tun={state.TunTakenOver}; dns-restored={state.DnsRestored}; failure={state.Failure}";
             if (_lastRuntimeObservation != observation) { _lastRuntimeObservation = observation; _diagnostics.Record("helper.state", observation); }
@@ -277,13 +294,13 @@ public sealed class ProductionClientBackend : IClientBackend
                 _coordinator.Applied is null && !File.Exists(MacHelperEndpoint.Installed.ExpectedHelperPath)
                     ? Task.FromResult(true)
                     : _coordinator.StopAsync("用户确认重置配置：停止接管并恢复网络", token), _drafts.ResetAsync, cancellationToken).ConfigureAwait(false);
-            _launch = null; _savedResourcePort = new MacPolicyDocument().Defaults.ResourceProxyPort;
+            _recoveryRequired = false; _launch = null; _savedResourcePort = new MacPolicyDocument().Defaults.ResourceProxyPort;
             _lastLoggedStage = null;
             _diagnostics.Record("configuration.reset", "network restored; draft backed up; empty setup saved; caches retained");
         }
         finally { _apply.Release(); }
     }
-    public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default) => _drafts.SaveAsync(document, cancellationToken);
+    public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default) => Task.Run(() => _drafts.SaveAsync(document, cancellationToken), cancellationToken);
     public Task<ConnectionWorkspaceSnapshot> ReadConnectionsAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -316,9 +333,11 @@ public sealed class ProductionClientBackend : IClientBackend
     }
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return; _disposed = true;
-        try { if (_coordinator.Applied is not null || _helper.Status.Running) await StopAsync().ConfigureAwait(false); }
-        finally { await _helper.DisposeAsync().ConfigureAwait(false); }
+        if (_disposed) return;
+        // Even a stopped core may leave a recovery journal / DNS pending after an earlier failure.
+        if (MacRuntimeReadiness.RequiresExitRecovery(_recoveryRequired || _coordinator.Applied is not null, _helper.Status) && !await StopAsync().ConfigureAwait(false))
+            throw new IOException("Network restoration was not confirmed; keep the authenticated helper connection for retry.");
+        await _helper.DisposeAsync().ConfigureAwait(false); _disposed = true;
     }
 
     private async Task EnsureHelperAsync(PreparedCoreRelease core, CancellationToken cancellationToken)
@@ -384,7 +403,7 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         string product = item.BundleIdentifier switch { "com.openai.chat" or "com.openai.chatgpt" => "openai", "com.openai.codex" => "codex",
             "com.anthropic.claudefordesktop" => "claude", "com.todesktop.230313mzl4w4u92" => "cursor", "com.google.Chrome" => "chrome", "com.apple.Safari" => "safari",
-            "com.microsoft.VSCode" => "vscode", "notion.id" => "notion", "com.tinyspeck.slackmacgap" => "slack", "com.spotify.client" => "spotify", _ => "app" };
+            "com.microsoft.VSCode" => "vscode", "notion.id" => "notion", "com.tinyspeck.slackmacgap" => "slack", "com.spotify.client" => "spotify", "ru.keepcoder.Telegram" or "org.telegram.desktop" => "telegram", "com.hnc.Discord" => "discord", _ => "app" };
         return new("app-" + Digest(item.Id)[..24], item.DisplayName, product, "macOS App", item.BundlePath, item.PrimaryExecutablePath, item.ExecutablePaths, false, item.BundleIdentifier);
     }
     private static string SafeId(string value) => value.Length <= 100 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.') ? value : "catalog-" + Digest(value)[..24];

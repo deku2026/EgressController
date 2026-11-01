@@ -6,7 +6,10 @@ namespace EgressController.Desktop.ViewModels;
 public sealed partial class ShellViewModel
 {
     private List<GroupRow> _groupRows = [];
-    private bool _managingGroups, _maintainingGroups;
+    private bool _managingGroups, _maintainingGroups, _showSubscription;
+    public bool ShowSubscription { get => _showSubscription; set => Set(ref _showSubscription, value); }
+    public UiCommand ToggleSubscriptionCommand => new(() => ShowSubscription = !ShowSubscription);
+    private IReadOnlyList<GroupRow> _visibleGroups = [];
     private MacPolicyDocument? _appliedGroups;
     private CancellationTokenSource? _groupMaintenanceCancellation;
     private TaskCompletionSource? _groupMaintenanceCompletion;
@@ -14,21 +17,24 @@ public sealed partial class ShellViewModel
     public bool ManagingGroups { get => _managingGroups; set => Set(ref _managingGroups, value); }
     public UiCommand ManageGroupsCommand { get; private set; } = null!;
     public IReadOnlyList<GroupRow> AllGroups => _groupRows;
-    public IReadOnlyList<GroupRow> VisibleGroups => _groupRows.Where(row => row.Retained && (Matches(row.Name, NodeQuery)
-        || GroupGraph.Leaves(row.Id, Document).Any(id => Matches(GroupGraph.Name(id, Document), NodeQuery)))).ToArray();
+    public IReadOnlyList<GroupRow> VisibleGroups => _visibleGroups;
     public bool NoGroupsMatch => VisibleGroups.Count == 0;
     public string GroupCountLabel => $"{_groupRows.Count(row => row.Retained)} 个已保留分组 · {Document.Nodes.Count(node => node.IsSupported)} 个节点";
     public string AutomaticDownloadDescription => "下载出口自动从默认分组中选择测速成功的代理节点，跳过 DIRECT；无需另设下载代理。";
     private void RebuildGroups()
     {
         var previous = _groupRows.ToDictionary(row => row.Id, StringComparer.Ordinal);
-        _groupRows = Document.Groups.Select(group => { if (previous.TryGetValue(group.Id, out var row)) { row.Update(group); return row; } return new GroupRow(this, group); }).ToList();
+        var rows = Document.Groups.Select(group => { if (previous.TryGetValue(group.Id, out var row)) { row.Update(group); return row; } return new GroupRow(this, group); }).ToList();
+        if (!_groupRows.SequenceEqual(rows)) { _groupRows = rows; Raise(nameof(AllGroups)); }
         PublishGroups();
     }
     private void PublishGroups()
     {
         foreach (var row in _groupRows) row.Refresh();
-        foreach (string property in new[] { nameof(AllGroups), nameof(VisibleGroups), nameof(NoGroupsMatch), nameof(GroupCountLabel) }) Raise(property);
+        var visible = _groupRows.Where(row => row.Retained && (Matches(row.Name, NodeQuery)
+            || GroupGraph.Leaves(row.Id, Document).Any(id => Matches(GroupGraph.Name(id, Document), NodeQuery)))).ToArray();
+        if (!_visibleGroups.SequenceEqual(visible)) { _visibleGroups = visible; Raise(nameof(VisibleGroups)); }
+        Raise(nameof(NoGroupsMatch)); Raise(nameof(GroupCountLabel));
     }
     public void GroupRetentionChanged() { RebuildProjection(); StateChanged(); }
     public string? ResolveGroupMember(ProxyGroup group)
@@ -59,15 +65,7 @@ public sealed partial class ShellViewModel
     private static IReadOnlyList<RequiredGroupProbe> GroupRequests(IEnumerable<ProxyGroup> groups, MacPolicyDocument document) => groups
         .SelectMany(group => GroupGraph.Leaves(group.Id, document).Where(id => id != GroupGraph.Reject)
             .Select(id => new RequiredGroupProbe(id, group.TestUrl))).Distinct().ToArray();
-    public Task TestGroupAsync(string id) => RunOperationAsync(async () =>
-    {
-        var group = Document.Groups.Single(group => group.Id == id);
-        Notice = $"正在测试 {group.Name}…";
-        var probes = await _backend.ProbeMembersAsync(CopyDocument(Document), CompileOptions(), GroupRequests([group], Document), ActionToken);
-        MergeProbes(probes); _lastGroupTests[id] = _backend.Now;
-        await ApplyAutomaticObservationsAsync(ActionToken);
-        Notice = $"{group.Name} 测速完成 · {_backend.Now.ToLocalTime():HH:mm:ss}";
-    });
+    public Task TestGroupAsync(string id) => RunGroupProbeAsync(id);
     public Task SelectGroupMemberAsync(string groupId, string memberId) => RunOperationAsync(async () =>
     {
         var group = Document.Groups.Single(group => group.Id == groupId);
@@ -79,23 +77,30 @@ public sealed partial class ShellViewModel
         await _backend.SaveDraftAsync(CopyDocument(Document), ActionToken);
         if (!PreviewRunning || _appliedGroups is null || pending) { Notice = "分组选择已保存，连接后生效。"; return; }
         var candidate = CopyDocument(Document);
-        var result = await _backend.ApplyAsync(candidate, CompileOptions(candidate), _prepared.Assets, ActionToken);
+        var result = await _backend.UpdateGroupsAsync(candidate, CompileOptions(candidate), _prepared.Assets, ActionToken);
         if (result.Succeeded) { RememberAppliedGroups(candidate); HasChanges = false; Notice = "分组已切换，新连接立即使用所选出口。"; }
         else CurrentIssue = string.Join(" ", result.Diagnostics.Select(item => item.Message));
     });
-    public Task SetGroupStrategyAsync(string id, GroupKind kind) => RunOperationAsync(async () =>
+    public async Task SetGroupStrategyAsync(string id, GroupKind kind)
     {
-        bool pending = HasChanges;
-        var group = Document.Groups.Single(group => group.Id == id); group.Kind = kind; group.StrategyOverridden = true;
-        StateChanged(); PublishGroups();
-        var probes = await _backend.ProbeMembersAsync(CopyDocument(Document), CompileOptions(), GroupRequests([group], Document), ActionToken);
-        MergeProbes(probes);
-        await _backend.SaveDraftAsync(CopyDocument(Document), ActionToken);
-        if (!PreviewRunning || _appliedGroups is null || pending) return;
-        var candidate = CopyDocument(Document); var result = await _backend.ApplyAsync(candidate, CompileOptions(candidate), _prepared.Assets, ActionToken);
-        if (result.Succeeded) { RememberAppliedGroups(candidate); HasChanges = false; Notice = "分组策略已生效，将按配置间隔自动检查。"; }
-        else CurrentIssue = string.Join(" ", result.Diagnostics.Select(item => item.Message));
-    });
+        bool pending = HasChanges, saved = false; long revision = -1;
+        await RunOperationAsync(async () =>
+        {
+            var group = Document.Groups.Single(group => group.Id == id); group.Kind = kind; group.StrategyOverridden = true;
+            StateChanged(); PublishGroups(); revision = _revision;
+            await PersistDraftAsync(ActionToken); saved = true;
+        });
+        if (!saved) return;
+        if (!await RunGroupProbeAsync(id)) return;
+        if (revision != _revision || !PreviewRunning || _appliedGroups is null || pending || _closing) return;
+        await RunOperationAsync(async () =>
+        {
+            var candidate = CopyDocument(Document);
+            var result = await _backend.UpdateGroupsAsync(candidate, CompileOptions(candidate), _prepared.Assets, ActionToken);
+            if (result.Succeeded) { RememberAppliedGroups(candidate); HasChanges = false; Notice = "分组策略已生效，将按配置间隔自动检查。"; }
+            else CurrentIssue = string.Join(" ", result.Diagnostics.Select(item => item.Message));
+        });
+    }
     private void RememberAppliedGroups(MacPolicyDocument document)
     {
         _appliedGroups = CopyDocument(document);
@@ -110,7 +115,7 @@ public sealed partial class ShellViewModel
     /// <summary>Independent policy timer. Status/connection observation failure is never an input to selection.</summary>
     public async Task MaintainAutomaticGroupsAsync()
     {
-        if (_disposed || IsBusy || _maintainingGroups || !PreviewRunning || _appliedGroups is null) return;
+        if (_disposed || IsBusy || IsProbing || _maintainingGroups || !PreviewRunning || _appliedGroups is null) return;
         var due = _appliedGroups.Groups.Where(group => group.Kind is GroupKind.UrlTest or GroupKind.Fallback
             && (!_lastGroupTests.TryGetValue(group.Id, out var last) || _backend.Now - last >= TimeSpan.FromSeconds(Math.Max(1, group.IntervalSeconds)))).ToArray();
         if (due.Length == 0) return;

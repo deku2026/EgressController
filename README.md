@@ -14,6 +14,8 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 管理员密码只授权网络助手安装，Rider 和主界面保持普通用户权限，无需以管理员身份打开 Rider。失败时向导顶部直接显示错误，可点击“查看诊断”或“打开日志目录”；日志位于 `~/Library/Logs/EgressController/lifecycle.log`，包含安装阶段、系统退出码和连接恢复结果。
 
+勾选应用后点击“继续”会扫描并保存固定清单；日常修改自动保存草稿，网络策略仍需应用。退出前等待正在进行的操作结束，再确认网络恢复；恢复失败保留窗口和重试入口。
+
 **从头设置**：在“设置 → 网络与 TUN”或连接失败提示中点击“重置并重新设置”。确认后先停止接管、恢复网络，再备份当前配置并清空网卡、订阅、分组、应用和规则选择。缓存、日志及用量记录保留；不会自动连接。恢复或保存失败时保留当前配置并显示原因。
 
 ![重置确认（隔离预览）](docs/images/mac-reset-setup.png)
@@ -34,7 +36,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 
 订阅导入后立即显示分组、图标与成员数量，首次设置可勾选需要保留的分组；应用与规则只需选择分组。未保留的组仍保存为嵌套依赖，不会破坏已有引用。只有节点的订阅会生成默认自动组。
 
-“节点与分组”提供可展开卡片、组内成员选择、单组／全部延迟测速、自动优选和故障转移。新手动组采用订阅的 `default-selected` 或第一个声明成员；更新保留已有选择，缺失成员明确提示。每个组都可手动选择 DIRECT。测速地址、间隔和容差沿用配置，缺少地址时使用 `https://www.gstatic.com/generate_204`。
+“节点与分组”提供紧凑卡片、品牌图标、自适应成员网格、单组／全部 HTTP 延迟测速、自动优选和故障转移。测速通过非家宽物理出口，不依赖 TUN；结果逐批更新，可取消，期间仍能切换页面。已移除或不支持的成员默认隐藏，失效的当前选择会保留提示。新手动组采用订阅的 `default-selected` 或第一个声明成员；更新保留已有选择，缺失成员明确提示。每个组都可手动选择 DIRECT。测速地址、间隔和容差沿用配置，缺少地址时使用 `https://www.gstatic.com/generate_204`。
 
 普通分组切换、自动优选和规则路由更新即时作用于新连接，保留现有 TUN；已有连接和历史出口不重标。节点传输、网卡或 DNS 等运行配置变化仍需要重新配置内核。自动测速失败保留当前出口，不改变保护状态。
 
@@ -46,7 +48,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 
 ![连接活动（隔离合成样本）](docs/images/mac-connections.png)
 
-连接流程显示检查策略、内置 Xray、授权助手、建立 TUN、准备规则、应用分流六个阶段。规则准备期间普通流量暂缓；端口占用、TUN 占用、出口连接失败、授权失败和接管超时都有明确提示与重试入口。
+连接期间显示检查策略、内置 Xray、授权助手、建立 TUN、准备规则、应用分流六个阶段；成功后收起进度面板。规则准备期间普通流量暂缓；端口占用、TUN 占用、出口连接失败、授权失败和接管超时都有明确提示与重试入口。
 
 ![离线物理出口不阻止 TUN（隔离验证）](docs/images/mac-tun-offline-started.png)
 
@@ -61,7 +63,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 ```sh
 # 构建机获取固定发布归档；不会启动 Xray/TUN。
 gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
-python3 build/Verify-Mac.py --version 0.1.5
+python3 build/Verify-Mac.py --version 0.1.6
 ```
 
 **开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、内置 Xray 命令行与模拟 Unix RPC 的规则资源回归检查、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。
@@ -83,6 +85,7 @@ dotnet run --project tools/EgressController.MacPreview -- --screenshots artifact
 - [生产运行、持久化与恢复](docs/mac-runtime.md)
 - [macOS C ABI 与特权助手](docs/macos-native.md)
 - [管理员授权、安装错误与日志](docs/mac-helper-install-diagnostics.md)
+- [界面与可靠性回归记录](docs/mac-workspace-reliability.md)
 - [实施和验收边界](docs/mac-implementation-plan.md)
 
 旧 Windows 代码隔离在 `EgressController.Windows.slnx`，不参与默认产品构建。

@@ -7,8 +7,9 @@ public static class GroupArtwork
     {
         string hint = name.ToLowerInvariant();
         if (Uri.TryCreate(icon, UriKind.Absolute, out var uri)) hint += " " + Path.GetFileNameWithoutExtension(uri.AbsolutePath).ToLowerInvariant();
-        foreach (string product in new[] { "claude", "gemini", "openai", "github", "spotify", "youtube", "google", "apple", "netflix", "telegram", "notion", "slack", "codex" })
+        foreach (string product in new[] { "claude", "gemini", "openai", "github", "spotify", "youtube", "google", "apple", "netflix", "telegram", "notion", "slack", "codex", "tiktok", "microsoft", "paypal", "twitter", "discord", "steam" })
             if (hint.Contains(product, StringComparison.Ordinal)) return product;
+        if (hint is "x" || hint.Contains("twitter") || hint.Contains("推特")) return "twitter";
         return hint.Contains("gpt", StringComparison.Ordinal) ? "openai" : "domain";
     }
 }

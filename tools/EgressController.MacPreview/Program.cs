@@ -52,6 +52,7 @@ internal static class Program
         }
         ResetInteractions(directory);
         GroupInteractions(directory);
+        GroupRenderingChecks.Run(directory);
         BootstrapSearchInteractions(directory);
         Interactions(directory);
         ProductionCompositionChecks.Run(directory);
@@ -118,9 +119,8 @@ internal static class Program
         Save(window, Path.Combine(directory, "nodes-search-normal.png")); window.Width = 980; window.Height = 700; Save(window, Path.Combine(directory, "nodes-search-compact.png"));
         search.Text = "no-match"; Flush(); Check(vm.NoNodesMatch, "Node search must show an explicit empty state."); Save(window, Path.Combine(directory, "nodes-search-empty.png"));
         search.Text = "";
-        var expander = Find<Expander>(window, "SubscriptionExpander");
-        expander.IsExpanded = true; Flush(); Save(window, Path.Combine(directory, "nodes-local-import-compact.png"));
-        expander.IsExpanded = false; vm.PageIndex = 1; vm.AddAppsCommand.Execute(null); Flush();
+        vm.ShowSubscription = true; Flush(); Save(window, Path.Combine(directory, "nodes-local-import-compact.png"));
+        vm.ShowSubscription = false; vm.PageIndex = 1; vm.AddAppsCommand.Execute(null); Flush();
         var catalogSearch = Find<TextBox>(window, "CatalogSearch"); catalogSearch.Focus(); window.KeyTextInput("Safari"); Flush();
         Check(vm.VisibleCatalog.Count == 1 && vm.VisibleCatalog[0].Name == "Safari", "Safari search did not retain the application row.");
         Save(window, Path.Combine(directory, "safari-search-compact.png")); window.Width = 1260; window.Height = 860; Save(window, Path.Combine(directory, "safari-search-normal.png"));

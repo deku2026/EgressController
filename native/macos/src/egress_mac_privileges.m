@@ -170,6 +170,34 @@ int32_t egress_mac_write_dns(const uint8_t *json, size_t length, const char *ser
         }
         if (ok) ok = SCPreferencesCommitChanges(preferences) && SCPreferencesApplyChanges(preferences);
         SCPreferencesUnlock(preferences); CFRelease(preferences);
+        // Reopen the committed store; a successful setter is not proof that the exact saved
+        // protocol presence, enabled state and dictionary have been restored.
+        if (ok && restore) {
+            SCPreferencesRef verify = SCPreferencesCreate(NULL, CFSTR("EgressController.VerifyRecovery"), NULL);
+            if (verify == NULL) ok = NO;
+            else {
+                for (NSDictionary *snapshot in snapshots) {
+                    SCNetworkServiceRef service = SCNetworkServiceCopy(verify, (__bridge CFStringRef)snapshot[@"serviceId"]);
+                    if (service == NULL) { ok = NO; break; }
+                    SCNetworkProtocolRef protocol = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeDNS);
+                    BOOL existed = [snapshot[@"protocolWasPresent"] boolValue];
+                    if ((protocol != NULL) != existed) ok = NO;
+                    if (protocol != NULL && existed) {
+                        id expected = nil; NSString *encoded = snapshot[@"originalConfigurationPlistBase64"];
+                        if ([encoded isKindOfClass:[NSString class]]) {
+                            NSData *data = [[NSData alloc] initWithBase64EncodedString:encoded options:0];
+                            expected = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:nil];
+                        }
+                        id actual = (__bridge id)SCNetworkProtocolGetConfiguration(protocol);
+                        ok = ok && SCNetworkProtocolGetEnabled(protocol) == [snapshot[@"protocolWasEnabled"] boolValue]
+                            && ((actual == nil && expected == nil) || [actual isEqual:expected]);
+                    }
+                    if (protocol != NULL) CFRelease(protocol); CFRelease(service);
+                    if (!ok) break;
+                }
+                CFRelease(verify);
+            }
+        }
         return ok ? EGRESS_MAC_OK : EGRESS_MAC_IO;
     } @catch (NSException *exception) { (void)exception; return EGRESS_MAC_INTERNAL; } }
 }

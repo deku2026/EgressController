@@ -16,14 +16,14 @@ public interface IObservatoryProcess
 public sealed class ObservatoryProbes(IObservatoryProcess process)
 {
     public async Task<IReadOnlyList<GroupProbe>> ProbeAsync(MacPolicyDocument document, XrayCompileOptions options,
-        string executable, CancellationToken cancellationToken = default, bool requiredOnly = false, IReadOnlyList<RequiredGroupProbe>? requested = null)
+        string executable, CancellationToken cancellationToken = default, bool requiredOnly = false, IReadOnlyList<RequiredGroupProbe>? requested = null, IProgress<GroupProbe>? progress = null)
     {
         var results = new List<GroupProbe>();
         var observations = options.Probes.ToList();
         var working = new XrayCompileOptions { Interfaces = options.Interfaces.ToList(), Probes = observations,
             Now = options.Now, ProbeMaxAge = options.ProbeMaxAge, PreparedRuleSources = options.PreparedRuleSources.ToList(),
             ChinaGeoSiteFile = options.ChinaGeoSiteFile, ChinaGeoIpFile = options.ChinaGeoIpFile, ChinaTag = options.ChinaTag };
-        using var throttle = new SemaphoreSlim(3, 3);
+        using var throttle = new SemaphoreSlim(6, 6);
         var urls = document.Groups.Select(group => group.TestUrl).Distinct(StringComparer.Ordinal).ToArray();
         if (urls.Length == 0) urls = ["https://www.gstatic.com/generate_204"];
         var attempted = new HashSet<(string NodeId, string Url)>();
@@ -39,14 +39,7 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                 try
                 {
                     string outbound = item.NodeId == GroupGraph.Direct ? "nonhome" : item.NodeId == GroupGraph.Reject ? "blocked" : item.NodeId;
-                    var draft = PolicyYaml.Read(PolicyYaml.Write(document)).Document!;
-                    draft.Applications.Clear(); draft.RuleSets.Clear();
-                    // Internal health requests still pass the public group-only route contract.
-                    string probeGroupId = "probe-selector";
-                    while (draft.Nodes.Any(node => node.Id == probeGroupId) || draft.Groups.Any(group => group.Id == probeGroupId) || draft.Providers.Any(provider => provider.Id == probeGroupId)) probeGroupId += "-x";
-                    draft.Groups.Add(new() { Id = probeGroupId, Name = "Internal probe selector", Kind = GroupKind.Select,
-                        MemberIds = [item.NodeId], SelectedMemberId = item.NodeId });
-                    draft.Defaults.Global = ExitChoice.Proxy(probeGroupId);
+                    var draft = ProbeDocument(document, item.NodeId);
                     var compiled = XrayConfigCompiler.Compile(draft, working);
                     ObservatoryResult measured = new(false, 0);
                     if (compiled.IsSuccess)
@@ -66,7 +59,9 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
                         };
                         measured = await process.RunAsync(executable, root.ToJsonString(), outbound, cancellationToken).ConfigureAwait(false);
                     }
-                    lock (results) results.Add(new(item.NodeId, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.TestUrl));
+                    var observation = new GroupProbe(item.NodeId, measured.Available, measured.LatencyMilliseconds, DateTimeOffset.UtcNow, item.TestUrl);
+                    lock (results) results.Add(observation);
+                    progress?.Report(observation);
                 }
                 finally { throttle.Release(); }
             });
@@ -76,6 +71,31 @@ public sealed class ObservatoryProbes(IObservatoryProcess process)
         } while (requiredOnly);
         // Required-only callers can atomically replace their probe snapshot without dropping fresh cached observations.
         return requiredOnly ? observations : results;
+    }
+
+    // Keep only this node and its dialer dependencies. Unrelated removed subscriptions and
+    // thousands of application/rule rows neither block a test nor get compiled per node.
+    public static MacPolicyDocument ProbeDocument(MacPolicyDocument source, string nodeId)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        void Visit(string id)
+        {
+            if (!ids.Add(id)) return;
+            if (source.Nodes.FirstOrDefault(node => node.Id == id)?.DialerProxyId is { } dialer) Visit(dialer);
+            if (source.Groups.FirstOrDefault(group => group.Id == id) is { } group)
+                foreach (string member in group.MemberIds) Visit(member);
+        }
+        Visit(nodeId);
+        string selector = "probe-selector"; while (ids.Contains(selector)) selector += "-x";
+        var draft = new MacPolicyDocument
+        {
+            Interfaces = source.Interfaces, Dns = source.Dns, Tun = source.Tun,
+            Nodes = source.Nodes.Where(node => ids.Contains(node.Id)).ToList(),
+            Groups = source.Groups.Where(group => ids.Contains(group.Id)).ToList()
+        };
+        draft.Groups.Add(new() { Id = selector, Name = "Probe", Kind = GroupKind.Select, MemberIds = [nodeId], SelectedMemberId = nodeId });
+        draft.Defaults.Global = ExitChoice.Proxy(selector);
+        return draft;
     }
 
     // Exact message emitted by Xray v26.10.29 app/observatory/observer.go. Unknown output never means success.
@@ -108,7 +128,7 @@ public sealed class XrayObservatoryProcess(Action requireProduction, string priv
         DurableFiles.CreatePrivateDirectory(session);
         Process? child = null;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
         try
         {
             string config = Path.Combine(session, "probe.json");
