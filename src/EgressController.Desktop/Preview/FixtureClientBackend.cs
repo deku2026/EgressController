@@ -12,6 +12,7 @@ public sealed class FixtureClientBackend : IClientBackend
     private readonly FixtureResourceTransport _transport = new();
     private readonly ResourcePreparation _preparation;
     private readonly Dictionary<string, GeoRuleSet> _sources = new(StringComparer.Ordinal);
+    private readonly string _fileKey = Guid.NewGuid().ToString("N");
     private string? _assetKey;
     private ClientPreparedResources _prepared = new([], new Dictionary<string, byte[]>(), new Dictionary<string, GeoRuleSet>());
     private bool _running = true;
@@ -23,9 +24,17 @@ public sealed class FixtureClientBackend : IClientBackend
     public string? SavedPath { get; private set; }
     public int RequestCount => _transport.RequestCount;
     public bool SimulateHomeFailure { get; set; }
+    public string HomeFailureCode { get; set; } = "timeout";
+    public TaskCompletionSource? HomeCheckGate { get; set; }
+    public Exception? HomeCheckError { get; set; }
     public int HomeChecks { get; private set; }
-    public Task<InterfaceConnectivityResult> CheckHomeConnectivityAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
-    { HomeChecks++; return Task.FromResult(new InterfaceConnectivityResult(!SimulateHomeFailure, document.Interfaces.HomeId, "en5", "cloudflare-204", SimulateHomeFailure ? "timeout" : "", 42)); }
+    public async Task<InterfaceConnectivityResult> CheckHomeConnectivityAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
+    {
+        HomeChecks++; cancellationToken.ThrowIfCancellationRequested();
+        if (HomeCheckGate is { } gate) await gate.Task.WaitAsync(cancellationToken);
+        if (HomeCheckError is { } error) throw error;
+        return new(!SimulateHomeFailure, document.Interfaces.HomeId, "en5", "cloudflare-204", SimulateHomeFailure ? HomeFailureCode : "", 42);
+    }
     public bool SimulateHelperUnavailable { get; set; }
     public bool SimulateRepairFailure { get; set; }
     public int RepairCount { get; private set; }
@@ -150,13 +159,13 @@ public sealed class FixtureClientBackend : IClientBackend
     }
     public Task SaveDraftAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested(); SaveCalls++; SavedPath = PrivatePreviewFiles.WriteText("preview-policy.yaml", PolicyYaml.Write(document)); return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); SaveCalls++; SavedPath = PrivatePreviewFiles.WriteText($"preview-policy-{_fileKey}.yaml", PolicyYaml.Write(document)); return Task.CompletedTask;
     }
     public string? ResetBackupPath { get; private set; }
     public Task<ConfigurationResetResult> ResetConfigurationAsync(MacPolicyDocument current, CancellationToken cancellationToken = default)
         => ConfigurationReset.ExecuteAsync(current, StopAsync, async (snapshot, token) =>
         {
-            ResetBackupPath = PrivatePreviewFiles.WriteText("preview-policy-before-reset.yaml", PolicyYaml.Write(snapshot));
+            ResetBackupPath = PrivatePreviewFiles.WriteText($"preview-policy-before-reset-{_fileKey}.yaml", PolicyYaml.Write(snapshot));
             await SaveDraftAsync(new(), token);
         }, cancellationToken);
     public Task OpenLogDirectoryAsync(CancellationToken cancellationToken = default)

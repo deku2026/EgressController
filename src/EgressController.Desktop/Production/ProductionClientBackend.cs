@@ -287,11 +287,21 @@ public sealed class ProductionClientBackend : IClientBackend
     {
         var interfaces = await Task.Run(_platform.ReadInterfaces, cancellationToken).ConfigureAwait(false);
         var home = interfaces.SingleOrDefault(item => Physical(item) && item.ServiceId == document.Interfaces.HomeId);
-        if (home is null) return new(false, document.Interfaces.HomeId, "", "", "interface.bind", 0);
-        var binding = new InterfaceBinding(home.ServiceId, home.BsdName);
-        _diagnostics.Record("home.check.begin", $"service={binding.StableId}; interface={binding.BsdName}; addresses={home.Addresses.Length}; direct=true; tun=false");
-        var binder = new MacPhysicalSocketBinder(_native);
-        var result = await new InterfaceConnectivity(binder, new BoundDohResolver(binder, document.Dns.HttpsUrl)).CheckAsync(binding, cancellationToken).ConfigureAwait(false);
+        var binding = new InterfaceBinding(document.Interfaces.HomeId, home?.BsdName ?? "");
+        _diagnostics.Record("home.check.begin", $"service={binding.StableId}; interface={binding.BsdName}; active={home?.IsActive == true}; addresses={home?.Addresses.Length ?? 0}; direct=true; tun=false");
+        string? failure = home is null ? "interface.bind" : InterfaceConnectivity.ReadinessFailure(home.IsActive, home.Addresses);
+        InterfaceConnectivityResult result;
+        try
+        {
+            var binder = new MacPhysicalSocketBinder(_native);
+            result = failure is not null ? new(false, binding.StableId, binding.BsdName, "", failure, 0)
+                : await new InterfaceConnectivity(binder, new BoundDohResolver(binder, document.Dns.HttpsUrl)).CheckAsync(binding, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is OperationCanceledException or IOException or System.Net.Http.HttpRequestException or System.Net.Sockets.SocketException)
+        {
+            _diagnostics.Record("home.check.end", $"service={binding.StableId}; interface={binding.BsdName}; available=False; code={(error is OperationCanceledException ? "cancelled" : NetworkFailure.Code(error))}");
+            throw;
+        }
         _diagnostics.Record("home.check.end", $"service={result.InterfaceId}; interface={result.BsdName}; endpoint={result.Endpoint}; available={result.Available}; code={result.FailureCode}; ms={result.Milliseconds:F0}");
         return result;
     }

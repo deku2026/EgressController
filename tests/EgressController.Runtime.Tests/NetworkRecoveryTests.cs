@@ -9,6 +9,33 @@ public sealed class NetworkRecoveryTests
 {
     private static readonly InterfaceBinding Home = new("home-id", "en8");
     [Theory]
+    [InlineData(false, "172.20.10.3", "interface.inactive")]
+    [InlineData(true, "", "interface.no-address")]
+    [InlineData(true, "fe80::1234%8", "interface.no-address")]
+    [InlineData(true, "169.254.1.2", "interface.no-address")]
+    [InlineData(true, "127.0.0.1,::,ff02::1,255.255.255.255,invalid", "interface.no-address")]
+    [InlineData(true, "fe80::1234%8,172.20.10.3", null)]
+    [InlineData(true, "2001:db8::1234", null)]
+    public void SetupPreflightDistinguishesAttachedFromAddressedInterfaces(bool active, string addresses, string? failure)
+        => Assert.Equal(failure, InterfaceConnectivity.ReadinessFailure(active, addresses.Split(',')));
+
+    [Theory]
+    [InlineData(SocketError.NetworkUnreachable, "network.unreachable")]
+    [InlineData(SocketError.AddressNotAvailable, "network.unreachable")]
+    [InlineData(SocketError.TimedOut, "timeout")]
+    [InlineData(SocketError.ConnectionRefused, "connection.refused")]
+    public void SocketCauseSurvivesDnsAndHttpWrappers(SocketError error, string failure)
+        => Assert.Equal(failure, NetworkFailure.Code(new IOException("Bound DNS queries failed", new AggregateException(new HttpRequestException("DoH request failed", new SocketException((int)error))))));
+
+    [Fact]
+    public void DnsStackFrameDoesNotChangeClassification()
+    {
+        try { BoundDnsFixture(); }
+        catch (IOException error) { Assert.Equal("connection.failed", NetworkFailure.Code(error)); return; }
+        Assert.Fail("Fixture did not throw.");
+        static void BoundDnsFixture() => throw new IOException("All connections through the selected physical interface failed.");
+    }
+    [Theory]
     [InlineData(204, 1, true)]
     [InlineData(200, 2, false)]
     [InlineData(302, 2, false)]

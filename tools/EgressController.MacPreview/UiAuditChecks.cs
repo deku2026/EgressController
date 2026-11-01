@@ -20,6 +20,7 @@ internal static class UiAuditChecks
         PreviewEnvironment.RequireIsolated();
         directory = Path.Combine(directory, "audit"); Directory.CreateDirectory(directory);
         WorkspaceRecovery(directory);
+        HomeConnectivityRecovery(directory);
         foreach (bool longLabels in new[] { false, true })
         {
             var document = PreviewFixtures.CreateDocument();
@@ -117,6 +118,34 @@ internal static class UiAuditChecks
         var host = new Window { Content = box, Width = 340, Height = 100 }; host.Show(); Flush();
         Check(!box.IsEffectivelyEnabled, "Empty ComboBox still accepts clicks and opens an empty popup.");
         host.Close();
+    }
+
+    private static void HomeConnectivityRecovery(string directory)
+    {
+        foreach (var size in new[] { (1260, 860), (960, 660) })
+        {
+            var backend = new FixtureClientBackend { SimulateHomeFailure = true, HomeFailureCode = "interface.inactive" };
+            var vm = new ShellViewModel(backend); Complete(vm.InitializeAsync()); vm.SetupStep = 0; vm.OnboardingVisible = true;
+            var window = new MainWindow { DataContext = vm, Width = size.Item1, Height = size.Item2 }; window.Show(); Flush();
+            var button = Find<Button>(window, "HomeConnectivityButton"); button.BringIntoView(); Flush(); button.Focus(NavigationMethod.Tab);
+            var point = Center(window, button); window.MouseDown(point, MouseButton.Left); window.MouseUp(point, MouseButton.Left); Flush();
+            var help = Find<Border>(window, "HomeConnectivityHelp"); var scroll = Find<ScrollViewer>(window, "SetupContentScroll");
+            Check(backend.HomeChecks == 1 && vm.HomeCheckFailed && help.IsEffectivelyVisible, "Pointer home check did not reveal USB guidance.");
+            var location = help.TranslatePoint(new Point(), scroll)!.Value;
+            Check(location.Y >= -1 && location.Y + help.Bounds.Height <= scroll.Viewport.Height + 1, "USB guidance is clipped by the setup viewport.");
+            Check(InWindow(window, Find<TextBlock>(window, "SetupStepTitle")) && InWindow(window, Find<Button>(window, "SetupContinueButton")), "Home failure displaced fixed heading/footer.");
+            Check(!Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled, "Failed check allowed continuation.");
+            Check(button.IsFocused, $"Home check lost keyboard focus: {(window.FocusManager?.GetFocusedElement() as Control)?.Name}, button enabled={button.IsEffectivelyEnabled}.");
+            Check(scroll.Extent.Width <= scroll.Viewport.Width + 1, "USB help overflows horizontally.");
+            Save(window, directory, "home-usb-failed-" + size.Item1);
+            backend.SimulateHomeFailure = false; point = Center(window, button);
+            Check(InWindow(window, button), "Retry button was scrolled out of the window.");
+            window.MouseDown(point, MouseButton.Left); window.MouseUp(point, MouseButton.Left); Flush();
+            Check(backend.HomeChecks == 2 && vm.HomeCheckReady && !help.IsEffectivelyVisible && Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled,
+                "Successful pointer retry retained advice or left Continue disabled.");
+            Check(backend.Core.RestartCount == 0, "Home check started TUN."); Save(window, directory, "home-usb-recovered-" + size.Item1);
+            window.Close(); Complete(vm.DisposeAsync().AsTask());
+        }
     }
 
     private static void Sizes(Window window, string directory, string name)
