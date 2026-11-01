@@ -20,7 +20,16 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
     {
         try { return await DownloadCoreAsync(resource, cancellationToken).ConfigureAwait(false); }
         catch (Exception error) when (error is HttpRequestException or System.Security.Authentication.AuthenticationException or SocketException)
-        { throw new IOException("HTTPS resource could not be fetched through the selected physical interface."); }
+        {
+            // SocketsHttpHandler wraps ConnectCallback failures. Recover only our sanitized facts.
+            for (Exception? cause = error; cause is not null; cause = cause.InnerException)
+                if (cause is ResourceTransportFailure known) throw known;
+            string code = error is System.Security.Authentication.AuthenticationException ? "tls.failed" : NetworkFailure.Code(error);
+            throw new ResourceTransportFailure(code == "tls.failed" ? ResourceTransportStage.Tls : ResourceTransportStage.Http, code,
+                error is HttpRequestException { StatusCode: { } status } ? (int)status : null);
+        }
+        catch (IOException error) when (error is not ResourceTransportFailure)
+        { throw new ResourceTransportFailure(ResourceTransportStage.Body, NetworkFailure.Code(error)); }
     }
     private async Task<byte[]> DownloadCoreAsync(ResourceDescriptor resource, CancellationToken cancellationToken)
     {
@@ -43,14 +52,14 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             if ((int)response.StatusCode is 301 or 302 or 303 or 307 or 308)
             {
-                if (redirects == 5 || response.Headers.Location is not { } location) throw new IOException("HTTPS resource redirect limit or missing location.");
+                if (redirects == 5 || response.Headers.Location is not { } location) throw new ResourceTransportFailure(ResourceTransportStage.Http, "redirect.invalid");
                 url = location.IsAbsoluteUri ? location : new Uri(url, location);
-                if (!SafeHttps(url)) throw new IOException("Resource redirect must remain HTTPS without embedded credentials.");
+                if (!SafeHttps(url)) throw new ResourceTransportFailure(ResourceTransportStage.Http, "redirect.invalid");
                 continue;
             }
-            if (!response.IsSuccessStatusCode) throw new IOException("HTTPS resource returned an unsuccessful status.");
-            if (response.Content.Headers.ContentEncoding.Count != 0) throw new IOException("Encoded resource responses are not accepted.");
-            if (response.Content.Headers.ContentLength is { } length && length > resource.MaximumBytes) throw new IOException("HTTPS resource exceeds the size limit.");
+            if (!response.IsSuccessStatusCode) throw new ResourceTransportFailure(ResourceTransportStage.Http, "http.status", (int)response.StatusCode);
+            if (response.Content.Headers.ContentEncoding.Count != 0) throw new ResourceTransportFailure(ResourceTransportStage.Body, "response.encoding");
+            if (response.Content.Headers.ContentLength is { } length && length > resource.MaximumBytes) throw new ResourceTransportFailure(ResourceTransportStage.Body, "response.size");
             await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var output = new MemoryStream();
             byte[] buffer = new byte[65536];
@@ -58,20 +67,23 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
             {
                 int read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (read == 0) break;
-                if (output.Length + read > resource.MaximumBytes) throw new IOException("HTTPS resource exceeds the size limit.");
+                if (output.Length + read > resource.MaximumBytes) throw new ResourceTransportFailure(ResourceTransportStage.Body, "response.size");
                 output.Write(buffer, 0, read);
             }
             return output.ToArray();
         }
-        throw new IOException("HTTPS resource redirect limit.");
+        throw new ResourceTransportFailure(ResourceTransportStage.Http, "redirect.invalid");
     }
 
     // Public to allow pure boundary tests to prove a failed binder prevents connect.
     public async ValueTask<Stream> ConnectAsync(DnsEndPoint endpoint, InterfaceBinding binding, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(binding.StableId) || string.IsNullOrWhiteSpace(binding.BsdName)) throw new IOException("A physical interface snapshot is required.");
-        var addresses = IPAddress.TryParse(endpoint.Host, out var literal) ? [literal] : await resolver.ResolveAsync(endpoint.Host, binding, token).ConfigureAwait(false);
-        if (addresses.Count == 0 || addresses.Count > 64) throw new IOException("Bound DNS returned no usable addresses.");
+        IReadOnlyList<IPAddress> addresses;
+        try { addresses = IPAddress.TryParse(endpoint.Host, out var literal) ? [literal] : await resolver.ResolveAsync(endpoint.Host, binding, token).ConfigureAwait(false); }
+        catch (Exception error) when (error is IOException or HttpRequestException or SocketException)
+        { throw new ResourceTransportFailure(ResourceTransportStage.Dns, NetworkFailure.Code(error)); }
+        if (addresses.Count == 0 || addresses.Count > 64) throw new ResourceTransportFailure(ResourceTransportStage.Dns, "dns.failed");
         Exception? failure = null;
         foreach (var address in addresses.Distinct())
         {
@@ -81,7 +93,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
             {
                 binder.Bind(socket, binding); // Never caught/retried on a different or unbound interface.
             }
-            catch { socket.Dispose(); throw new IOException("Binding the physical interface failed."); }
+            catch { socket.Dispose(); throw new ResourceTransportFailure(ResourceTransportStage.Bind, "interface.bind"); }
             try
             {
                 using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token); attempt.CancelAfter(TimeSpan.FromSeconds(2));
@@ -92,7 +104,7 @@ public sealed class BoundHttpsResourceTransport(IPhysicalSocketBinder binder, II
             catch (OperationCanceledException error) when (!token.IsCancellationRequested) { failure = new TimeoutException("Connection timeout.", error); socket.Dispose(); }
             catch { socket.Dispose(); throw; }
         }
-        throw new IOException("All connections through the selected physical interface failed.", failure);
+        throw new ResourceTransportFailure(ResourceTransportStage.Tcp, failure is null ? "connection.failed" : NetworkFailure.Code(failure));
     }
 
     private static void Validate(ResourceDescriptor resource)

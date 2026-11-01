@@ -37,8 +37,8 @@ public interface IValidatedResourceCache
     Task WriteAsync(string id, byte[] bytes, CancellationToken cancellationToken);
 }
 public sealed class ResourcePreparationException(string resourceId, string interfaceId, int remotePort, PreparationStage stage, bool timeout,
-    ResourceProxyFailureKind? proxyFailure = null)
-    : IOException(MessageFor(resourceId, interfaceId, stage, timeout, proxyFailure))
+    ResourceProxyFailureKind? proxyFailure = null, ResourceTransportFailure? transportFailure = null, string? bsdName = null)
+    : IOException(MessageFor(resourceId, interfaceId, stage, timeout, proxyFailure, transportFailure))
 {
     public string ResourceId { get; } = resourceId;
     public string InterfaceId { get; } = interfaceId;
@@ -46,12 +46,15 @@ public sealed class ResourcePreparationException(string resourceId, string inter
     public PreparationStage Stage { get; } = stage;
     public bool IsTimeout { get; } = timeout;
     public ResourceProxyFailureKind? ProxyFailure { get; } = proxyFailure;
-    private static string MessageFor(string id, string exit, PreparationStage stage, bool timeout, ResourceProxyFailureKind? failure)
+    public ResourceTransportFailure? TransportFailure { get; } = transportFailure;
+    public string? BsdName { get; } = bsdName;
+    private static string MessageFor(string id, string exit, PreparationStage stage, bool timeout, ResourceProxyFailureKind? failure, ResourceTransportFailure? transport)
     {
         string label = stage switch { PreparationStage.CheckingCache => "检查缓存", PreparationStage.Downloading => "下载", PreparationStage.Validating => "验证", PreparationStage.Publishing => "保存", _ => "准备" };
         string help = exit.StartsWith("subscription-direct:", StringComparison.Ordinal) ? "订阅使用非家宽物理网卡直连。请检查订阅地址、网络与 DNS 后重试；不会改用系统代理或 Xray。" : failure is { } reason ? new ResourceProxyConfigurationException(reason).Message
             : exit.StartsWith("xray-socks5:", StringComparison.Ordinal) ? $"请检查所选非家宽网卡、分组节点和 Xray 本地代理 {exit}；不会改走系统代理或直连。" : exit == "system-proxy" ? "请检查当前系统代理或默认网络后重试；可用缓存已保留。" : "请检查所选物理接口后重试；不会切换出口。";
-        return $"资源 {id} {label}{(timeout ? "超时" : "失败")}。{help}";
+        string resource = exit.StartsWith("subscription-direct:", StringComparison.Ordinal) ? "节点订阅" : $"资源 {id} ";
+        return $"{resource}{label}{(timeout ? "超时" : "失败")}。{(transport is null ? "" : transport.UserReason + "。")} {help}";
     }
 }
 
@@ -98,7 +101,7 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
             token.ThrowIfCancellationRequested();
             try { downloaded = await transport.DownloadAsync(resource, timeout.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            { throw new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: true); }
+            { throw new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: true, bsdName: resource.Exit.Interface?.BsdName); }
             stage = PreparationStage.Validating;
             Publish(stage, "正在验证资源");
             if (!Valid(downloaded)) throw new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: false);
@@ -116,8 +119,8 @@ public sealed class ResourcePreparation(IResourceTransport transport, IValidated
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             var failure = exception as ResourcePreparationException
-                ?? new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: exception is EgressController.Transport.Upstream.DownloadException { Code: "download.timeout" },
-                    proxyFailure: (exception as ResourceProxyConfigurationException)?.Reason);
+                ?? new ResourcePreparationException(resource.Id, resource.Exit.Identity, resource.Url.Port, stage, timeout: exception is EgressController.Transport.Upstream.DownloadException { Code: "download.timeout" } or ResourceTransportFailure { Code: "timeout" },
+                    proxyFailure: (exception as ResourceProxyConfigurationException)?.Reason, transportFailure: exception as ResourceTransportFailure, bsdName: resource.Exit.Interface?.BsdName);
             lock (_sync)
             {
                 _history.Enqueue(failure);

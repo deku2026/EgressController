@@ -17,7 +17,7 @@ public static class PolicyYaml
             doc.Interfaces = new() { HomeId = interfaces.Text("home"), NonHomeId = interfaces.Text("nonhome") };
             var defaults = root.Map("defaults");
             doc.Defaults = new() { China = ReadExit(defaults.Get("china")), Global = ReadExit(defaults.Get("global")), ProxyInterface = defaults.Text("proxy_interface", "nonhome"), ResourceProxyPort = defaults.Integer("resource_proxy_port", 17890) };
-            var dns = root.Map("dns"); doc.Dns = new() { UpstreamIp = dns.Text("upstream_ip", "1.1.1.1"), HttpsUrl = dns.Text("https_url", "https://1.1.1.1/dns-query") };
+            var dns = root.Map("dns"); doc.Dns = new() { UpstreamIp = dns.Text("upstream_ip", DnsEndpoint.DefaultIp), HttpsUrl = dns.Text("https_url", DnsEndpoint.DefaultHttpsUrl) };
             var tun = root.Map("tun"); doc.Tun = new() { Name = tun.Text("name", "utun10"), Ipv4Cidr = tun.Text("ipv4_cidr", "198.18.0.1/30"), Mtu = tun.Integer("mtu", 1500) };
             foreach (var app in root.Items("applications").OfType<YamlMappingNode>())
                 doc.Applications.Add(new() { Id = app.Text("id"), Name = app.Text("name"), BundlePath = app.Text("path"), BundleIdentifier = Null(app.Text("bundle_id")), PrimaryExecutable = Null(app.Text("primary_executable")), ExecutablePaths = app.Strings("executables"), Via = ReadExit(app.Get("via")), Enabled = app.Boolean("enabled", true) });

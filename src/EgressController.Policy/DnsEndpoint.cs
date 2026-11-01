@@ -4,6 +4,9 @@ namespace EgressController.Policy;
 
 public static class DnsEndpoint
 {
+    // Bootstrap must be reachable directly from non-home before any proxy node can resolve.
+    public const string DefaultIp = "223.5.5.5";
+    public const string DefaultHttpsUrl = "https://223.5.5.5/dns-query";
     public static bool IsValid(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && uri.Scheme == "https" && uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0
         && uri.Port == 443 && uri.AbsolutePath == "/dns-query"

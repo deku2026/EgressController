@@ -12,6 +12,44 @@ public sealed class DirectSubscriptionTests
     private static readonly SubscriptionSource Source = new() { Id = "first", Url = "https://subscription.example.invalid/list?token=synthetic-private" };
     private const string Nodes = "proxies: [{name: Direct node, type: socks5, server: node.example.invalid, port: 1080}]";
 
+    [Theory]
+    [InlineData(401)]
+    [InlineData(403)]
+    [InlineData(429)]
+    [InlineData(503)]
+    public async Task ServerStatusSurvivesPreparationWithoutCredentialsOrInternalIdsInUi(int status)
+    {
+        var service = new DirectSubscriptionResources(new RejectingBinder(), new Resolver(), new InMemoryResourceCache(), Binding,
+            httpHandlerFactory: _ => new Handler((_, _) => Task.FromResult(new HttpResponseMessage((HttpStatusCode)status))));
+        var error = await Assert.ThrowsAsync<ResourcePreparationException>(() => service.FetchAsync(Source, TestContext.Current.CancellationToken));
+        Assert.Equal(status, error.TransportFailure?.HttpStatus); Assert.Equal("en5", error.BsdName);
+        Assert.Contains("HTTP " + status, error.Message); Assert.DoesNotContain("subscription-first", error.Message);
+        Assert.Contains("http-status=" + status, OperationDiagnostics.Describe(error)); Assert.DoesNotContain("synthetic-private", error.ToString());
+    }
+    [Theory]
+    [InlineData(false, "network.unreachable")]
+    [InlineData(true, "timeout")]
+    public async Task DnsFailureSurvivesHttpWrapperAndPreparationWithTheBoundExit(bool timeout, string code)
+    {
+        var resolver = new FailedDns(timeout);
+        var transport = new BoundHttpsResourceTransport(new RejectingBinder(), resolver);
+        var dnsError = await Assert.ThrowsAsync<ResourceTransportFailure>(async () => await transport.ConnectAsync(new("fixture.invalid", 443), Binding, TestContext.Current.CancellationToken));
+        Assert.Equal(ResourceTransportStage.Dns, dnsError.TransportStage); Assert.Equal(code, dnsError.Code);
+        var service = new DirectSubscriptionResources(new RejectingBinder(), resolver, new InMemoryResourceCache(), Binding,
+            httpHandlerFactory: _ => new Handler((_, _) => throw new HttpRequestException("private URL token=synthetic-private", dnsError)));
+        var error = await Assert.ThrowsAsync<ResourcePreparationException>(() => service.FetchAsync(Source, TestContext.Current.CancellationToken));
+        Assert.Equal(timeout, error.IsTimeout); Assert.Equal(ResourceTransportStage.Dns, error.TransportFailure?.TransportStage);
+        Assert.Equal(code, error.TransportFailure?.Code); Assert.Contains("DNS 查询", error.Message);
+        string diagnostic = OperationDiagnostics.Describe(error);
+        Assert.Contains("interface=en5", diagnostic); Assert.Contains("transport-stage=Dns", diagnostic); Assert.Contains("code=" + code, diagnostic);
+        Assert.DoesNotContain("synthetic-private", diagnostic); Assert.DoesNotContain("synthetic-private", error.ToString());
+    }
+    private sealed class FailedDns(bool timeout) : IInterfaceDnsResolver
+    {
+        public ValueTask<IReadOnlyList<IPAddress>> ResolveAsync(string host, InterfaceBinding binding, CancellationToken token)
+            => ValueTask.FromException<IReadOnlyList<IPAddress>>(new IOException("Bound DNS failed: token=synthetic-private", timeout ? new OperationCanceledException() : new SocketException((int)SocketError.NetworkUnreachable)));
+    }
+
     [Fact]
     public async Task FirstSubscriptionProvidersAndRedirectsAreDirectWithoutCoreOrHelper()
     {
@@ -94,7 +132,7 @@ public sealed class DirectSubscriptionTests
     {
         var binder = new RejectingBinder(); var resolver = new Resolver();
         var transport = new BoundHttpsResourceTransport(binder, resolver);
-        await Assert.ThrowsAsync<IOException>(async () => await transport.ConnectAsync(new("subscription.example.invalid", 443), Binding, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ResourceTransportFailure>(async () => await transport.ConnectAsync(new("subscription.example.invalid", 443), Binding, TestContext.Current.CancellationToken));
         Assert.Equal(Binding, Assert.Single(binder.Bindings)); Assert.Equal(Binding, Assert.Single(resolver.Bindings));
     }
 

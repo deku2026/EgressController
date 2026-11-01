@@ -28,6 +28,7 @@ public sealed class FixtureClientBackend : IClientBackend
     public TaskCompletionSource? HomeCheckGate { get; set; }
     public Exception? HomeCheckError { get; set; }
     public int HomeChecks { get; private set; }
+    public bool SimulateSubscriptionDnsFailure { get; set; }
     public async Task<InterfaceConnectivityResult> CheckHomeConnectivityAsync(MacPolicyDocument document, CancellationToken cancellationToken = default)
     {
         HomeChecks++; cancellationToken.ThrowIfCancellationRequested();
@@ -93,6 +94,8 @@ public sealed class FixtureClientBackend : IClientBackend
     public async Task<MacPolicyDocument> ImportSubscriptionAsync(Uri url, MacPolicyDocument current, CancellationToken cancellationToken = default)
     {
         if (url.AbsoluteUri != PreviewFixtures.SubscriptionUrl) throw new IOException("隔离预览仅支持示例订阅 URL；没有发送网络请求。");
+        if (SimulateSubscriptionDnsFailure) throw new ResourcePreparationException("subscription-fixture", "subscription-direct:" + current.Interfaces.NonHomeId, 443,
+            PreparationStage.Downloading, true, transportFailure: new(ResourceTransportStage.Dns, "timeout"), bsdName: "en0");
         ClashImportResult? parsed = null;
         var bytes = await _preparation.PrepareAsync(new ResourceDescriptor { Id = "fixture-subscription", Url = url, Exit = ResourceExitSnapshot.SystemDefault, CachePolicy = PreparationCachePolicy.Refresh }, payload => { parsed = ClashSubscriptionImporter.Import(Encoding.UTF8.GetString(payload), "fixture-subscription"); return parsed.IsSuccess; }, cancellationToken);
         parsed = ClashSubscriptionImporter.Import(Encoding.UTF8.GetString(bytes), "fixture-subscription");

@@ -17,7 +17,7 @@ public sealed class ProductionResourceTests
     public async Task Failed_binding_prevents_any_connect_and_has_no_unbound_retry()
     {
         var binder = new FailingBinder(); var dns = new FixedResolver(); var transport = new BoundHttpsResourceTransport(binder, dns);
-        await Assert.ThrowsAsync<IOException>(async () => await transport.ConnectAsync(new DnsEndPoint("example.test", 443), Binding, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ResourceTransportFailure>(async () => await transport.ConnectAsync(new DnsEndPoint("example.test", 443), Binding, TestContext.Current.CancellationToken));
         Assert.Equal(1, binder.Calls); Assert.Equal(1, dns.Calls); Assert.Equal(Binding, binder.Binding);
         await Assert.ThrowsAsync<ArgumentException>(() => transport.DownloadAsync(new ResourceDescriptor { Id = "x", Url = new("http://example.test"), Exit = ResourceExitSnapshot.Bound(Binding) }, TestContext.Current.CancellationToken));
         Assert.Equal(1, binder.Calls);
@@ -35,11 +35,11 @@ public sealed class ProductionResourceTests
         Assert.Equal(new byte[] { 1, 2, 3 }, await transport.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
         Assert.Equal(2, handler.Calls); Assert.Equal(1, factories);
         var downgrade = new BoundHttpsResourceTransport(new FailingBinder(), new FixedResolver(), _ => new HttpFixture { Downgrade = true });
-        await Assert.ThrowsAsync<IOException>(() => downgrade.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ResourceTransportFailure>(() => downgrade.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
         var oversized = new BoundHttpsResourceTransport(new FailingBinder(), new FixedResolver(), _ => new HttpFixture { Oversize = true });
-        await Assert.ThrowsAsync<IOException>(() => oversized.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ResourceTransportFailure>(() => oversized.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
         var failed = new BoundHttpsResourceTransport(new FailingBinder(), new FixedResolver(), _ => new HttpFixture { Fail = true });
-        var error = await Assert.ThrowsAsync<IOException>(() => failed.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
+        var error = await Assert.ThrowsAsync<ResourceTransportFailure>(() => failed.DownloadAsync(descriptor, TestContext.Current.CancellationToken));
         Assert.DoesNotContain("synthetic-secret", error.ToString());
     }
     [Fact]

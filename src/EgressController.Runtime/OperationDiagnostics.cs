@@ -25,6 +25,8 @@ public sealed class OperationDiagnostics(ILifecycleLog? log)
             if (current is RuntimeFailureException known) result.Append(" code=").Append(known.Code).Append(' ').Append(known.DiagnosticDetail);
             if (current is ResourcePreparationException resource) result.Append(" resource=").Append(resource.ResourceId).Append(" exit=").Append(resource.InterfaceId)
                 .Append(" port=").Append(resource.RemotePort).Append(" stage=").Append(resource.Stage).Append(" timeout=").Append(resource.IsTimeout).Append(" proxy-failure=").Append(resource.ProxyFailure);
+            if (current is ResourcePreparationException { TransportFailure: { } transport } prepared)
+                result.Append(" interface=").Append(prepared.BsdName).Append(" transport-stage=").Append(transport.TransportStage).Append(" code=").Append(transport.Code).Append(" http-status=").Append(transport.HttpStatus);
             if (current is JsonException json) result.Append(" json-path=").Append(json.Path).Append(" line=").Append(json.LineNumber).Append(" byte=").Append(json.BytePositionInLine);
             if (current is Win32Exception native) result.Append(" native-code=").Append(native.NativeErrorCode);
             if (current is System.Net.Sockets.SocketException socket) result.Append(" socket=").Append(socket.SocketErrorCode);

@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
     parser.add_argument("--without-package", action="store_true", help="Development iteration; CI also runs the AOT package step.")
-    parser.add_argument("--version", default="0.1.10", help="Three-component package version.")
+    parser.add_argument("--version", default="0.1.11", help="Three-component package version.")
     args = parser.parse_args()
     if platform.system() != "Darwin":
         parser.error("Run this acceptance script on macOS. Policy/runtime managed tests may run independently on other hosts.")

@@ -21,6 +21,7 @@ internal static class UiAuditChecks
         directory = Path.Combine(directory, "audit"); Directory.CreateDirectory(directory);
         WorkspaceRecovery(directory);
         HomeConnectivityRecovery(directory);
+        SubscriptionDnsRecovery(directory);
         foreach (bool longLabels in new[] { false, true })
         {
             var document = PreviewFixtures.CreateDocument();
@@ -148,19 +149,45 @@ internal static class UiAuditChecks
         }
     }
 
+    private static void SubscriptionDnsRecovery(string directory)
+    {
+        foreach (var size in new[] { (1260, 860), (960, 660) })
+        {
+            var document = PreviewFixtures.CreateDocument(); document.Dns.HttpsUrl = "https://1.1.1.1/dns-query";
+            document.Nodes.Clear(); document.Groups.Clear(); document.Subscriptions.Clear(); document.Applications.Clear(); document.RuleSets.Clear();
+            var backend = new FixtureClientBackend { WorkspaceDocument = document, SimulateSubscriptionDnsFailure = true };
+            var vm = new ShellViewModel(backend); Complete(vm.InitializeAsync()); vm.SetupStep = 1; vm.OnboardingVisible = true;
+            var window = new MainWindow { DataContext = vm, Width = size.Item1, Height = size.Item2 }; window.Show(); Flush();
+            Complete(vm.ImportSubscriptionCommand.ExecuteAsync());
+            var editor = Find<DnsEndpointEditor>(window, "SetupDnsEditor"); var scroll = Find<ScrollViewer>(window, "SetupContentScroll");
+            var panel = Find<Border>(window, "SubscriptionDnsRepairPanel"); var point = panel.TranslatePoint(new Point(), scroll)!.Value;
+            Check(vm.SubscriptionDnsIssue && point.Y >= -1 && point.Y + panel.Bounds.Height <= scroll.Viewport.Height + 1, "Subscription DNS repair is clipped.");
+            Check(InWindow(window, Find<Button>(window, "SetupContinueButton")) && !Find<Button>(window, "SetupContinueButton").IsEffectivelyEnabled, "DNS failure allowed empty setup to continue or pushed actions offscreen.");
+            Save(window, directory, "subscription-dns-failed-" + size.Item1);
+            var ali = editor.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ChooseAliDnsButton");
+            var click = Center(window, ali); window.MouseDown(click, MouseButton.Left); window.MouseUp(click, MouseButton.Left); Flush();
+            Check(vm.DnsServer == DnsEndpoint.DefaultHttpsUrl && !vm.HasIssue && !vm.SubscriptionDnsIssue, "DNS preset did not repair the draft/clear the issue.");
+            backend.SimulateSubscriptionDnsFailure = false;
+            var retry = Find<Button>(window, "RetrySubscriptionDnsButton"); click = Center(window, retry);
+            window.MouseDown(click, MouseButton.Left); window.MouseUp(click, MouseButton.Left); Flush();
+            Check(!vm.HasIssue && backend.Core.RestartCount == 0, "DNS retry failed or started the core.");
+            Save(window, directory, "subscription-dns-recovered-" + size.Item1); window.Close(); Complete(vm.DisposeAsync().AsTask());
+        }
+    }
+
     private static void Sizes(Window window, string directory, string name)
     {
         foreach (var size in new[] { (1260, 860), (960, 660) })
         {
             window.Width = size.Item1; window.Height = size.Item2; Flush();
             // Grid overlap is legal XAML. Check actual form geometry, not only successful compilation.
-            var dns = window.GetVisualDescendants().OfType<TextBox>().SingleOrDefault(x => x.Name == "DnsUpstreamBox");
+            var dns = window.GetVisualDescendants().OfType<TextBox>().SingleOrDefault(x => x.Name == "DnsEndpointInput" && x.IsEffectivelyVisible);
             if (name.Contains("settings-1", StringComparison.Ordinal)) Check(dns is not null, "DNS form was not materialized.");
             if (dns?.IsEffectivelyVisible == true)
             {
-                var form = dns.GetVisualAncestors().OfType<Grid>().First();
-                var label = form.Children.OfType<TextBlock>().Single();
-                Check(dns.Bounds.X >= label.Bounds.Right + 8 && dns.Bounds.Right <= form.Bounds.Width + 1,
+                var form = dns.GetVisualAncestors().OfType<StackPanel>().First();
+                var heading = form.Children.OfType<Grid>().Single();
+                Check(dns.Bounds.Y >= heading.Bounds.Bottom + 7 && dns.Bounds.Right <= form.Bounds.Width + 1,
                     "DNS label and input overlap or extend beyond the form.");
             }
             foreach (var scroll in window.GetVisualDescendants().OfType<ScrollViewer>().Where(x => x.IsEffectivelyVisible && !x.GetVisualAncestors().OfType<TextBox>().Any()))

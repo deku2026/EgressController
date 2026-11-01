@@ -139,8 +139,20 @@ public sealed class ProductionClientBackend : IClientBackend
         if (!DnsEndpoint.IsValid(current.Dns.HttpsUrl))
             throw new RuntimeFailureException("subscription.dns");
         var binder = new MacPhysicalSocketBinder(_native);
-        var imported = await new DirectSubscriptionResources(binder, new BoundDohResolver(binder, current.Dns.HttpsUrl), _cache,
-            new(interfaceId, selected.BsdName), ResourceProgress()).FetchAsync(source, cancellationToken).ConfigureAwait(false);
+        var watch = Stopwatch.StartNew();
+        _diagnostics.Record("subscription.fetch.begin", $"service={interfaceId}; interface={selected.BsdName}; active={selected.IsActive}; addresses={selected.Addresses.Length}; dns-host={new Uri(current.Dns.HttpsUrl).Host}; direct=true; system-proxy=false; system-dns=false; tun=false");
+        ClashImportResult imported;
+        try
+        {
+            imported = await new DirectSubscriptionResources(binder, new BoundDohResolver(binder, current.Dns.HttpsUrl), _cache,
+                new(interfaceId, selected.BsdName), ResourceProgress()).FetchAsync(source, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is IOException or OperationCanceledException)
+        {
+            _diagnostics.Record("subscription.fetch.end", $"interface={selected.BsdName}; success=false; ms={watch.ElapsedMilliseconds}; cancelled={error is OperationCanceledException}");
+            _diagnostics.Failure("subscription.fetch", error); throw;
+        }
+        _diagnostics.Record("subscription.fetch.end", $"interface={selected.BsdName}; success={imported.IsSuccess}; ms={watch.ElapsedMilliseconds}; nodes={imported.Nodes.Count}; groups={imported.Groups.Count}");
         if (!imported.IsSuccess) throw new InvalidDataException("订阅结构无效，保留原有节点与选择。");
         var merged = SubscriptionReconciler.Merge(current, sourceId, imported);
         merged.Subscriptions.RemoveAll(item => item.Id == sourceId); merged.Subscriptions.Add(source); return merged;

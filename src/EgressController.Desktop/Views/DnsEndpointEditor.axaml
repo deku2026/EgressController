@@ -1,0 +1,7 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.Desktop.ViewModels" x:Class="EgressController.Desktop.Views.DnsEndpointEditor" x:DataType="vm:ShellViewModel" IsEnabled="{Binding CanEdit}">
+ <StackPanel Spacing="8">
+  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6"><TextBlock Text="加密 DNS 上游" FontSize="12" FontWeight="Medium" VerticalAlignment="Center"/><Button Name="ChooseAliDnsButton" Grid.Column="1" Content="阿里 DNS" Classes="quiet" Command="{Binding UseAliDnsCommand}" AutomationProperties.Name="选择阿里加密 DNS"/><Button Grid.Column="2" Content="Cloudflare" Classes="quiet" Command="{Binding UseCloudflareDnsCommand}" AutomationProperties.Name="选择 Cloudflare 加密 DNS"/></Grid>
+  <TextBox Name="DnsEndpointInput" Text="{Binding DnsServer,Mode=TwoWay}" FontSize="11" AutomationProperties.Name="加密 DNS 上游地址" AutomationProperties.HelpText="需要能通过非家宽直接访问的 HTTPS DNS 地址；此处不会改变系统 DNS。"/>
+  <TextBlock Text="需能经非家宽直连。浏览器经 Clash 可用，不代表此 DNS 可直连；失败可更换上游后重新导入。" Classes="caption" FontSize="10" TextWrapping="Wrap" LineHeight="18"/>
+ </StackPanel>
+</UserControl>

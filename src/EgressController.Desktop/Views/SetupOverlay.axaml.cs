@@ -30,6 +30,15 @@ public partial class SetupOverlay : UserControl
     }
     private void ModelChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(ShellViewModel.SubscriptionDnsIssue) && _model?.SubscriptionDnsIssue == true)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_model?.SubscriptionDnsIssue == true && _model.SetupSubscription && IsEffectivelyVisible)
+                    this.FindControl<Border>("SubscriptionDnsRepairPanel")?.BringIntoView();
+            }, DispatcherPriority.Loaded);
+            return;
+        }
         if (e.PropertyName == nameof(ShellViewModel.CanEdit))
         {
             var button = this.FindControl<Button>("HomeConnectivityButton");

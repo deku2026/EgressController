@@ -69,7 +69,7 @@ public sealed partial class ShellViewModel
         _backend.SetProgressSink(null); _appliedGroups = null; _lastGroupTests.Clear(); _probes.Clear();
         _prepared = new([], new Dictionary<string, byte[]>(), new Dictionary<string, GeoRuleSet>());
         _ruleCatalog = []; _catalog.Clear(); // Discard checkboxes without rescanning/enrolling any executable.
-        Document = new(); InvalidateHomeCheck(true); _subscriptionReady = false; _needsValidation = true; ConfigValid = false; HasChanges = false;
+        Document = new(); SubscriptionDnsIssue = false; ShowSubscriptionDnsRetry = false; InvalidateHomeCheck(true); _subscriptionReady = false; _needsValidation = true; ConfigValid = false; HasChanges = false;
         SubscriptionUrl = ""; LocalSubscriptionYaml = ""; AppQuery = ""; CatalogQuery = ""; RuleQuery = ""; NodeQuery = "";
         CustomRuleName = ""; CustomRuleEntries = ""; CustomRuleIsIp = false;
         AddingApps = false; AddingRules = false; CreatingCustomRule = false; ManagingGroups = false;

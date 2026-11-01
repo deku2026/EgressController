@@ -99,7 +99,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         ConnectionAttempt = new(() => ApplyCommand.Execute(null));
         _backend.SetProgressSink(new UiProgress(progress => ConnectionAttempt.Observe(progress)));
         ResetDslCommand = new(() => { DslText = PolicyYaml.Write(Document); Notice = "已从当前配置重新生成 DSL。"; }); TogglePreviewCommand = new(() => RunOperationAsync(TogglePreviewAsync));
-        InitializeResetCommands(); InitializeHomeCheck(); InitializeWorkspaceCommands();
+        InitializeResetCommands(); InitializeHomeCheck(); InitializeWorkspaceCommands(); InitializeDnsCommands();
         BeginSetupCommand = new(() => { SetupStep = 0; OnboardingVisible = true; }); CloseSetupCommand = new(() => OnboardingVisible = false); NextSetupCommand = new(() => RunOperationAsync(NextSetupAsync), () => CanAdvanceSetup && !IsBusy); BackSetupCommand = new(() => SetupStep = Math.Max(0, SetupStep - 1), () => SetupStep > 0 && !IsBusy);
     }
     public IReadOnlyList<Choice> InterfaceChoices { get; private set; } = [];
@@ -161,7 +161,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public string CustomRuleName { get => _customName; set => Set(ref _customName, value); }
     public string CustomRuleEntries { get => _customEntries; set => Set(ref _customEntries, value); }
     public bool CustomRuleIsIp { get => _customIp; set => Set(ref _customIp, value); }
-    public string DnsServer { get => Document.Dns.HttpsUrl; set { if (Document.Dns.HttpsUrl == value) return; Document.Dns.HttpsUrl = value; Raise(); StateChanged(); } }
+    public string DnsServer { get => Document.Dns.HttpsUrl; set { if (Document.Dns.HttpsUrl == value) return; Document.Dns.HttpsUrl = value; SubscriptionDnsIssue = false; if (DnsEndpoint.IsValid(value)) Document.Dns.UpstreamIp = new Uri(value).Host.Trim('[', ']'); Raise(); StateChanged(); } }
     public string DslText { get => _dsl; set => Set(ref _dsl, value); }
     public string GeneratedConfig { get => _generated; private set => Set(ref _generated, value); }
     public string Notice { get => _notice; private set => Set(ref _notice, value); }
@@ -327,6 +327,7 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
         foreach (var group in _groupRows) group.RefreshInteraction();
         ConfirmAppsCommand.Refresh(); RefreshSelectedInventoryCommand.Refresh(); NextSetupCommand.Refresh(); BackSetupCommand.Refresh();
         RequestResetCommand.Refresh(); CancelResetCommand.Refresh(); ConfirmResetCommand.Refresh(); RepairNetworkCommand.Refresh(); CheckHomeCommand.Refresh(); RetryWorkspaceCommand.Refresh();
+        UseAliDnsCommand.Refresh(); UseCloudflareDnsCommand.Refresh();
     }
     private void RecordFailure(string operation, Exception error)
     { try { _backend.RecordFailure(operation, error); } catch (Exception) { /* Diagnostics are observational. */ } }
@@ -483,15 +484,15 @@ public sealed partial class ShellViewModel : Bindable, IAsyncDisposable
     public async Task ImportSubscriptionAsync()
     {
         if (!Uri.TryCreate(SubscriptionUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)) { CurrentIssue = "请输入有效的 HTTPS 订阅 URL。"; return; }
-        CurrentIssue = ""; Notice = "正在直连获取并校验订阅…";
+        CurrentIssue = ""; SubscriptionDnsIssue = false; Notice = "正在直连获取并校验订阅…";
         try
         {
-            var imported = await _backend.ImportSubscriptionAsync(uri, Document, ActionToken);
-            Document = imported; InitializeImportedDefault(); _probes.Clear(); _subscriptionReady = Document.Nodes.Count > 0 || Document.Groups.Count > 0; RebuildProjection(); StateChanged();
+            var imported = await _backend.ImportSubscriptionAsync(uri, CopyDocument(Document), ActionToken);
+            Document = imported; ShowSubscriptionDnsRetry = false; InitializeImportedDefault(); _probes.Clear(); _subscriptionReady = Document.Nodes.Count > 0 || Document.Groups.Count > 0; RebuildProjection(); StateChanged();
             if (IsPreview) await MeasureGroupsAsync(applyAutomatic: false);
             Raise(nameof(SetupSubscriptionStatus)); Notice = $"订阅已更新：{NodeCountLabel}；原有选择已保留。"; AddEvent("订阅已更新", "已校验节点与分组；原有配置选择继续保留。", "subscription");
         }
-        catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("subscription.import", exception); Notice = exception is OperationCanceledException ? "订阅导入已取消；原有节点与缓存已保留。" : "订阅直连未完成；原有节点与缓存已保留，可以重试。"; CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
+        catch (Exception exception) when (IsExpectedFailure(exception)) { RecordFailure("subscription.import", exception); Notice = exception is OperationCanceledException ? "订阅导入已取消；原有节点与缓存已保留。" : "订阅直连未完成；原有节点与缓存已保留，可以重试。"; CurrentIssue = SafeFailure(exception, "订阅更新失败；原有配置与已验证缓存已保留。"); ShowSubscriptionDnsRetry = exception is ResourcePreparationException { TransportFailure.TransportStage: ResourceTransportStage.Dns }; SubscriptionDnsIssue = ShowSubscriptionDnsRetry; AddEvent("订阅更新失败", CurrentIssue, "subscription"); }
     }
     public void RunProbes() { if (!IsPreview) throw new InvalidOperationException("Use asynchronous real probing."); RunProbesAsync().GetAwaiter().GetResult(); }
     public Task RunProbesAsync() => RunGroupProbeAsync(null);

@@ -91,7 +91,7 @@ public sealed class PolicyTests
             if (skipping && line.Length > 0 && !char.IsWhiteSpace(line[0])) skipping = false;
             if (!skipping) filtered.Add(line);
         }
-        var parsed = PolicyYaml.Read(string.Join('\n', filtered)); Assert.True(parsed.IsSuccess); Assert.Equal("1.1.1.1", parsed.Document!.Dns.UpstreamIp); Assert.Equal("utun10", parsed.Document.Tun.Name); Assert.Contains("dns:", PolicyYaml.Write(parsed.Document));
+        var parsed = PolicyYaml.Read(string.Join('\n', filtered)); Assert.True(parsed.IsSuccess); Assert.Equal(DnsEndpoint.DefaultIp, parsed.Document!.Dns.UpstreamIp); Assert.Equal("utun10", parsed.Document.Tun.Name); Assert.Contains("dns:", PolicyYaml.Write(parsed.Document));
     }
     [Theory]
     [InlineData("dns: {upstream_ip: https://dns.example.test/query}")]

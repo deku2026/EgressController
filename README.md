@@ -14,6 +14,8 @@ Mac 优先的原生 Avalonia/.NET 客户端，以 Xray-core 为唯一网络内�
 
 管理员密码只授权网络助手安装，Rider 和主界面保持普通用户权限，无需以管理员身份打开 Rider。失败时向导顶部直接显示错误，可点击“查看诊断”或“打开日志目录”；“日志目录”同时提供生命周期日志、逐项测速诊断和后台网络错误汇总，记录网卡、失败阶段与恢复结果；不记录订阅密码或请求内容。
 
+**订阅／测速 DNS**：新建或重置配置默认使用阿里加密 DNS（`https://223.5.5.5/dns-query`），启动解析需要能经非家宽直接访问，不能依赖尚未建立的代理。旧配置的 DNS 保留；首次导入和“设置 → DNS”可修改上游。失败时显示 DNS、连接、TLS 或 HTTP 原因，DNS 失败会展开修复位置并提供“使用此 DNS 重试”。详见[DNS 启动依赖排查](docs/mac-dns-bootstrap.md)。
+
 **iPhone USB 检测失败**：若 macOS 显示 Attached，或关闭 Wi-Fi 后才可上网，到“系统设置 → 网络 → iPhone USB → 详细信息”关闭 **Disable unless needed（除非需要，否则停用）**，保持热点和 Wi-Fi 开启，等待 USB 获取 IP 后重新检测。向导会显示此提示，并区分网卡未激活、没有可用 IP、DNS 和连接失败；成功后清除提示。详见[家宽检测与 USB 排查](docs/mac-home-connectivity.md)。
 
 **工作空间载入失败**时会提供重新载入、日志和重新设置入口，保留已读到的应用与配置；不会显示空白网卡设置或把失败状态标成已同步。向导固定步骤标题和底部操作，分组、应用列表独立滚动。
@@ -67,7 +69,7 @@ dotnet run --project src/EgressController.Desktop -- --preview
 ```sh
 # 构建机获取固定发布归档；不会启动 Xray/TUN。
 gh release download v26.10.29 --repo XTLS/Xray-core --pattern Xray-macos-arm64-v8a.zip --dir artifacts/core
-python3 build/Verify-Mac.py --version 0.1.10
+python3 build/Verify-Mac.py --version 0.1.11
 ```
 
 **开发测试只用 mock。** 该命令运行注入资源/进程/权限适配器的测试、纯 C ABI 探针、内置 Xray 命令行与模拟 Unix RPC 的规则资源回归检查、普通/紧凑 UI 截图与交互检查，再打包 GUI、助手及经归档/可执行文件双重 SHA-256 校验的 Xray。缺少内核时拒绝生成安装包。只执行包内显式 `--mock-smoke`，从不启动真实 TUN、安装服务、修改系统 DNS/路由或终止真实应用。

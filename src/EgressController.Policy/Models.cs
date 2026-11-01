@@ -31,8 +31,8 @@ public sealed class MacPolicyDocument
 
 public sealed class DnsPolicy
 {
-    public string UpstreamIp { get; set; } = "1.1.1.1";
-    public string HttpsUrl { get; set; } = "https://1.1.1.1/dns-query";
+    public string UpstreamIp { get; set; } = DnsEndpoint.DefaultIp;
+    public string HttpsUrl { get; set; } = DnsEndpoint.DefaultHttpsUrl;
 }
 public sealed class TunPolicy
 {

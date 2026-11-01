@@ -59,15 +59,18 @@ public static class NetworkFailure
     public static string Code(Exception error)
     {
         var causes = Causes(error).ToArray();
+        if (causes.OfType<ResourceTransportFailure>().FirstOrDefault() is { } transport) return transport.Code;
         // Stack frames include DNS class names even when the real failure is socket routing.
         string classification = Classify(string.Join("\n", causes.Select(cause => cause.Message)));
         if (classification == "interface.bind") return classification;
+        if (causes.Any(cause => cause is TimeoutException or OperationCanceledException)) return "timeout";
         foreach (var socket in causes.OfType<SocketException>())
         {
             if (socket.SocketErrorCode is SocketError.NetworkUnreachable or SocketError.HostUnreachable or SocketError.NetworkDown or SocketError.AddressNotAvailable) return "network.unreachable";
             if (socket.SocketErrorCode == SocketError.ConnectionRefused) return "connection.refused";
             if (socket.SocketErrorCode == SocketError.TimedOut) return "timeout";
         }
+        if (causes.Any(cause => cause is System.Security.Authentication.AuthenticationException)) return "tls.failed";
         return classification;
     }
     private static IEnumerable<Exception> Causes(Exception error)
