@@ -1,0 +1,13 @@
+<Solution>
+  <Project Path="src/EgressController.Core/EgressController.Core.csproj" />
+  <Project Path="src/EgressController.Transport/EgressController.Transport.csproj" />
+  <Project Path="src/EgressController.Presentation/EgressController.Presentation.csproj" />
+  <Project Path="src/EgressController.Surge/EgressController.Surge.csproj" />
+  <Project Path="src/EgressController.Mac/EgressController.Mac.csproj" />
+  <Project Path="src/EgressController.Subscriptions/EgressController.Subscriptions.csproj" />
+  <Project Path="src/EgressController.SubscriptionUI/EgressController.SubscriptionUI.csproj" />
+  <Project Path="src/EgressController.MacApp/EgressController.MacApp.csproj" />
+  <Project Path="src/EgressController.MacAgent/EgressController.MacAgent.csproj" />
+  <Project Path="tools/EgressController.MacPreview/EgressController.MacPreview.csproj" />
+  <Project Path="tests/EgressController.Portable.Tests/EgressController.Portable.Tests.csproj" />
+</Solution>

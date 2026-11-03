@@ -1,0 +1,9 @@
+# NativeAOT browser boundary
+
+PuppeteerSharp is pinned to 25.15.0. Its AOT serializer uses its generated `SystemTextJsonSerializationContext` when reflection is disabled, but several options-based serializer overloads still produce library IL2104/IL3053 aggregate warnings. Executable projects keep these two third-party aggregates visible as warnings; direct product IL2026/IL3050 warnings remain errors. Do not enable JSON reflection or add blanket trimming suppression. Re-audit these diagnostics on dependency upgrades.
+
+A real NativeAOT run found an additional upstream omission: `BrowserSetDownloadBehaviorRequest` is absent from that generated context. EgressController serializes its own typed request with a generated context and supplies a `JsonElement` to the CDP session instead. The session must remain attached through the download; detaching restores Chrome's default download behavior and may open an unwanted Save dialog. Download behavior is scoped to a temporary browser context and a private temporary directory. The persistent account context is never incognito.
+
+Only installed Chrome is launched. BrowserFetcher/bundled browser download code is not used. Human first login uses an ordinary Chrome process with only a separate user data directory and window URL. Subsequent visits launch the same installed browser/profile and attach through a loopback-only debugging endpoint. No UA override, stealth scripts, automated password submission or CAPTCHA solving is used. A blocked challenge is an explicit state, not expired authentication.
+
+Validation must run the native artifact, not just JIT or a build: use the opt-in local integration tool and a human-established session. Never add real-site/browser/network E2E to CI. The native main app and Agent additionally provide early mock smoke that runs before production initialization.

@@ -46,5 +46,9 @@
     <InternalsVisibleTo Include="EgressController.Windows.IntegrationTests" />
   </ItemGroup>
 
-  <ItemGroup><ProjectReference Include="..\EgressController.Presentation\EgressController.Presentation.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="..\EgressController.Presentation.Windows\EgressController.Presentation.Windows.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../EgressController.SubscriptionUI/EgressController.SubscriptionUI.csproj" /></ItemGroup>
+  <!-- PuppeteerSharp 25.15 uses its generated context in AOT but annotates the options overloads.
+       Keep third-party aggregate diagnostics visible. Product IL2026/IL3050 remain errors; see docs/native-aot-subscriptions.md. -->
+  <PropertyGroup><WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104;IL3053</WarningsNotAsErrors></PropertyGroup>
 </Project>

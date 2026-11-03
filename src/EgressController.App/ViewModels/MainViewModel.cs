@@ -14,6 +14,12 @@ public sealed class MainViewModel : ObservableObject
     public MainViewModel(IAppController controller)
     {
         Controller = controller;
+        Subscriptions = new EgressController.SubscriptionUI.SubscriptionViewModel(controller.IsPreview
+            ? new EgressController.SubscriptionUI.PreviewSubscriptionSession()
+            : new EgressController.Subscriptions.DesktopSubscriptionSession(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EgressController"),
+                new EgressController.Subscriptions.WindowsSecretStore()));
+        _ = Subscriptions.InitializeAsync();
         Traffic = new TrafficViewModel(controller);
         Dashboard = new DashboardViewModel(controller, Traffic);
         Overview = new OverviewViewModel(controller);
@@ -29,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public IAppController Controller { get; }
+    public EgressController.SubscriptionUI.SubscriptionViewModel Subscriptions { get; }
     public DashboardViewModel Dashboard { get; }
     public IReadOnlyList<NavigationItem> Pages { get; } = [
         new("overview", "概览", "连接状态与流量，一目了然"),
@@ -39,6 +46,7 @@ public sealed class MainViewModel : ObservableObject
         new("traffic", "流量", "查看本周期应用用量与出口分布"),
         new("protection", "进程保护", "主程序的保护状态与终止记录"),
         new("guardian", "独立守护", "只核验主程序存活与 TUN 接管"),
+        new("subscriptions", "机场订阅", "登录会话、订阅校验与服务器接收"),
         new("events", "运行事件", "查看保护、启动与重启的关键原因")];
     private NavigationItem? _selectedPage;
     public NavigationItem SelectedPage

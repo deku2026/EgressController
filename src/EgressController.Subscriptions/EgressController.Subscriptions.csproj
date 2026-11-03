@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks><TargetFramework>net10.0</TargetFramework><PlatformTarget>AnyCPU</PlatformTarget></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EgressController.Core/EgressController.Core.csproj" />
+    <PackageReference Include="PuppeteerSharp" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+    <PackageReference Include="Google.Protobuf" />
+    <Protobuf Include="../../contracts/subscription_ingress.proto" GrpcServices="Client" />
+  </ItemGroup>
+</Project>

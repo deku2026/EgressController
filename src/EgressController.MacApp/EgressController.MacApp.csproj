@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><PlatformTarget>AnyCPU</PlatformTarget><OutputType>Exe</OutputType><AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EgressController.Mac/EgressController.Mac.csproj" />
+    <ProjectReference Include="../EgressController.Surge/EgressController.Surge.csproj" />
+    <ProjectReference Include="../EgressController.Subscriptions/EgressController.Subscriptions.csproj" />
+    <ProjectReference Include="../EgressController.SubscriptionUI/EgressController.SubscriptionUI.csproj" />
+    <ProjectReference Include="../EgressController.Presentation/EgressController.Presentation.csproj" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Avalonia.Desktop" />
+  </ItemGroup>
+  <ItemGroup><AvaloniaResource Include="../../packaging/Assets/Square44x44Logo.png" Link="Assets/App.png"/><AvaloniaResource Include="../../tools/EgressController.UiPreview/Assets/*.png" Link="Assets/%(Filename)%(Extension)" /></ItemGroup>
+  <!-- PuppeteerSharp 25.15 uses its generated context in AOT but annotates the options overloads.
+       Keep third-party aggregate diagnostics visible. Product IL2026/IL3050 remain errors; see docs/native-aot-subscriptions.md. -->
+  <PropertyGroup><WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104;IL3053</WarningsNotAsErrors></PropertyGroup>
+</Project>

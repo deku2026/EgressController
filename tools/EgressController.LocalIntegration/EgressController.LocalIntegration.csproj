@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><PlatformTarget>AnyCPU</PlatformTarget><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/EgressController.Subscriptions/EgressController.Subscriptions.csproj"/><ProjectReference Include="../../src/EgressController.Surge/EgressController.Surge.csproj"/></ItemGroup>
+  <!-- PuppeteerSharp 25.15 uses its generated context in AOT but annotates the options overloads.
+       Keep third-party aggregate diagnostics visible. Product IL2026/IL3050 remain errors; see docs/native-aot-subscriptions.md. -->
+  <PropertyGroup><WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104;IL3053</WarningsNotAsErrors></PropertyGroup>
+</Project>

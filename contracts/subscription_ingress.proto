@@ -1,0 +1,24 @@
+syntax = "proto3";
+package subvault.ingress.v1;
+option csharp_namespace = "SubVault.Ingress.V1";
+service SubscriptionIngress {
+  rpc UploadSubscription (SubscriptionUpload) returns (UploadReceipt);
+}
+enum SubscriptionFormat { UNSPECIFIED = 0; CLASH = 1; SURGE = 2; }
+message SubscriptionUpload {
+  string provider_id = 1;
+  string client_id = 2;
+  SubscriptionFormat format = 3;
+  bytes content = 4;
+  string sha256 = 5;
+  int64 captured_at_unix_ms = 6;
+  int64 version = 7;
+}
+message UploadReceipt {
+  bool accepted = 1;
+  SubscriptionFormat format = 2;
+  string sha256 = 3;
+  string server_version = 4;
+  string failure_reason = 5;
+  int64 version = 6;
+}

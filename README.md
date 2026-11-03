@@ -1,5 +1,8 @@
 # EgressController
 
+macOS 新增原生 Surge 配置与订阅管理界面，沿用当前主题；不接管网络、不运行 TUN。首次手动登录 TAG 后复用专属 Chrome 会话，明确提示会话过期或网站验证阻塞。Windows 新增同一订阅页面。构建、使用与验证边界见 [macOS 管理说明](docs/macos-manager.md)。
+
+
 Windows 双网卡分流与应用保护工具。原生 Avalonia 界面，主程序、守护服务和小托盘均使用 NativeAOT。
 
 ![概览](docs/images/overview.png)

@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.SubscriptionUI" x:Class="EgressController.SubscriptionUI.SubscriptionPage" x:DataType="vm:SubscriptionViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="16">
+      <Border Classes="card" Padding="18">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+          <StackPanel Spacing="6"><TextBlock Text="{Binding LoginStatusText}" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding LoginDetail}" Classes="muted" TextWrapping="Wrap" FontSize="12"/></StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><Button Content="检查会话" Command="{Binding CheckSessionCommand}" IsEnabled="{Binding !Busy}"/><Button Content="首次登录 / 重新登录" Command="{Binding LoginCommand}" IsEnabled="{Binding !Busy}"/></StackPanel>
+        </Grid>
+      </Border>
+      <Border Background="#FFF2DB" CornerRadius="8" Padding="12" IsVisible="{Binding LoginWarning}"><TextBlock Text="自动获取已暂停。完成手动登录 / 安全验证并检查会话后，才会恢复自动获取。" TextWrapping="Wrap" Foreground="#875515"/></Border>
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="14">
+        <Border Classes="card" Padding="18"><StackPanel Spacing="10"><TextBlock Classes="muted" Text="Clash 订阅"/><TextBlock Text="{Binding ClashStatus}" FontSize="18" FontWeight="SemiBold"/><TextBlock Classes="muted" Text="Mihomo 原生校验" FontSize="12"/></StackPanel></Border>
+        <Border Grid.Column="1" Classes="card" Padding="18"><StackPanel Spacing="10"><TextBlock Classes="muted" Text="Surge 订阅"/><TextBlock Text="{Binding SurgeStatus}" FontSize="18" FontWeight="SemiBold"/><TextBlock Classes="muted" Text="{Binding SurgeValidationLabel}" FontSize="12"/></StackPanel></Border>
+        <Border Grid.Column="2" Classes="card" Padding="18"><StackPanel Spacing="10"><TextBlock Classes="muted" Text="服务器接收"/><TextBlock Text="{Binding UploadStatus}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Classes="muted" Text="原始订阅 · 内容与版本确认" FontSize="12"/></StackPanel></Border>
+      </Grid>
+      <Border Classes="card" Padding="20">
+        <StackPanel Spacing="16">
+          <Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="4"><TextBlock Text="TAG 订阅账户" FontSize="17" FontWeight="SemiBold"/><TextBlock Classes="muted" Text="真实 Chrome · 独立登录会话 · 需要验证时由你完成" FontSize="12"/></StackPanel><Border Grid.Column="1" Classes="badge"><TextBlock Text="按需启动" FontSize="12"/></Border></Grid>
+          <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="18" RowSpacing="14">
+            <StackPanel Spacing="6"><TextBlock Text="网站地址"/><TextBox Text="{Binding Website}" PlaceholderText="https://tagss.pro/"/></StackPanel>
+            <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="接收服务器"/><TextBox Text="{Binding ServerEndpoint}" PlaceholderText="https://server.example/"/></StackPanel>
+            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="6"><TextBlock Text="服务器接收凭据"/><TextBox Text="{Binding IngressToken}" PasswordChar="●" PlaceholderText="至少 32 位；留空保留已保存的凭据"/></StackPanel>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12"><TextBlock Classes="muted" Text="凭据保存在系统安全存储；仅上传原始订阅文件。" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="12"/><Button Grid.Column="1" Content="保存设置" Command="{Binding SaveCommand}" IsEnabled="{Binding !Busy}"/></Grid>
+        </StackPanel>
+      </Border>
+      <Border Classes="card" Padding="20">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="5"><TextBlock Text="{Binding Stage}" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Classes="muted" TextWrapping="Wrap"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><Button Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding Busy}"/><Button Content="立即获取并上传" Classes="primary" Command="{Binding RefreshCommand}" IsEnabled="{Binding !Busy}"/></StackPanel></Grid>
+          <Border Background="#FFF2DB" CornerRadius="8" Padding="12" IsVisible="{Binding NeedsInteraction}"><TextBlock Text="请在专属 Chrome 手动完成登录或安全验证，随后退出该 Chrome，再点击检查会话。" TextWrapping="Wrap" Foreground="#875515"/></Border>
+          <TextBlock Classes="muted" FontSize="12" Text="获取 → 原生校验 → 上传 → 服务器确认；失败保留上次有效文件。"/>
+        </StackPanel>
+      </Border>
+      <Border Classes="card" Padding="20"><StackPanel Spacing="14">
+        <Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="4"><TextBlock Text="节点健康与自动刷新" FontSize="17" FontWeight="SemiBold"/><TextBlock Classes="muted" Text="每 15 分钟检查一次；确认连续异常后才启动浏览器" FontSize="12"/></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding AutomaticChecks}" OnContent="已启用" OffContent="未启用"/></Grid>
+        <CheckBox IsChecked="{Binding KeepSessionActive}" Content="每 6 小时确认已保存会话（网络正常且自动检测已启用时）"/>
+        <TextBlock Text="尽量复用登录；有效期由网站决定。检测到过期或验证阻塞后暂停，不自动提交密码。" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
+        <Grid ColumnDefinitions="2*,*,*,*" ColumnSpacing="12">
+          <StackPanel Spacing="6"><TextBlock Text="节点分组 Regex"/><TextBox Text="{Binding GroupPattern}"/></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="超时比例 ≥ %"/><NumericUpDown Value="{Binding FailurePercent}" Minimum="1" Maximum="100" FormatString="0"/></StackPanel>
+          <StackPanel Grid.Column="2" Spacing="6"><TextBlock Text="连续异常轮次"/><NumericUpDown Value="{Binding ConsecutiveRounds}" Minimum="1" Maximum="10" FormatString="0"/></StackPanel>
+          <StackPanel Grid.Column="3" Spacing="6"><TextBlock Text="冷却时间 / 分钟"/><NumericUpDown Value="{Binding CooldownMinutes}" Minimum="15" Maximum="1440" FormatString="0"/></StackPanel>
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12"><TextBlock Text="{Binding HealthStatus}" Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center"/><Button Grid.Column="1" Content="检测节点" Command="{Binding CheckHealthCommand}" IsEnabled="{Binding !Busy}"/></Grid>
+      </StackPanel></Border>
+      <Border Classes="card" Padding="20"><Expander Header="浏览器与原生校验器" Theme="{StaticResource QuietExpander}"><StackPanel Spacing="12" Margin="0,12,0,0">
+        <Grid ColumnDefinitions="110,*" ColumnSpacing="12"><TextBlock Text="Chrome" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding ChromePath}"/></Grid>
+        <Grid ColumnDefinitions="110,*" ColumnSpacing="12"><TextBlock Text="Mihomo" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding MihomoPath}" PlaceholderText="选择 mihomo 可执行文件，校验只使用 -t"/></Grid>
+        <Grid ColumnDefinitions="110,*" ColumnSpacing="12"><TextBlock Text="Surge CLI" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding SurgeCliPath}"/></Grid>
+      </StackPanel></Expander></Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

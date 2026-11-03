@@ -5,6 +5,7 @@ namespace EgressController.Presentation;
 /// <summary>Original 20×20 monochrome vector icons. No font or SVG runtime dependency.</summary>
 public static class Icons
 {
+    public static Geometry Network { get; } = For("network");
     public static Geometry Folder { get; } = For("folder");
     public static Geometry Guardian { get; } = For("guardian");
     public static Geometry More { get; } = For("more");
@@ -19,6 +20,9 @@ public static class Icons
         "traffic" => "M2 12H6V19H2Z M9 7H13V19H9Z M16 2H20V19H16Z",
         "protection" => "M10 1L19 4V11C19 15 15 18 10 21C5 18 1 15 1 11V4Z M9 6V13H11V6Z M9 15V17H11V15Z",
         "guardian" => "M10 1L19 4V11C19 15 15 18 10 21C5 18 1 15 1 11V4Z M5 10L9 14L16 7L14.5 5.5L9 11L6.5 8.5Z",
+        "subscriptions" => "M3 1H17V7H14V4H6V7H3Z M1 9H7V12H1Z M14 9H20V12H14Z M9 7H12V15H9Z M6 13L10.5 18L15 13L17 15L10.5 22L4 15Z",
+        "configuration" => "M4 1H16L20 5V21H4Z M6 3V19H18V7H14V3Z M8 10H16V12H8Z M8 14H14V16H8Z",
+        "settings" => "M1 4H13V2H16V4H21V6H16V8H13V6H1Z M1 11H5V9H8V11H21V13H8V15H5V13H1Z M1 18H13V16H16V18H21V20H16V22H13V20H1Z",
         "events" => "M4 1H17L20 4V20H4Z M6 3V18H18V5H15V3Z M8 7H15V9H8Z M8 11H15V13H8Z M8 15H12V17H8Z",
         "folder" => "M1 4H9L11 7H20V18H1Z M3 9V16H18V9Z",
         "open" => "M2 4H10V6H4V17H16V11H18V19H2Z M11 1H20V10H18V4.5L9.5 13L8 11.5L16.5 3H11Z",

@@ -6,6 +6,9 @@
   <Folder Name="/probes/">
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/EgressController.Subscriptions/EgressController.Subscriptions.csproj" />
+    <Project Path="src/EgressController.SubscriptionUI/EgressController.SubscriptionUI.csproj" />
+    <Project Path="src/EgressController.Presentation.Windows/EgressController.Presentation.Windows.csproj" />
     <Project Path="src/EgressController.Presentation/EgressController.Presentation.csproj" />
     <Project Path="src/EgressController.App/EgressController.App.csproj" />
     <Project Path="src/EgressController.Core/EgressController.Core.csproj" />

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EgressController.Presentation/EgressController.Presentation.csproj" />
+    <ProjectReference Include="../EgressController.Guardian/EgressController.Guardian.csproj" />
+    <ProjectReference Include="../EgressController.Windows/EgressController.Windows.csproj" />
+  </ItemGroup>
+</Project>

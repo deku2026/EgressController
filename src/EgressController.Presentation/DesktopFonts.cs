@@ -7,6 +7,8 @@ public static class DesktopFonts
     public static FontManagerOptions Options() => new()
     {
         DefaultFamilyName = "fonts:Inter#Inter",
-        FontFallbacks = [new() { FontFamily = new FontFamily("Microsoft YaHei UI") }, new() { FontFamily = new FontFamily("Segoe UI Symbol") }],
+        FontFallbacks = OperatingSystem.IsMacOS()
+            ? [new() { FontFamily = new FontFamily("PingFang SC") }, new() { FontFamily = new FontFamily("Apple Symbols") }]
+            : [new() { FontFamily = new FontFamily("Microsoft YaHei UI") }, new() { FontFamily = new FontFamily("Segoe UI Symbol") }],
     };
 }

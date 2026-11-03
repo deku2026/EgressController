@@ -1,0 +1,29 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:EgressController.MacApp.ViewModels" xmlns:ui="using:EgressController.Presentation" x:Class="EgressController.MacApp.Views.OverviewPage" x:DataType="vm:MacMainViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled"><StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+      <Border Classes="card" Padding="22"><StackPanel Spacing="18">
+        <Grid ColumnDefinitions="*,Auto"><TextBlock Text="网络后端" Classes="card-title"/><Button Grid.Column="1" Content="检测连接" Classes="quiet" Command="{Binding CheckSurgeCommand}" IsEnabled="{Binding !Busy}"/></Grid>
+        <StackPanel Spacing="8"><TextBlock Text="Surge Mac" FontSize="30" FontWeight="SemiBold"/><StackPanel Orientation="Horizontal" Spacing="8"><Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" IsVisible="{Binding SurgeConnected}"/><TextBlock Text="{Binding SurgeStatus}" Classes="muted"/></StackPanel></StackPanel>
+        <Border Background="{DynamicResource LineBrush}" Height="1"/><Grid ColumnDefinitions="*,Auto"><TextBlock Text="最后检测" Classes="muted" FontSize="12"/><TextBlock Grid.Column="1" Text="{Binding ObservedAt}" Classes="muted" FontSize="12"/></Grid>
+      </StackPanel></Border>
+      <Border Grid.Column="1" Classes="card" Padding="22"><StackPanel Spacing="18">
+        <TextBlock Text="配置状态" Classes="card-title"/>
+        <StackPanel Spacing="8"><TextBlock Text="{Binding ConfigStatus}" FontSize="23" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="本地保存、语法校验与实际生效分别记录" Classes="muted" FontSize="12" TextWrapping="Wrap"/></StackPanel>
+        <Border Background="{DynamicResource LineBrush}" Height="1"/><Button Content="生成并校验配置" Command="{Binding PrepareCommand}" IsEnabled="{Binding !Busy}" HorizontalAlignment="Left"/>
+      </StackPanel></Border>
+    </Grid>
+    <Border Classes="card" Padding="22"><StackPanel Spacing="20">
+      <Grid ColumnDefinitions="*,Auto"><TextBlock Text="网络与分流" Classes="card-title"/><TextBlock Grid.Column="1" Text="{Binding NetworkSummary}" Classes="muted" FontSize="12" VerticalAlignment="Center"/></Grid>
+      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="20">
+        <StackPanel Spacing="8"><TextBlock Text="{Binding SelectedApps}" FontSize="32" FontWeight="SemiBold"/><TextBlock Text="已选应用" Classes="muted"/><TextBlock Text="App Bundle 与原生 CLI" Classes="muted" FontSize="12"/></StackPanel>
+        <StackPanel Grid.Column="1" Spacing="8"><TextBlock Text="{Binding SelectedRules}" FontSize="32" FontWeight="SemiBold"/><TextBlock Text="已启用域名与规则集" Classes="muted"/><TextBlock Text="按保存顺序编译" Classes="muted" FontSize="12"/></StackPanel>
+        <StackPanel Grid.Column="2" Spacing="8"><TextBlock Text="{Binding Ports.Count}" FontSize="32" FontWeight="SemiBold"/><TextBlock Text="本地 SOCKS5 端口" Classes="muted"/><TextBlock Text="代理核心固定到物理出口" Classes="muted" FontSize="12"/></StackPanel>
+      </Grid>
+    </StackPanel></Border>
+    <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+      <Border Classes="card" Padding="22"><StackPanel Spacing="16"><TextBlock Text="物理出口" Classes="card-title"/><ItemsControl ItemsSource="{Binding Adapters}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:AdapterRow"><Grid ColumnDefinitions="32,*,Auto" ColumnSpacing="12" Margin="0,0,0,16"><Border Background="#F0EDFC" CornerRadius="8" Width="32" Height="32"><PathIcon Data="{x:Static ui:Icons.Network}" Width="16" Height="16" Foreground="{DynamicResource HomeTextBrush}"/></Border><StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="{Binding Name}" FontWeight="Medium"/><TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Status}" Classes="muted" FontSize="11" VerticalAlignment="Center"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+      <Border Grid.Column="1" Classes="card" Padding="22"><StackPanel Spacing="16"><TextBlock Text="机场订阅" Classes="card-title"/><TextBlock Text="{Binding Subscriptions.Stage}" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="{Binding Subscriptions.Detail}" Classes="muted" TextWrapping="Wrap"/><TextBlock Text="每 15 分钟检查节点；确认异常后按需启动 Chrome。" Classes="muted" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
+    </Grid>
+    <TextBlock Text="管理配置与订阅；网络接管、连接转发由 Surge 负责。" Classes="muted" FontSize="12" Margin="2,2"/>
+  </StackPanel></ScrollViewer>
+</UserControl>

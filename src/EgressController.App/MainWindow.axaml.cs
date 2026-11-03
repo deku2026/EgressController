@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _timer?.Stop();
+        _vm?.Subscriptions.Dispose();
         base.OnClosed(e);
     }
 
@@ -83,13 +84,14 @@ public partial class MainWindow : Window
         {
             page = key switch
             {
+                "subscriptions" => new EgressController.SubscriptionUI.SubscriptionPage(),
                 "network" => new Views.NetworkPage(), "apps" => new Views.ApplicationsPage(),
                 "rules" => new Views.RulesPage(), "connections" => new Views.ConnectionsPage(),
                 "traffic" => new Views.TrafficPage(), "protection" => new Views.ProtectionPage(),
                 "guardian" => new Views.GuardianPage(), "events" => new Views.EventsPage(),
                 _ => new Views.OverviewPage(),
             };
-            page.DataContext = _vm;
+            page.DataContext = key == "subscriptions" ? _vm.Subscriptions : _vm;
             _pages[key] = page;
         }
         PageHost.Content = page;
