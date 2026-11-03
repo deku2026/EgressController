@@ -31,7 +31,8 @@
           <TextBlock Classes="muted" FontSize="12" Text="获取 → 原生校验 → 上传 → 服务器确认；失败保留上次有效文件。"/>
         </StackPanel>
       </Border>
-      <Border Classes="card" Padding="20"><StackPanel Spacing="14">
+      <Border Classes="card" Padding="16" IsVisible="{Binding !SupportsAutomaticChecks}"><TextBlock Classes="muted" Text="当前平台支持手动获取与上传。节点健康自动刷新尚未接入。" TextWrapping="Wrap"/></Border>
+      <Border Classes="card" Padding="20" IsVisible="{Binding SupportsAutomaticChecks}"><StackPanel Spacing="14">
         <Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="4"><TextBlock Text="节点健康与自动刷新" FontSize="17" FontWeight="SemiBold"/><TextBlock Classes="muted" Text="每 15 分钟检查一次；确认连续异常后才启动浏览器" FontSize="12"/></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding AutomaticChecks}" OnContent="已启用" OffContent="未启用"/></Grid>
         <CheckBox IsChecked="{Binding KeepSessionActive}" Content="每 6 小时确认已保存会话（网络正常且自动检测已启用时）"/>
         <TextBlock Text="尽量复用登录；有效期由网站决定。检测到过期或验证阻塞后暂停，不自动提交密码。" Classes="muted" FontSize="12" TextWrapping="Wrap"/>

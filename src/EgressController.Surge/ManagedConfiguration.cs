@@ -16,6 +16,8 @@ public sealed class ManagedConfiguration(string directory, IConfigValidator vali
         await _gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            PrivateFile.EnsureDirectory(directory);
+            await using var ownership = new FileStream(Path.Combine(directory, "configuration.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             byte[] bytes = Encoding.UTF8.GetBytes(content);
             await PrivateFile.WriteAsync(CandidatePath, bytes, token).ConfigureAwait(false);
             var result = await validator.CheckAsync(CandidatePath, token).ConfigureAwait(false);
@@ -34,6 +36,8 @@ public sealed class ManagedConfiguration(string directory, IConfigValidator vali
         await _gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            PrivateFile.EnsureDirectory(directory);
+            await using var ownership = new FileStream(Path.Combine(directory, "configuration.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             var bytes = await File.ReadAllBytesAsync(LastValidPath, token).ConfigureAwait(false);
             await PrivateFile.WriteAsync(CandidatePath, bytes, token).ConfigureAwait(false);
             return Encoding.UTF8.GetString(bytes);

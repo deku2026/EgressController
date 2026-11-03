@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
+using EgressController.Core.Protection;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -23,12 +24,15 @@ public sealed class GrpcSubscriptionUploader : ISubscriptionUploader, IDisposabl
     }
     public async Task<SubscriptionResult> UploadAsync(string provider, string client, SourceFormat format, byte[] content, long version, DateTimeOffset captured, CancellationToken token)
     {
+        RuntimeSafety.RequireLiveOperations();
+        if (content.Length is 0 or > 4 * 1024 * 1024) throw new InvalidDataException("订阅大小无效。");
         string hash = Convert.ToHexStringLower(SHA256.HashData(content));
         var request = new SubscriptionUpload { ProviderId = provider, ClientId = client, Format = (SubscriptionFormat)format, Content = ByteString.CopyFrom(content), Sha256 = hash, Version = version, CapturedAtUnixMs = captured.ToUnixTimeMilliseconds() };
         var rpc = new SubscriptionIngress.SubscriptionIngressClient(_channel);
         UploadReceipt receipt;
         try { receipt = await rpc.UploadSubscriptionAsync(request, new Metadata { { "authorization", "Bearer " + _token } }, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: token).ConfigureAwait(false); }
-        catch (RpcException ex) when (!token.IsCancellationRequested) { throw new IOException($"服务器接收失败（{ex.StatusCode}）；有效订阅已保留，可重试上传。"); }
+        catch (RpcException) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
+        catch (RpcException ex) { throw new IOException($"服务器接收失败（{ex.StatusCode}）；有效订阅已保留，可重试上传。"); }
         if (!receipt.Accepted || receipt.Format != request.Format || receipt.Sha256 != hash || receipt.Version != version || string.IsNullOrWhiteSpace(receipt.ServerVersion))
             throw new InvalidDataException("服务器未确认相同格式、内容哈希和版本；不能显示上传成功。");
         return new(format, hash, receipt.ServerVersion, version);

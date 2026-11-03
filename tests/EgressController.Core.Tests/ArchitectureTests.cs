@@ -20,6 +20,14 @@ public class ArchitectureTests
         "EgressController.Guardian",
         "EgressController.GuardService",
         "EgressController.GuardTray",
+        "EgressController.Presentation.Windows",
+        "EgressController.Subscriptions",
+        "EgressController.SubscriptionUI",
+        "EgressController.Surge",
+        "EgressController.Mac",
+        "EgressController.MacApp",
+        "EgressController.MacAgent",
+
     ];
 
     private static readonly Dictionary<string, HashSet<string>> AllowedRefs = new(StringComparer.OrdinalIgnoreCase)
@@ -40,12 +48,20 @@ public class ArchitectureTests
             "EgressController.Core", "EgressController.Transport", "EgressController.Windows",
             "EgressController.Rules", "EgressController.Launcher", "EgressController.Diagnostics",
             "EgressController.State", "EgressController.SingBox", "EgressController.Guardian", "EgressController.Presentation",
+            "EgressController.Presentation.Windows", "EgressController.SubscriptionUI",
         },
         ["EgressController.Guardian"] = new(StringComparer.OrdinalIgnoreCase)
         { "EgressController.Core", "EgressController.Windows", "EgressController.Diagnostics" },
         ["EgressController.GuardService"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian" },
-        ["EgressController.GuardTray"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian", "EgressController.Presentation" },
-        ["EgressController.Presentation"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian", "EgressController.Windows" },
+        ["EgressController.GuardTray"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Guardian", "EgressController.Presentation", "EgressController.Presentation.Windows" },
+        ["EgressController.Presentation"] = new(StringComparer.OrdinalIgnoreCase),
+        ["EgressController.Presentation.Windows"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Presentation", "EgressController.Guardian", "EgressController.Windows" },
+        ["EgressController.Subscriptions"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Core" },
+        ["EgressController.SubscriptionUI"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Subscriptions", "EgressController.Presentation" },
+        ["EgressController.Surge"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Core", "EgressController.Transport" },
+        ["EgressController.Mac"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Subscriptions", "EgressController.Core", "EgressController.Surge" },
+        ["EgressController.MacApp"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Mac", "EgressController.Surge", "EgressController.Subscriptions", "EgressController.SubscriptionUI", "EgressController.Presentation" },
+        ["EgressController.MacAgent"] = new(StringComparer.OrdinalIgnoreCase) { "EgressController.Mac", "EgressController.Subscriptions", "EgressController.Surge" },
     };
 
     [Fact]
@@ -112,7 +128,7 @@ public class ArchitectureTests
 
     public static TheoryData<string> SrcProjectNames => new(SrcProjects);
     public static TheoryData<string> NonAppProjectNames
-        => new(SrcProjects.Where(name => name is not ("EgressController.App" or "EgressController.GuardTray" or "EgressController.Presentation")));
+        => new(SrcProjects.Where(name => name is not ("EgressController.App" or "EgressController.GuardTray" or "EgressController.Presentation" or "EgressController.Presentation.Windows" or "EgressController.SubscriptionUI" or "EgressController.MacApp")));
 
     private static ProjectMap LoadProjectMap() => ProjectMap.Load(FindSolutionRoot());
 

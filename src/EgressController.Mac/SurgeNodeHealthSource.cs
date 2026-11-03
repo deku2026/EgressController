@@ -2,6 +2,7 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using EgressController.Core.Storage;
+using EgressController.Core.Protection;
 using EgressController.Subscriptions;
 using EgressController.Surge;
 
@@ -11,6 +12,7 @@ public sealed class SurgeNodeHealthSource(string root, KeychainSecretStore secre
 {
     public async Task<HealthSnapshot> ObserveAsync(SubscriptionSettings settings, CancellationToken token)
     {
+        RuntimeSafety.RequireLiveOperations();
         var config = await PrivateFile.ReadJsonAsync(Path.Combine(root, "settings.json"), MacSettingsJson.Default.MacSettings, token).ConfigureAwait(false) ?? new();
         string? key = secrets.Read("surge-api");
         if (string.IsNullOrEmpty(key)) return new(false, false, [], "请先在设置中连接 Surge HTTP API");
@@ -39,7 +41,7 @@ public sealed class SurgeNodeHealthSource(string root, KeychainSecretStore secre
     {
         if (response.ValueKind == JsonValueKind.Object && response.TryGetProperty(name, out var result) && result.ValueKind == JsonValueKind.Object)
         {
-            if (result.TryGetProperty("available", out var available) && available.TryGetDouble(out double milliseconds) && milliseconds >= 0 && double.IsFinite(milliseconds))
+            if (result.TryGetProperty("available", out var available) && available.ValueKind == JsonValueKind.Number && available.TryGetDouble(out double milliseconds) && milliseconds >= 0 && double.IsFinite(milliseconds))
                 return new(id, name, ProbeOutcome.Success, at, milliseconds);
             if (result.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String &&
                 (error.GetString()!.Contains("timeout", StringComparison.OrdinalIgnoreCase) || error.GetString()!.Contains("timed out", StringComparison.OrdinalIgnoreCase)))

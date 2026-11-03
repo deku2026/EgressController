@@ -50,6 +50,26 @@ public sealed class WorkflowTests
         }
         finally { Directory.Delete(root,true); }
     }
+    [Fact] public async Task Separate_managers_cannot_replace_a_candidate_during_validation()
+    {
+        string root = Root(); var token = TestContext.Current.CancellationToken;
+        var validator = new WaitingValidator();
+        var first = new ManagedConfiguration(root, validator).PrepareAsync("first", token);
+        await validator.Entered.Task.WaitAsync(token);
+        try
+        {
+            await Assert.ThrowsAsync<IOException>(() => new ManagedConfiguration(root, new ConfigValidator()).PrepareAsync("second", token));
+            Assert.Equal("first", await File.ReadAllTextAsync(Path.Combine(root, "candidate.conf"), token));
+        }
+        finally { validator.Release.SetResult(); await first; Directory.Delete(root, true); }
+    }
+    private sealed class WaitingValidator : IConfigValidator
+    {
+        public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<ConfigValidation> CheckAsync(string path, CancellationToken token)
+        { Entered.SetResult(); await Release.Task.WaitAsync(token); return new(true, "valid"); }
+    }
     private sealed class Provider : ISubscriptionProvider
     { public int Calls; public Task<IReadOnlyList<CapturedSubscription>> CaptureAsync(SubscriptionSettings s,ProviderCredentials c,string d,IProgress<SubscriptionProgress> p,CancellationToken t) { Calls++; return Task.FromResult<IReadOnlyList<CapturedSubscription>>([new(SourceFormat.Clash,Encoding.UTF8.GetBytes("fixture-clash")),new(SourceFormat.Surge,Encoding.UTF8.GetBytes("fixture-surge"))]); } }
     private sealed class Validator : ISubscriptionValidator

@@ -9,6 +9,9 @@ public sealed class DesktopSubscriptionSession(string root, ISecretStore secrets
     private string DirectoryPath => Path.Combine(root, "subscriptions");
     private string SettingsPath => Path.Combine(DirectoryPath, "settings.json");
     public bool IsPreview => false;
+    public bool SupportsAutomaticChecks => health is not null;
+    public async Task<SubscriptionResult[]> ReadReceiptsAsync(CancellationToken token) =>
+        await PrivateFile.ReadJsonAsync(Path.Combine(DirectoryPath, "receipts.json"), SubscriptionJson.Default.SubscriptionResultArray, token).ConfigureAwait(false) ?? [];
     private string LoginPath => Path.Combine(DirectoryPath, "session.json");
     public async Task<LoginState> ReadLoginStateAsync(CancellationToken token) =>
         await PrivateFile.ReadJsonAsync(LoginPath, LoginJson.Default.LoginState, token).ConfigureAwait(false) ?? new(LoginStatus.Unknown, default, "尚未完成首次登录");
@@ -74,7 +77,13 @@ public sealed class DesktopSubscriptionSession(string root, ISecretStore secrets
     {
         public async Task<IReadOnlyList<CapturedSubscription>> CaptureAsync(SubscriptionSettings settings, ProviderCredentials credentials, string browserDirectory, IProgress<SubscriptionProgress> progress, CancellationToken token)
         {
-            var captures = await inner.CaptureAsync(settings, credentials, browserDirectory, progress, token).ConfigureAwait(false);
+            IReadOnlyList<CapturedSubscription> captures;
+            try { captures = await inner.CaptureAsync(settings, credentials, browserDirectory, progress, token).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is IOException or TimeoutException or System.Net.Http.HttpRequestException)
+            {
+                await owner.SaveLoginStateAsync(new(LoginStatus.Unknown, DateTimeOffset.UtcNow, "本次获取未能确认会话；请检查网络或浏览器，未判定为过期"), token).ConfigureAwait(false);
+                throw;
+            }
             await owner.SaveLoginStateAsync(new(LoginStatus.Valid, DateTimeOffset.UtcNow, "最近一次获取已确认登录有效"), token).ConfigureAwait(false);
             return captures;
         }

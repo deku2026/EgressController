@@ -23,6 +23,7 @@ public sealed class SubscriptionWorkflow(ISubscriptionProvider provider, ISubscr
             throw new InvalidOperationException("有待确认的上传属于此前的服务器或账户；请恢复原设置重试，避免把订阅发往其他目标。");
         if (pending is null)
         {
+            PruneOldBatches();
             progress.Report(new("获取订阅", "复用已保存的专属 Chrome 会话"));
             var captures = await provider.CaptureAsync(settings, credentials, Path.Combine(directory, "chrome-profile"), progress, token).ConfigureAwait(false);
             if (captures.Count == 0 || captures.Any(c => !Enum.IsDefined(c.Format)) || captures.Select(c => c.Format).Distinct().Count() != captures.Count)
@@ -68,4 +69,18 @@ public sealed class SubscriptionWorkflow(ISubscriptionProvider provider, ISubscr
         return results.ToArray();
     }
     private static string FileName(SourceFormat format) => format == SourceFormat.Surge ? "source.conf" : "source.yaml";
+    private void PruneOldBatches()
+    {
+        string batches = Path.Combine(directory, "batches");
+        if (!Directory.Exists(batches)) return;
+        // Called only without a pending upload, under refresh.lock. Keep a small recovery history.
+        foreach (var old in new DirectoryInfo(batches).EnumerateDirectories()
+                     .Where(d => Guid.TryParseExact(d.Name, "N", out _) && !d.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                     .OrderByDescending(d => d.CreationTimeUtc).Skip(3))
+        {
+            try { old.Delete(recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
 }

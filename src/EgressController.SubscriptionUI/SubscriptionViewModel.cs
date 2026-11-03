@@ -7,6 +7,7 @@ namespace EgressController.SubscriptionUI;
 public sealed class PreviewSubscriptionSession(string scenario = "ready") : ISubscriptionSession
 {
     public bool IsPreview => true;
+    public bool SupportsAutomaticChecks => true;
     public Task<LoginState> ReadLoginStateAsync(CancellationToken token) => Task.FromResult(new LoginState(scenario switch { "expired" => LoginStatus.Expired, "verification" => LoginStatus.NeedsVerification, "unknown" => LoginStatus.Unknown, "empty" => LoginStatus.NotSignedIn, _ => LoginStatus.Valid }, DateTimeOffset.UtcNow, scenario switch { "expired" => "网站已返回登录页，保存的会话已失效；请重新登录", "verification" => "网站安全验证阻塞；自动刷新已暂停，请手动完成验证", "unknown" => "网络暂不可用，无法确认登录状态；未判定为过期", "empty" => "首次使用请打开专属 Chrome 完成登录", _ => "登录有效 · 复用已保存的专属 Chrome 会话" }));
     public Task<LoginState> LoginAsync(SubscriptionSettings settings, IProgress<SubscriptionProgress> progress, CancellationToken token) => ReadLoginStateAsync(token);
     public Task<LoginState> CheckSessionAsync(SubscriptionSettings settings, CancellationToken token) => ReadLoginStateAsync(token);
@@ -50,6 +51,7 @@ public sealed partial class SubscriptionViewModel(ISubscriptionSession session) 
     [ObservableProperty] private bool _busy;
     [ObservableProperty] private bool _needsInteraction;
     public bool IsPreview => session.IsPreview;
+    public bool SupportsAutomaticChecks => session.SupportsAutomaticChecks;
     public async Task InitializeAsync()
     {
         try
@@ -59,6 +61,14 @@ public sealed partial class SubscriptionViewModel(ISubscriptionSession session) 
             AutomaticChecks = _settings.AutomaticChecks; KeepSessionActive = _settings.KeepSessionActive; GroupPattern = _settings.GroupPattern; FailurePercent = _settings.FailurePercent;
             ConsecutiveRounds = _settings.ConsecutiveRounds; CooldownMinutes = _settings.CooldownMinutes;
             ShowLogin(await session.ReadLoginStateAsync(_lifetime.Token), current: session.IsPreview);
+            var receipts = await session.ReadReceiptsAsync(_lifetime.Token);
+            if (receipts.Length > 0)
+            {
+                ClashStatus = receipts.Any(r => r.Format == SourceFormat.Clash) ? "上次获取已确认" : "尚未获取";
+                SurgeStatus = receipts.Any(r => r.Format == SourceFormat.Surge) ? "上次获取已确认" : "尚未获取";
+                UploadStatus = "已保存服务器回执";
+                Stage = "上次上传已确认"; Detail = "本地已保留有效文件和回执；可按需获取新版本";
+            }
             if (!session.IsPreview) _ = ObserveSavedStateAsync();
         }
         catch (Exception ex) { Stage = "设置读取失败"; Detail = ex.Message; }
@@ -91,7 +101,8 @@ public sealed partial class SubscriptionViewModel(ISubscriptionSession session) 
                 try
                 {
                     var state = await session.ReadLoginStateAsync(_lifetime.Token);
-                    ShowLogin(state, DateTimeOffset.UtcNow - state.CheckedAt < TimeSpan.FromMinutes(5));
+                    var age = DateTimeOffset.UtcNow - state.CheckedAt;
+                    ShowLogin(state, age >= TimeSpan.Zero && age < TimeSpan.FromMinutes(5));
                 }
                 catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { LoginStatusText = "会话状态无法读取"; LoginDetail = "状态文件不可用；请手动检查会话"; LoginWarning = true; }
             }
