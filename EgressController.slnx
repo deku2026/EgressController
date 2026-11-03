@@ -24,6 +24,7 @@
     <Project Path="src/EgressController.Windows/EgressController.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/EgressController.Portable.Tests/EgressController.Portable.Tests.csproj" />
     <Project Path="tests/EgressController.Core.Tests/EgressController.Core.Tests.csproj" />
     <Project Path="tests/EgressController.Guardian.Tests/EgressController.Guardian.Tests.csproj" />
     <Project Path="tests/EgressController.Launcher.Tests/EgressController.Launcher.Tests.csproj" />
