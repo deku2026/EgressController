@@ -12,6 +12,14 @@ rm -rf "$mac_output/EgressController.app"
 mkdir -p "$mac_bundle/MacOS" "$mac_bundle/Resources"
 cp "$mac_output/gui/EgressController.MacApp" "$mac_bundle/MacOS/"
 cp "$mac_output/gui/"*.dylib "$mac_bundle/MacOS/"
+mac_icons="$mac_output/App.iconset"
+mkdir -p "$mac_icons"
+for mac_size in 16 32 128 256 512; do
+    sips -z "$mac_size" "$mac_size" packaging/Assets/Square150x150Logo.png --out "$mac_icons/icon_${mac_size}x${mac_size}.png" >/dev/null
+    mac_retina=$((mac_size * 2))
+    sips -z "$mac_retina" "$mac_retina" packaging/Assets/Square150x150Logo.png --out "$mac_icons/icon_${mac_size}x${mac_size}@2x.png" >/dev/null
+done
+iconutil -c icns "$mac_icons" -o "$mac_bundle/Resources/App.icns"
 cat > "$mac_bundle/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -21,6 +29,7 @@ cat > "$mac_bundle/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>EgressController</string>
 <key>CFBundleDisplayName</key><string>EgressController</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIconFile</key><string>App.icns</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>NSHighResolutionCapable</key><true/>

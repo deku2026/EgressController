@@ -16,6 +16,7 @@ public partial class App : Application
     public static bool PreviewMode { get; set; }
     public override void Initialize()
     {
+        Name = "EgressController";
         AvaloniaXamlLoader.Load(this); Styles.Add(DesktopTheme.CreateBaseTheme()); Styles.Add(new DesktopTheme());
     }
     private static async Task RunSchedulerAsync(SubscriptionScheduler scheduler, CancellationToken token)

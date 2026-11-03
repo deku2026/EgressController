@@ -29,3 +29,17 @@
 
 - Baseline: EgressController 8d05852, SubVault fd880df; clean original checkouts.
 - Host: .NET SDK 10.0.403, macOS arm64, OrbStack Docker 29.8.2, installed Surge CLI and Google Chrome.
+
+- Real TAG manual login persisted in a dedicated Chrome profile. JIT and NativeAOT refresh reused it without submitting credentials. Both raw formats passed native validators and exact gRPC hash/version acknowledgement. Downloads use an ephemeral context with a retained CDP download session; no Save As dialog or client-import action.
+- Portable mock suite: 21 cases. Windows solution build, all mock test projects and ordinary/compact UI rendering passed on the remote Windows host.
+- macOS ARM64 GUI and Agent published with NativeAOT; ad-hoc bundle signature and early mock smoke verified. The native GUI was opened in isolated preview mode and its subscription workflow exercised.
+- OrbStack ARM64 server ran as UID 1654, accepted synthetic uploads and preserved idempotent receipts. SubVault: 418 server and 54 GUI tests; PR CI passed.
+- Rendered seven macOS scenarios at 1280×840, ready pages at 1024×680, plus hover/pressed/focused/disabled session actions. Selected synthetic screenshots are in `docs/images/macos`.
+
+## Explicit acceptance boundaries
+
+- Active Surge was never loaded, reloaded or switched. Import/application stays manual. Its current profile has no HTTP API configured, so real API health observation remains for user acceptance; failures remain unknown and cannot trigger a refresh.
+- Windows keeps manual subscription acquisition. Its node-health adapter is not connected in this implementation; automatic controls are hidden there. The macOS scheduler/Agent and shared condition evaluator are implemented.
+- The first UI edits a single regex/percentage rule; advanced AND/OR/age conditions exist in the evaluator, not as a full rule editor.
+- launchd installation and distribution signing/notarization remain owner-controlled. No live end-to-end job was added to CI.
+- PuppeteerSharp aggregate trim/AOT warnings remain visible and are documented; product-code AOT warnings remain errors.

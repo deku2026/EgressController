@@ -30,6 +30,9 @@ foreach (string scenario in new[] { "ready", "offline", "empty", "failed", "expi
         if (!vm.Snapshot().ApplicationMetadata.Any(m => m.Path == row.Path && m.Category == "开发")) throw new InvalidOperationException("Unchecked application category was lost");
         var before = vm.Applications.ToArray(); vm.RefreshApplicationsCommand.ExecuteAsync(null).GetAwaiter().GetResult();
         if (!before.SequenceEqual(vm.Applications)) throw new InvalidOperationException("Refresh replaced/reordered existing application rows");
+        var savedBy = DateTime.UtcNow.AddSeconds(3);
+        while (vm.ConfigStatus == "正在保存" && DateTime.UtcNow < savedBy) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+        if (vm.ConfigStatus == "正在保存") throw new InvalidOperationException("Mock autosave did not settle");
     }
     var window = new MainWindow { DataContext = vm, Width = 1280, Height = 840 };
     window.Show(); Dispatcher.UIThread.RunJobs();

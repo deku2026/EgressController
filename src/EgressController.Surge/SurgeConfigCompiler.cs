@@ -40,7 +40,7 @@ public sealed class SurgeConfigCompiler
             {
                 string line = raw.Trim(); if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';')) continue;
                 int equal = line.IndexOf('=');
-                if (equal < 1 || line.Contains('[') || line.Contains(']')) throw new InvalidDataException("订阅代理定义无效。");
+                if (equal < 1 || line.Any(char.IsControl)) throw new InvalidDataException("订阅代理定义无效。");
                 string name = line[..equal].Trim(); ValidateAtom(name);
                 if (name.StartsWith("EC-", StringComparison.Ordinal) || name is "DIRECT" or "REJECT" || !subscriptionNames.Add(name)) throw new InvalidDataException("订阅策略名称冲突。");
                 lines.AppendLine(line);

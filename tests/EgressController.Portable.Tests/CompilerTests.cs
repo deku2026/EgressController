@@ -21,6 +21,8 @@ public sealed class CompilerTests
     public void Rejects_unbounded_paths_and_injection(string path, bool bundle) => Assert.Throws<InvalidDataException>(() => SurgeConfigCompiler.ValidatePath(path,bundle));
     [Fact] public void Conflicting_core_route_is_rejected() => Assert.Throws<InvalidDataException>(() => new SurgeConfigCompiler().Compile(Profile with { Applications = [new("a","core","/Apps/Proxy.app/Contents/MacOS/core",false,RouteDestination.Socks(7890))] }, Live));
     [Fact] public void Subscription_cannot_inject_other_sections() => Assert.Throws<InvalidDataException>(() => new SurgeConfigCompiler().Compile(Profile, Live, "[Script]\nx = http-response"));
+    [Fact] public void Bracketed_ipv6_in_a_proxy_definition_is_preserved()
+        => Assert.Contains("[2001:db8::1]", new SurgeConfigCompiler().Compile(Profile, Live, "Fixture = socks5, [2001:db8::1], 1080"));
     [Fact] public void Names_do_not_change_route_membership()
     {
         string before = new SurgeConfigCompiler().Compile(Profile, Live);

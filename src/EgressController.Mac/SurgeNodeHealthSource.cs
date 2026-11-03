@@ -34,7 +34,7 @@ public sealed class SurgeNodeHealthSource(string root, KeychainSecretStore secre
                 ? Parse(n.Id, n.Name, result.RootElement, now) : new NodeObservation(n.Id, n.Name, ProbeOutcome.Unknown, now)).ToArray();
             return new(true, true, observations, "Surge 节点检测完成");
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or RegexMatchTimeoutException or TaskCanceledException && !token.IsCancellationRequested)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or RegexMatchTimeoutException or TaskCanceledException && !token.IsCancellationRequested)
         { return new(false, false, [], "Surge API 检测不可用；未知结果不触发刷新"); }
     }
     public static NodeObservation Parse(string id, string name, JsonElement response, DateTimeOffset at)

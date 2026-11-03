@@ -29,7 +29,7 @@ Mihomo runs only with `-t`; macOS Surge runs only with `--check`. Windows uses a
 
 Ingress credentials and the Surge API key use Keychain on macOS / Credential Manager on Windows. Private files use user-only permissions and atomic replacement. No account, token, raw subscription or real profile belongs in screenshots or source control.
 
-Automatic macOS rounds run every 15 minutes in the GUI or optional Agent, sharing an OS-owned lock and persisted cooldown. Surge HTTP API must already be configured; EgressController never changes the live Surge profile to enable it. External policy identifiers remain unknown until batch-test support is verified. The condition engine supports regex groups, percentage/all-timeout/success-below, AND/OR, consecutive rounds, age and cooldown; the initial UI edits one percentage group. Missing/stale/unsupported measurements do not count as failures. A failed DIRECT control or backend prevents refresh. Windows subscription acquisition is available; its node-health adapter is not yet connected and reports unknown rather than claiming automatic detection.
+Automatic macOS rounds run every 15 minutes in the GUI or optional Agent, sharing an OS-owned lock and persisted cooldown. Surge HTTP API must already be configured; EgressController never changes the live Surge profile to enable it. External policy identifiers remain unknown until batch-test support is verified. The condition engine supports regex groups, percentage/all-timeout/success-below, AND/OR, consecutive rounds, age and cooldown; the initial UI edits one percentage group. Missing/stale/unsupported measurements do not count as failures. A failed DIRECT control or backend prevents refresh. Windows subscription acquisition is available; its node-health adapter is not yet connected and its automatic controls are hidden rather than claiming automatic detection.
 
 ## Build and local verification
 
@@ -43,3 +43,13 @@ The packaging script produces an ad-hoc signed app bundle plus a separate native
 The local integration tool is intentionally excluded from all solutions and CI. `--local-only` runs synthetic native validators and local gRPC receipt/retry checks. `--login`, `--check-session` and `--tag` opt into the real TAG site using an isolated profile. `EGRESS_LOCAL_TEST_DATA`, `EGRESS_MIHOMO` and `SUBVAULT_INGRESS_TEST_TOKEN` configure private test resources. Use the separate SubVault OrbStack compose project, never production containers.
 
 See [NativeAOT dependency notes](native-aot-subscriptions.md) and [implementation plan](macos-implementation-plan.md). Official references: [Surge CLI](https://manual.nssurge.com/tools/cli.html), [Surge HTTP API](https://manual.nssurge.com/tools/http-api.html), [Cloudflare supported browsers](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/), [PuppeteerSharp AOT](https://www.puppeteersharp.com/docs/AOT/).
+
+## Rendered preview
+
+These are rendered application screenshots using synthetic data. The existing theme, fonts and controls are shared with Windows.
+
+![macOS overview](images/macos/ready-overview.png)
+
+![Expired session and manual recovery](images/macos/expired-subscriptions.png)
+
+![Compact subscription page](images/macos/compact-subscriptions.png)

@@ -35,7 +35,7 @@ public sealed class SurgeHttpApi : IDisposable
             bool valid = json.RootElement.TryGetProperty("proxies", out var proxies) && proxies.ValueKind == JsonValueKind.Array;
             return new(valid, valid ? "Surge 已连接" : "API 返回格式无法识别", DateTimeOffset.UtcNow);
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !token.IsCancellationRequested)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or TaskCanceledException && !token.IsCancellationRequested)
         { return new(false, "Surge API 无法连接；检查地址、密钥和 Surge 状态", DateTimeOffset.UtcNow); }
     }
     public async Task<IReadOnlyList<SurgeNode>> NodesAsync(CancellationToken token)

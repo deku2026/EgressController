@@ -14,6 +14,7 @@ public sealed partial class MacMainViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _pendingEdit;
     private MacSettings _settings = new();
     private bool _loading;
+    private long _editVersion;
     private EgressController.Subscriptions.SurgeSource? _subscriptionSource;
     [ObservableProperty] private string _subscriptionNodesStatus = "尚未读取机场节点";
     public MacMainViewModel(IMacWorkspace workspace, SubscriptionViewModel subscriptions)
@@ -127,6 +128,7 @@ public sealed partial class MacMainViewModel : ObservableObject, IDisposable
     private void Edit()
     {
         if (_loading) return;
+        _editVersion++;
         UpdateRoutes(); RefreshSummary(); ConfigStatus = "正在保存";
         _pendingEdit?.Cancel();
         var owned = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); _pendingEdit = owned;
@@ -139,6 +141,7 @@ public sealed partial class MacMainViewModel : ObservableObject, IDisposable
         {
             await Task.Delay(450, owned.Token); var profile = Snapshot();
             await _workspace.SaveAsync(profile, owned.Token); saved = true;
+            owned.Token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(_pendingEdit, owned)) return;
             ConfigStatus = "已保存 · 待校验"; Status = "选择已自动保存";
             // Edits compile a preview; native validation remains an explicit command.
@@ -165,8 +168,8 @@ public sealed partial class MacMainViewModel : ObservableObject, IDisposable
     }
     [RelayCommand] private Task PrepareAsync() => RunAsync(async () =>
     {
-        _pendingEdit?.Cancel(); var profile = Snapshot(); await _workspace.SaveAsync(profile, _lifetime.Token); ConfigStatus = "正在校验";
-        try { var result = await _workspace.PrepareAsync(profile, _lifetime.Token); ConfigText = result.Content; ConfigStatus = result.Validation.Summary; AddLog("配置校验", result.Validation.Summary); }
+        _pendingEdit?.Cancel(); var profile = Snapshot(); long version = _editVersion; await _workspace.SaveAsync(profile, _lifetime.Token); ConfigStatus = "正在校验";
+        try { var result = await _workspace.PrepareAsync(profile, _lifetime.Token); if (version == _editVersion) { ConfigText = result.Content; ConfigStatus = result.Validation.Summary; } else ConfigStatus = "旧快照已检查 · 新更改待校验"; AddLog("配置校验", result.Validation.Summary); }
         catch { ConfigStatus = "校验未通过 · 原配置保留"; throw; }
     });
     [RelayCommand] private Task RestoreAsync() => RunAsync(async () => { ConfigText = await _workspace.RestoreAsync(_lifetime.Token); ConfigStatus = "已恢复上次有效文件 · 尚未应用"; AddLog("恢复配置", ConfigStatus); });
